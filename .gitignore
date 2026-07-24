@@ -216,3 +216,15 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# TokenDamper / Node.js
+node_modules/
+dist/
+coverage/
+.eslintcache
+*.tsbuildinfo
+.DS_Store
+*.log
+.env
+.env.*
+!.env.example

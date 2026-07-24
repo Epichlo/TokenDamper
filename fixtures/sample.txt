@@ -1,0 +1,2 @@
+TokenDamper sample input.
+This content should be emitted unchanged in Milestone 1.
