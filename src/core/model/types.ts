@@ -6,12 +6,17 @@ export type OptimizationMode = 'pass_through';
 /**
  * The supported source classification for a normalized context bundle.
  */
-export type ContextSource = 'cli';
+export type ContextSource = 'cli' | 'stdin' | 'file' | 'text';
 
 /**
  * The supported item kinds inside a context bundle.
  */
 export type ContextItemKind = 'prompt' | 'file' | 'diff' | 'conversation' | 'note';
+
+/**
+ * The supported deterministic content classifications.
+ */
+export type ContentType = 'text' | 'markdown' | 'code' | 'html' | 'json' | 'yaml' | 'logs' | 'unknown';
 
 /**
  * The supported runtime modes for configuration.
@@ -42,10 +47,13 @@ export type ValidationIssueSeverity = 'info' | 'warning' | 'error';
  * A single immutable item inside a normalized context bundle.
  */
 export interface ContextItem {
+  readonly id: string;
   readonly itemId: string;
   readonly kind: ContextItemKind;
+  readonly contentType: ContentType;
   readonly content: string;
   readonly origin: string;
+  readonly contentHash: string;
   readonly role?: string;
   readonly path?: string;
   readonly language?: string;
@@ -65,11 +73,23 @@ export interface ContextSummary {
  * The immutable normalized input bundle that flows through the engine.
  */
 export interface ContextBundle {
+  readonly id: string;
   readonly bundleId: string;
   readonly source: ContextSource;
   readonly items: ReadonlyArray<ContextItem>;
   readonly summary: ContextSummary;
+  readonly statistics: BundleStatistics;
   readonly contentHash: string;
+}
+
+/**
+ * Aggregated bundle statistics used by the trace and validation layers.
+ */
+export interface BundleStatistics {
+  readonly itemCount: number;
+  readonly contentTypeCounts: Readonly<Record<ContentType, number>>;
+  readonly kindCounts: Readonly<Record<ContextItemKind, number>>;
+  readonly totalCharacters: number;
 }
 
 /**
@@ -186,11 +206,16 @@ export interface StageTrace {
  */
 export interface OptimizationTrace {
   readonly requestId: string;
+  readonly bundleId: string;
+  readonly bundleContentHash: string;
   readonly planMode: OptimizationMode;
   readonly stageCount: number;
   readonly stageTraces: ReadonlyArray<StageTrace>;
+  readonly inputTokenEstimate: number;
+  readonly outputTokenEstimate: number;
   readonly tokenBefore: number;
   readonly tokenAfter: number;
+  readonly bundleStatistics: BundleStatistics;
   readonly fallbackUsed: boolean;
   readonly fallbackReason?: string;
 }

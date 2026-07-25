@@ -1,11 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import type {
-  ContextBundle,
-  ContextItem,
   OptimizationRequest,
   OptimizationResult,
   ResolvedConfig,
 } from '../../core/model';
+import { createOptimizationRequest, type NormalizedInputSource } from '../../core/model';
 
 /**
  * The adapter name used by the frozen Milestone 1 CLI integration.
@@ -23,20 +22,20 @@ export const CLI_ADAPTER_VERSION = '0.1.0';
 export function parse(
   rawInput: string,
   config: ResolvedConfig,
-  options: { readonly requestId?: string; readonly sourcePath?: string } = {},
+  options: {
+    readonly requestId?: string;
+    readonly sourceKind?: NormalizedInputSource;
+    readonly sourcePath?: string;
+  } = {},
 ): OptimizationRequest {
   const requestId = options.requestId ?? randomUUID();
-  const bundle = createBundle(rawInput, options.sourcePath);
-
-  return {
+  return createOptimizationRequest(rawInput, config, {
     requestId,
-    rawInput,
-    bundle,
-    budget: config.budget,
-    config,
     adapterName: CLI_ADAPTER_NAME,
     adapterVersion: CLI_ADAPTER_VERSION,
-  };
+    source: options.sourceKind ?? (options.sourcePath ? 'file' : 'text'),
+    ...(options.sourcePath ? { sourcePath: options.sourcePath } : {}),
+  });
 }
 
 /**
@@ -44,45 +43,4 @@ export function parse(
  */
 export function format(result: OptimizationResult): string {
   return result.emittedOutput;
-}
-
-function createBundle(rawInput: string, sourcePath?: string): ContextBundle {
-  const item: ContextItem = {
-    itemId: 'context-0',
-    kind: sourcePath ? 'file' : 'prompt',
-    content: rawInput,
-    origin: sourcePath ?? CLI_ADAPTER_NAME,
-    metadata: {},
-    ...(sourcePath ? { path: sourcePath } : {}),
-  };
-
-  return {
-    bundleId: randomUUID(),
-    source: 'cli',
-    items: [item],
-    summary: {
-      itemCount: 1,
-      tokenEstimate: estimateTokens(rawInput),
-      preview: rawInput.slice(0, 80),
-    },
-    contentHash: createContentHash(rawInput),
-  };
-}
-
-function estimateTokens(text: string): number {
-  if (text.length === 0) {
-    return 0;
-  }
-
-  return Math.max(1, Math.ceil(text.length / 4));
-}
-
-function createContentHash(text: string): string {
-  let hash = 0;
-
-  for (let index = 0; index < text.length; index += 1) {
-    hash = (hash * 31 + text.charCodeAt(index)) >>> 0;
-  }
-
-  return hash.toString(16).padStart(8, '0');
 }

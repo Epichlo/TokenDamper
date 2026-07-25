@@ -1,4 +1,5 @@
 import type { OptimizationRequest, OptimizationResult, StageResult } from '../model';
+import { createOptimizationResult, createValidationReport } from '../model';
 import { getBuiltInStageCatalog } from '../stage-registry';
 import { plan } from '../planner';
 import { resolveFallback } from '../fallback';
@@ -13,16 +14,18 @@ export function optimize(request: OptimizationRequest): OptimizationResult {
   const selectedPlan = plan(request.bundle, request.budget, request.config, stageCatalog);
   const stageResults: StageResult[] = [];
   const finalBundle = request.bundle;
-  const validation = validate(request.bundle, finalBundle, selectedPlan, request.budget);
+  const validation = createValidationReport(
+    validate(request.bundle, finalBundle, selectedPlan, request.budget),
+  );
   const fallback = resolveFallback(request, validation);
   const emittedOutput = fallback.output;
   const trace = buildTrace(request, selectedPlan, stageResults, validation, fallback, emittedOutput);
 
-  return {
+  return createOptimizationResult({
     finalBundle,
     emittedOutput,
     validation,
     trace,
     fallbackUsed: fallback.used,
-  };
+  });
 }

@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { createOptimizationBudget, freeze } from '../core/model/constructors';
 import { DEFAULT_CONFIG, isConfigFileShape } from './schema';
 import type { ConfigFileShape, LoadConfigOptions, TokenDamperConfig } from './types';
 
@@ -12,8 +13,11 @@ export function loadConfig(options: LoadConfigOptions = {}): TokenDamperConfig {
   const filePath = options.configPath ?? resolve(cwd, 'tokendamper.config.json');
 
   const fileConfig = loadConfigFile(filePath);
+  const configFromFile = applyFileConfig(DEFAULT_CONFIG, fileConfig);
+  const configFromEnv = applyEnvOverrides(configFromFile, env);
+  const configFromCli = applyCliOverrides(configFromEnv, options.cliOverrides);
 
-  return mergeConfig(DEFAULT_CONFIG, fileConfig, env, options.cliOverrides);
+  return freeze(configFromCli) as TokenDamperConfig;
 }
 
 function loadConfigFile(filePath: string): ConfigFileShape | undefined {
@@ -31,23 +35,12 @@ function loadConfigFile(filePath: string): ConfigFileShape | undefined {
   return parsed;
 }
 
-function mergeConfig(
-  base: TokenDamperConfig,
-  fileConfig: ConfigFileShape | undefined,
-  env: NodeJS.ProcessEnv,
-  cliOverrides: LoadConfigOptions['cliOverrides'],
-): TokenDamperConfig {
-  const configFromFile = applyFileConfig(base, fileConfig);
-  const configFromEnv = applyEnvOverrides(configFromFile, env);
-  return applyCliOverrides(configFromEnv, cliOverrides);
-}
-
 function applyFileConfig(base: TokenDamperConfig, fileConfig: ConfigFileShape | undefined): TokenDamperConfig {
   if (!fileConfig) {
     return base;
   }
 
-  return {
+  return freeze({
     ...base,
     appName: fileConfig.app?.name ?? base.appName,
     appVersion: fileConfig.app?.version ?? base.appVersion,
@@ -56,27 +49,25 @@ function applyFileConfig(base: TokenDamperConfig, fileConfig: ConfigFileShape | 
     planner: {
       defaultMode: fileConfig.planner?.defaultMode ?? base.planner.defaultMode,
     },
-    budget: {
-      ...base.budget,
-      ...fileConfig.budget,
-    },
+    budget: mergeBudget(base.budget, fileConfig.budget),
     validation: {
       minimumConfidence: fileConfig.validation?.minimumConfidence ?? base.validation.minimumConfidence,
     },
     logging: {
       level: fileConfig.logging?.level ?? base.logging.level,
     },
-  };
+  }) as TokenDamperConfig;
 }
 
 function applyEnvOverrides(base: TokenDamperConfig, env: NodeJS.ProcessEnv): TokenDamperConfig {
-  return {
+  return freeze({
     ...base,
     appMode: parseAppMode(env.TOKENDAMPER_APP_MODE) ?? base.appMode,
     traceOutput: parseTraceOutput(env.TOKENDAMPER_TRACE_OUTPUT) ?? base.traceOutput,
     planner: {
       defaultMode: parsePlannerMode(env.TOKENDAMPER_PLANNER_MODE) ?? base.planner.defaultMode,
     },
+    budget: mergeBudget(base.budget, buildBudgetOverridesFromEnv(env)),
     validation: {
       minimumConfidence:
         parseNumber(env.TOKENDAMPER_MINIMUM_CONFIDENCE) ?? base.validation.minimumConfidence,
@@ -84,32 +75,83 @@ function applyEnvOverrides(base: TokenDamperConfig, env: NodeJS.ProcessEnv): Tok
     logging: {
       level: parseLogLevel(env.TOKENDAMPER_LOG_LEVEL) ?? base.logging.level,
     },
-  };
+  }) as TokenDamperConfig;
 }
 
-function applyCliOverrides(base: TokenDamperConfig, cliOverrides: LoadConfigOptions['cliOverrides']): TokenDamperConfig {
+function applyCliOverrides(
+  base: TokenDamperConfig,
+  cliOverrides: LoadConfigOptions['cliOverrides'],
+): TokenDamperConfig {
   if (!cliOverrides) {
     return base;
   }
 
-  return {
+  return freeze({
     ...base,
     appMode: cliOverrides.appMode ?? base.appMode,
     traceOutput: cliOverrides.traceOutput ?? base.traceOutput,
     planner: {
       defaultMode: cliOverrides.plannerMode ?? base.planner.defaultMode,
     },
-    budget: {
-      ...base.budget,
-      ...cliOverrides.budget,
-    },
+    budget: mergeBudget(base.budget, cliOverrides.budget),
     validation: {
       minimumConfidence: cliOverrides.minimumConfidence ?? base.validation.minimumConfidence,
     },
     logging: {
       level: cliOverrides.logLevel ?? base.logging.level,
     },
-  };
+  }) as TokenDamperConfig;
+}
+
+function mergeBudget(
+  base: TokenDamperConfig['budget'],
+  override: Partial<TokenDamperConfig['budget']> | undefined,
+): TokenDamperConfig['budget'] {
+  if (!override) {
+    return base;
+  }
+
+  return createOptimizationBudget({
+    ...base,
+    ...override,
+    preserveKinds: override.preserveKinds ?? base.preserveKinds,
+  });
+}
+
+function buildBudgetOverridesFromEnv(env: NodeJS.ProcessEnv): Partial<TokenDamperConfig['budget']> {
+  const override: Record<string, unknown> = {};
+
+  const maxInputTokens = parseNumber(env.TOKENDAMPER_MAX_INPUT_TOKENS);
+  if (maxInputTokens !== undefined) {
+    override.maxInputTokens = maxInputTokens;
+  }
+
+  const maxOutputTokens = parseNumber(env.TOKENDAMPER_MAX_OUTPUT_TOKENS);
+  if (maxOutputTokens !== undefined) {
+    override.maxOutputTokens = maxOutputTokens;
+  }
+
+  const targetReductionRatio = parseNumber(env.TOKENDAMPER_TARGET_REDUCTION_RATIO);
+  if (targetReductionRatio !== undefined) {
+    override.targetReductionRatio = targetReductionRatio;
+  }
+
+  const maxLatencyMs = parseNumber(env.TOKENDAMPER_MAX_LATENCY_MS);
+  if (maxLatencyMs !== undefined) {
+    override.maxLatencyMs = maxLatencyMs;
+  }
+
+  const riskTolerance = parseRiskTolerance(env.TOKENDAMPER_RISK_TOLERANCE);
+  if (riskTolerance !== undefined) {
+    override.riskTolerance = riskTolerance;
+  }
+
+  const preserveKinds = parsePreserveKinds(env.TOKENDAMPER_PRESERVE_KINDS);
+  if (preserveKinds.length > 0) {
+    override.preserveKinds = preserveKinds;
+  }
+
+  return override as Partial<TokenDamperConfig['budget']>;
 }
 
 function parseAppMode(value: string | undefined): TokenDamperConfig['appMode'] | undefined {
@@ -137,4 +179,33 @@ function parseNumber(value: string | undefined): number | undefined {
 
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function parsePreserveKinds(value: string | undefined): TokenDamperConfig['budget']['preserveKinds'] {
+  if (!value) {
+    return [];
+  }
+
+  const allowedKinds: TokenDamperConfig['budget']['preserveKinds'][number][] = [
+    'prompt',
+    'file',
+    'diff',
+    'conversation',
+    'note',
+  ];
+
+  return value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry): entry is TokenDamperConfig['budget']['preserveKinds'][number] =>
+      allowedKinds.includes(entry as TokenDamperConfig['budget']['preserveKinds'][number]),
+    );
+}
+
+function parseRiskTolerance(value: string | undefined): TokenDamperConfig['budget']['riskTolerance'] | undefined {
+  if (value === 'low' || value === 'medium' || value === 'high') {
+    return value;
+  }
+
+  return undefined;
 }

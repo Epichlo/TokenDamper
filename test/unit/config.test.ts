@@ -65,4 +65,41 @@ describe('config loading', () => {
     expect(config.validation.minimumConfidence).toBe(1);
     expect(config.logging.level).toBe('info');
   });
+
+  it('resolves budget overrides from file, environment, and CLI', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'tokendamper-budget-'));
+    const configPath = join(cwd, 'tokendamper.config.json');
+
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        budget: {
+          maxInputTokens: 500,
+          riskTolerance: 'medium',
+        },
+      }),
+      'utf8',
+    );
+
+    const config = loadConfig({
+      cwd,
+      configPath,
+      env: {
+        TOKENDAMPER_MAX_OUTPUT_TOKENS: '200',
+        TOKENDAMPER_TARGET_REDUCTION_RATIO: '0.2',
+      },
+      cliOverrides: {
+        budget: {
+          maxInputTokens: 1000,
+          preserveKinds: ['prompt', 'file'],
+        },
+      },
+    });
+
+    expect(config.budget.maxInputTokens).toBe(1000);
+    expect(config.budget.maxOutputTokens).toBe(200);
+    expect(config.budget.targetReductionRatio).toBe(0.2);
+    expect(config.budget.riskTolerance).toBe('medium');
+    expect(config.budget.preserveKinds).toEqual(['prompt', 'file']);
+  });
 });

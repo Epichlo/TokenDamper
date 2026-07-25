@@ -5,6 +5,7 @@ import type {
   StageResult,
   ValidationReport,
 } from '../model';
+import { createOptimizationTrace } from '../model';
 import type { FallbackOutcome } from '../fallback';
 
 /**
@@ -25,16 +26,21 @@ export function buildTrace(
     changed: stage.changed,
   }));
 
-  return {
+  return createOptimizationTrace({
     requestId: request.requestId,
+    bundleId: request.bundle.bundleId,
+    bundleContentHash: request.bundle.contentHash,
     planMode: plan.mode,
     stageCount: stageTraces.length,
     stageTraces,
+    inputTokenEstimate: request.bundle.summary.tokenEstimate,
+    outputTokenEstimate: estimateTokens(finalOutput),
     tokenBefore: request.bundle.summary.tokenEstimate,
     tokenAfter: estimateTokens(finalOutput),
+    bundleStatistics: request.bundle.statistics,
     fallbackUsed: fallback.used,
     ...(fallback.reason ?? validation.reason ? { fallbackReason: fallback.reason ?? validation.reason } : {}),
-  };
+  });
 }
 
 function estimateTokens(text: string): number {

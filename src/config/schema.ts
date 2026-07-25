@@ -1,3 +1,4 @@
+import { createOptimizationBudget, freeze } from '../core/model/constructors';
 import type { ConfigFileShape, TokenDamperConfig } from './types';
 
 /**
@@ -11,18 +12,20 @@ export const DEFAULT_CONFIG: TokenDamperConfig = {
   planner: {
     defaultMode: 'pass_through',
   },
-  budget: {
+  budget: createOptimizationBudget({
     targetReductionRatio: 0,
     riskTolerance: 'low',
     preserveKinds: [],
-  },
+  }),
   validation: {
     minimumConfidence: 1,
   },
   logging: {
     level: 'info',
   },
-};
+} as const;
+
+freeze(DEFAULT_CONFIG);
 
 /**
  * Returns true when the provided value looks like a config file shape.

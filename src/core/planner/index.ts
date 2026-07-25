@@ -13,9 +13,11 @@ import type { BuiltInStageDefinition } from '../stage-registry';
 export function plan(
   bundle: ContextBundle,
   _budget: OptimizationBudget,
-  _config: ResolvedConfig,
+  config: ResolvedConfig,
   _stageCatalog: ReadonlyArray<BuiltInStageDefinition>,
 ): OptimizationPlan {
+  validatePlannerInputs(bundle, _budget, config);
+
   return {
     planId: `${bundle.bundleId}:pass_through`,
     mode: 'pass_through',
@@ -31,4 +33,22 @@ export function plan(
  */
 export function planOptimizationMode(): OptimizationMode {
   return 'pass_through';
+}
+
+function validatePlannerInputs(
+  bundle: ContextBundle,
+  budget: OptimizationBudget,
+  config: ResolvedConfig,
+): void {
+  if (!bundle) {
+    throw new Error('Planner requires a context bundle.');
+  }
+
+  if (!budget) {
+    throw new Error('Planner requires an optimization budget.');
+  }
+
+  if (!config) {
+    throw new Error('Planner requires a resolved configuration.');
+  }
 }
