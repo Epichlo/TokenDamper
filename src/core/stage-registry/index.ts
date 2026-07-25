@@ -1,5 +1,11 @@
+import type { ContextBundle, OptimizationBudget, StageResult } from '../model/types';
+import { runSessionDedupStage, type SessionDedupContext } from '../../stages/cleanup/session-dedup';
+import { runConstraintPreservationStage } from '../../stages/cleanup/constraint-preservation';
+import { runTopologyPrunerStage } from '../../stages/pruning/topology-pruner';
+import { createStageResult } from '../model/constructors';
+
 /**
- * The minimal built-in stage definition used by the frozen MVP registry.
+ * The minimal built-in stage definition used by the registry.
  */
 export interface BuiltInStageDefinition {
   readonly stageId: string;
@@ -7,7 +13,7 @@ export interface BuiltInStageDefinition {
 }
 
 /**
- * Returns the built-in stage catalog for Milestone 3.
+ * Returns the built-in stage catalog for Milestone 5.
  */
 export function getBuiltInStageCatalog(): ReadonlyArray<BuiltInStageDefinition> {
   return Object.freeze([
@@ -19,5 +25,37 @@ export function getBuiltInStageCatalog(): ReadonlyArray<BuiltInStageDefinition> 
       stageId: 'cleanup:constraint-preservation',
       version: '0.1.0',
     },
+    {
+      stageId: 'pruning:topology-pruner',
+      version: '0.1.0',
+    },
   ]);
+}
+
+/**
+ * Executes a built-in stage by stage ID.
+ */
+export function executeBuiltInStage(
+  stageId: string,
+  bundle: ContextBundle,
+  budget: OptimizationBudget,
+  sessionContext?: SessionDedupContext,
+): StageResult {
+  switch (stageId) {
+    case 'cleanup:session-dedup':
+      return runSessionDedupStage(bundle, budget, sessionContext);
+    case 'cleanup:constraint-preservation':
+      return runConstraintPreservationStage(bundle, budget);
+    case 'pruning:topology-pruner':
+      return runTopologyPrunerStage(bundle, budget);
+    default:
+      return createStageResult({
+        stageId,
+        status: 'skipped',
+        bundle,
+        changed: false,
+        metrics: {},
+        notes: `Unknown stage ID '${stageId}'.`,
+      });
+  }
 }

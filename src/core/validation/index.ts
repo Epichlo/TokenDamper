@@ -21,7 +21,6 @@ export function validate(
   budget: OptimizationBudget,
 ): ValidationReport {
   const issues: ValidationIssue[] = [];
-  void budget;
 
   // 1. Run AST Validation on optimized bundle
   const astResult = validateBundleAst(after);
@@ -44,6 +43,17 @@ export function validate(
       issues.push({
         code: 'CONSTRAINT_DIRECTIVE_LOST',
         message: `Imperative constraint directive dropped during optimization: "${directive}"`,
+        severity: 'error',
+      });
+    }
+  }
+
+  // 3. Verify Budget Boundary Compliance
+  if (typeof budget?.maxInputTokens === 'number' && budget.maxInputTokens > 0) {
+    if (after.summary.tokenEstimate > budget.maxInputTokens) {
+      issues.push({
+        code: 'BUDGET_EXCEEDED',
+        message: `Optimized bundle token estimate (${after.summary.tokenEstimate}) exceeds maxInputTokens budget (${budget.maxInputTokens}).`,
         severity: 'error',
       });
     }

@@ -1,7 +1,7 @@
 /**
  * The supported optimization mode for the frozen MVP planner.
  */
-export type OptimizationMode = 'pass_through';
+export type OptimizationMode = 'pass_through' | 'topology_knapsack';
 
 /**
  * The supported source classification for a normalized context bundle.

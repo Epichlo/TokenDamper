@@ -64,10 +64,10 @@ export function runConstraintPreservationStage(
 
     // Check if metadata already matches
     if (
-      item.metadata.hasConstraints === hasConstraints &&
-      item.metadata.directiveCount === directiveCount &&
-      item.metadata.constraintDirectives === constraintDirectivesJson &&
-      item.metadata.imperativeKeywords === imperativeKeywordsJson
+      item.metadata?.hasConstraints === hasConstraints &&
+      item.metadata?.directiveCount === directiveCount &&
+      item.metadata?.constraintDirectives === constraintDirectivesJson &&
+      item.metadata?.imperativeKeywords === imperativeKeywordsJson
     ) {
       return item;
     }

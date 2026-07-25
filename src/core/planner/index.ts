@@ -8,30 +8,42 @@ import type {
 import type { BuiltInStageDefinition } from '../stage-registry';
 
 /**
- * Returns the frozen no-op plan used by Milestone 1.
+ * Returns an optimization plan based on budget constraints and available stage catalog.
  */
 export function plan(
   bundle: ContextBundle,
-  _budget: OptimizationBudget,
+  budget: OptimizationBudget,
   config: ResolvedConfig,
   _stageCatalog: ReadonlyArray<BuiltInStageDefinition>,
 ): OptimizationPlan {
-  validatePlannerInputs(bundle, _budget, config);
+  validatePlannerInputs(bundle, budget, config);
+
+  const isKnapsackMode = typeof budget.maxInputTokens === 'number' && budget.maxInputTokens > 0;
+  const mode: OptimizationMode = isKnapsackMode ? 'topology_knapsack' : 'pass_through';
+
+  const stageIds: string[] = [];
+  if (isKnapsackMode) {
+    stageIds.push('cleanup:constraint-preservation');
+    stageIds.push('pruning:topology-pruner');
+  }
 
   return {
-    planId: `${bundle.bundleId}:pass_through`,
-    mode: 'pass_through',
-    stageIds: [],
-    revalidationPoints: ['end'],
+    planId: `${bundle.bundleId}:${mode}`,
+    mode,
+    stageIds: Object.freeze(stageIds),
+    revalidationPoints: Object.freeze(['end']),
     fallbackPolicy: 'original_input',
-    expectedSavings: 0,
+    expectedSavings: isKnapsackMode ? 0.3 : 0,
   };
 }
 
 /**
- * Plans only the pass-through optimization mode in Milestone 1.
+ * Determines the optimization mode based on budget.
  */
-export function planOptimizationMode(): OptimizationMode {
+export function planOptimizationMode(budget?: OptimizationBudget): OptimizationMode {
+  if (budget && typeof budget.maxInputTokens === 'number' && budget.maxInputTokens > 0) {
+    return 'topology_knapsack';
+  }
   return 'pass_through';
 }
 

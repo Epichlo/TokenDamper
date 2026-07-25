@@ -4,6 +4,7 @@ import type {
   ContextBundle,
   ContextItem,
   ContextItemKind,
+  ContextSource,
   ContentType,
   OptimizationBudget,
   OptimizationPlan,
@@ -110,6 +111,38 @@ export function createContextBundle(
 }
 
 /**
+ * Creates an immutable normalized context bundle from an array of context items.
+ */
+export function createBundleFromItems(
+  items: ReadonlyArray<ContextItem>,
+  source: ContextSource = 'text',
+): ContextBundle {
+  const statistics = createBundleStatistics(items);
+  const bundleHash = hashContent({
+    source,
+    items: items.map((entry) => entry.contentHash),
+    statistics,
+  });
+  const rawCombined = items.map((i) => i.content).join('\n');
+  const tokenEstimate = Math.max(0, Math.ceil(rawCombined.length / 4));
+
+  return freeze({
+    id: bundleHash,
+    bundleId: bundleHash,
+    source,
+    items: freeze(items),
+    summary: freeze({
+      itemCount: items.length,
+      tokenEstimate,
+      preview: rawCombined.slice(0, 80),
+    }),
+    statistics,
+    contentHash: bundleHash,
+  });
+}
+
+
+/**
  * Normalizes a budget into a frozen immutable value.
  */
 export function createOptimizationBudget(input: Partial<OptimizationBudget> | undefined): OptimizationBudget {
@@ -182,27 +215,32 @@ export function mergeOptimizationBudget(
 export function createContextItem(input: {
   readonly id: string;
   readonly kind: ContextItemKind;
-  readonly contentType: ContentType;
+  readonly contentType?: ContentType;
   readonly content: string;
-  readonly origin: string;
-  readonly contentHash: string;
+  readonly origin?: string;
+  readonly contentHash?: string;
   readonly role?: string;
   readonly path?: string;
   readonly language?: string;
-  readonly metadata: Readonly<Record<string, string | number | boolean | null>>;
+  readonly metadata?: Readonly<Record<string, string | number | boolean | null>>;
 }): ContextItem {
+  const contentType = input.contentType ?? 'text';
+  const origin = input.origin ?? input.path ?? 'cli';
+  const metadata = input.metadata ?? freeze({});
+  const contentHash = input.contentHash ?? hashContent(input.content);
+
   return freeze({
     id: input.id,
     itemId: input.id,
     kind: input.kind,
-    contentType: input.contentType,
+    contentType,
     content: input.content,
-    origin: input.origin,
-    contentHash: input.contentHash,
+    origin,
+    contentHash,
     ...(input.role ? { role: input.role } : {}),
     ...(input.path ? { path: input.path } : {}),
     ...(input.language ? { language: input.language } : {}),
-    metadata: input.metadata,
+    metadata,
   });
 }
 

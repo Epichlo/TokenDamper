@@ -17,4 +17,28 @@ describe('engine', () => {
     expect(result.trace.stageCount).toBe(0);
     expect(result.trace.fallbackUsed).toBe(false);
   });
+
+  it('unconditionally falls back to OptimizationRequest.rawInput when budget is exceeded', () => {
+    const config = loadConfig();
+    const rawInput = 'System prompt context with imperative directive: You MUST NOT crash.\n'.repeat(10);
+    const baseRequest = parse(rawInput, config);
+
+    // Set maxInputTokens to an unachievably low value (5 tokens) while preserving prompt
+    const requestWithTightBudget = {
+      ...baseRequest,
+      budget: {
+        ...baseRequest.budget,
+        maxInputTokens: 5,
+        preserveKinds: ['prompt'],
+      },
+    };
+
+    const result = optimize(requestWithTightBudget);
+
+    expect(result.fallbackUsed).toBe(true);
+    expect(result.emittedOutput).toBe(rawInput);
+    expect(result.validation.passed).toBe(false);
+    expect(result.validation.shouldFallback).toBe(true);
+    expect(result.validation.issues.some((i) => i.code === 'BUDGET_EXCEEDED')).toBe(true);
+  });
 });

@@ -22,7 +22,7 @@ This document outlines the canonical 8-Milestone execution plan for TokenDamper,
   - Explicit constraint preservation parser ("MUST", "NEVER", "ONLY IF", "DO NOT" directives).
   - Validation-triggered fallback loop guaranteeing zero broken syntax or violated prompt rules.
 
-- [ ] **Milestone 5: Workspace Topology Pruning & 0/1 Knapsack Planner**
+- [x] **Milestone 5: Workspace Topology Pruning & 0/1 Knapsack Planner (Done)**
   - Git/Workspace topology aware pruning (dependency tree, export graph, modified files).
   - 0/1 Knapsack Solver implementation in Stateless Planner for optimal value/token density.
   - Cache-aware token budgeting (prompt caching optimization for LLM prefix matching).
@@ -51,7 +51,7 @@ This document outlines the canonical 8-Milestone execution plan for TokenDamper,
 5. [x] Session Gateway (`tokendamper exec` proxy wrapper) (M3)
 6. [x] Cross-turn context deduplication & session cache index (M3)
 7. [x] AST validator & prompt constraint preservation ("must", "never", "only if") (M4)
-8. [ ] Workspace topology graph pruner & 0/1 Knapsack planner (M5)
+8. [x] Workspace topology graph pruner & 0/1 Knapsack planner (M5)
 9. [ ] Reversible token hashing (`<BLOCK_HASH>`) & delta compression (M6)
 10. [ ] Visual `--diff` viewer & semantic drift ledger (M7)
 11. [ ] HumanEval / CodeXGLUE benchmark harness & accuracy evaluation (M8)
