@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { format as formatCliOutput, parse } from '../adapters/cli';
 import { loadConfig } from '../config';
 import { optimize } from '../core/engine';
+import { runExecCommand } from '../gateway/exec';
 import type { ConfigOverrides } from '../config';
 
 /**
@@ -19,8 +20,16 @@ export function runCli(
   try {
     const parsed = parseArguments(argv, cwd);
 
+    if (parsed.command === 'exec') {
+      // Async exec command runner handled synchronously or spawned
+      runExecCommand(parsed.execArgs, { io }).catch((err) => {
+        io.stderr.write(`Exec process error: ${err.message}\n`);
+      });
+      return 0;
+    }
+
     if (parsed.command !== 'optimize') {
-      io.stderr.write('Usage: tokendamper optimize <input-file|->\n');
+      io.stderr.write('Usage: tokendamper optimize <input-file|-> | tokendamper exec -- <command>\n');
       return 1;
     }
 
@@ -58,8 +67,9 @@ export function main(): void {
 }
 
 interface ParsedArguments {
-  readonly command: 'optimize' | 'unknown';
+  readonly command: 'optimize' | 'exec' | 'unknown';
   readonly inputPath: string;
+  readonly execArgs: readonly string[];
   readonly configPath?: string;
   readonly configOverrides?: Partial<ConfigOverrides>;
 }
@@ -70,10 +80,23 @@ function parseArguments(argv: readonly string[], cwd: string): ParsedArguments {
   const args = [...argv];
   const command = args.shift();
 
+  if (command === 'exec') {
+    // Drop optional '--' separator if present
+    if (args[0] === '--') {
+      args.shift();
+    }
+    return {
+      command: 'exec',
+      inputPath: '',
+      execArgs: args,
+    };
+  }
+
   if (command !== 'optimize') {
     return {
       command: 'unknown',
       inputPath: '',
+      execArgs: [],
     };
   }
 
@@ -228,6 +251,7 @@ function parseArguments(argv: readonly string[], cwd: string): ParsedArguments {
   return {
     command: 'optimize',
     inputPath,
+    execArgs: [],
     ...(configPath ? { configPath } : {}),
     configOverrides:
       minimumConfidence === undefined && budgetOverrides === undefined

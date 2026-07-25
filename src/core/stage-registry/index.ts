@@ -7,8 +7,17 @@ export interface BuiltInStageDefinition {
 }
 
 /**
- * Returns the built-in stage catalog for Milestone 1.
+ * Returns the built-in stage catalog for Milestone 3.
  */
 export function getBuiltInStageCatalog(): ReadonlyArray<BuiltInStageDefinition> {
-  return Object.freeze([]);
+  return Object.freeze([
+    {
+      stageId: 'cleanup:session-dedup',
+      version: '0.1.0',
+    },
+    {
+      stageId: 'cleanup:constraint-preservation',
+      version: '0.1.0',
+    },
+  ]);
 }
