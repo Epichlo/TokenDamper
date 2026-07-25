@@ -2,6 +2,8 @@ import type { ContextBundle, OptimizationBudget, StageResult } from '../model/ty
 import { runSessionDedupStage, type SessionDedupContext } from '../../stages/cleanup/session-dedup';
 import { runConstraintPreservationStage } from '../../stages/cleanup/constraint-preservation';
 import { runTopologyPrunerStage } from '../../stages/pruning/topology-pruner';
+import { runTokenHashingStage, type TokenHashingStageOptions } from '../../stages/compression/token-hashing';
+import { runDeltaCompressionStage, type DeltaCompressionOptions } from '../../stages/compression/delta-compression';
 import { createStageResult } from '../model/constructors';
 
 /**
@@ -13,7 +15,16 @@ export interface BuiltInStageDefinition {
 }
 
 /**
- * Returns the built-in stage catalog for Milestone 5.
+ * Optional contextual parameters passed during stage execution.
+ */
+export interface CompressionStageContext {
+  readonly sessionContext?: SessionDedupContext;
+  readonly tokenHashingOptions?: TokenHashingStageOptions;
+  readonly deltaOptions?: DeltaCompressionOptions;
+}
+
+/**
+ * Returns the built-in stage catalog for Milestone 6.
  */
 export function getBuiltInStageCatalog(): ReadonlyArray<BuiltInStageDefinition> {
   return Object.freeze([
@@ -29,6 +40,14 @@ export function getBuiltInStageCatalog(): ReadonlyArray<BuiltInStageDefinition> 
       stageId: 'pruning:topology-pruner',
       version: '0.1.0',
     },
+    {
+      stageId: 'compression:token-hashing',
+      version: '0.1.0',
+    },
+    {
+      stageId: 'compression:delta-compression',
+      version: '0.1.0',
+    },
   ]);
 }
 
@@ -40,14 +59,19 @@ export function executeBuiltInStage(
   bundle: ContextBundle,
   budget: OptimizationBudget,
   sessionContext?: SessionDedupContext,
+  compressionContext?: CompressionStageContext,
 ): StageResult {
   switch (stageId) {
     case 'cleanup:session-dedup':
-      return runSessionDedupStage(bundle, budget, sessionContext);
+      return runSessionDedupStage(bundle, budget, sessionContext ?? compressionContext?.sessionContext);
     case 'cleanup:constraint-preservation':
       return runConstraintPreservationStage(bundle, budget);
     case 'pruning:topology-pruner':
       return runTopologyPrunerStage(bundle, budget);
+    case 'compression:token-hashing':
+      return runTokenHashingStage(bundle, budget, compressionContext?.tokenHashingOptions);
+    case 'compression:delta-compression':
+      return runDeltaCompressionStage(bundle, budget, compressionContext?.deltaOptions);
     default:
       return createStageResult({
         stageId,

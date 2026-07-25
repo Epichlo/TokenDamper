@@ -48,8 +48,13 @@ describe('planner', () => {
     const result = plan(bundle, budget, baseConfig, []);
 
     expect(result.mode).toBe('topology_knapsack');
-    expect(result.stageIds).toEqual(['cleanup:constraint-preservation', 'pruning:topology-pruner']);
-    expect(result.expectedSavings).toBe(0.3);
+    expect(result.stageIds).toEqual([
+      'cleanup:constraint-preservation',
+      'pruning:topology-pruner',
+      'compression:token-hashing',
+      'compression:delta-compression',
+    ]);
+    expect(result.expectedSavings).toBe(0.45);
     expect(planOptimizationMode(budget)).toBe('topology_knapsack');
   });
 

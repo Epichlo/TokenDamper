@@ -29,7 +29,7 @@ describe('engine', () => {
       budget: {
         ...baseRequest.budget,
         maxInputTokens: 5,
-        preserveKinds: ['prompt'],
+        preserveKinds: ['prompt' as const],
       },
     };
 

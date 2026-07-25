@@ -229,4 +229,6 @@ coverage/
 .env.*
 !.env.example
 repomix-output.xml
+scratch/
+
 

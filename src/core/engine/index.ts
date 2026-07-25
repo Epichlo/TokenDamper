@@ -1,15 +1,31 @@
-import type { OptimizationRequest, OptimizationResult, StageResult } from '../model';
-import { createOptimizationResult, createValidationReport } from '../model';
-import { getBuiltInStageCatalog, executeBuiltInStage } from '../stage-registry';
+import type { ContextBundle, ContextItem, OptimizationRequest, OptimizationResult, StageResult } from '../model';
+import { createOptimizationResult, createValidationReport, createStageResult, createContextItem, createBundleStatistics, freeze, hashContent } from '../model';
+import { getBuiltInStageCatalog, executeBuiltInStage, type CompressionStageContext } from '../stage-registry';
 import { plan } from '../planner';
 import { resolveFallback } from '../fallback';
 import { buildTrace } from '../trace';
 import { validate } from '../validation';
+import type { SessionDedupContext } from '../../stages/cleanup/session-dedup';
+import type { TokenHasher } from '../hashing/token-hasher';
+import type { ConfidenceLedger } from '../ledger/confidence-ledger';
+import type { DeltaCompressionOptions } from '../../stages/compression/delta-compression';
+
+export interface EngineOptimizationOptions {
+  readonly sessionContext?: SessionDedupContext;
+  readonly tokenHasher?: TokenHasher;
+  readonly confidenceLedger?: ConfidenceLedger;
+  readonly deltaOptions?: DeltaCompressionOptions;
+  readonly currentTurn?: number;
+}
 
 /**
- * Runs the optimization flow end to end across planned stages.
+ * Runs the optimization flow end-to-end across planned stages.
+ * Handles compression stage execution, confidence ledger tracking, and automated re-hydration.
  */
-export function optimize(request: OptimizationRequest): OptimizationResult {
+export function optimize(
+  request: OptimizationRequest,
+  options?: EngineOptimizationOptions,
+): OptimizationResult {
   try {
     const stageCatalog = getBuiltInStageCatalog();
     const selectedPlan = plan(request.bundle, request.budget, request.config, stageCatalog);
@@ -18,9 +34,21 @@ export function optimize(request: OptimizationRequest): OptimizationResult {
     let stageFailed = false;
     let failureReason: string | undefined;
 
+    const compressionContext: CompressionStageContext = {
+      ...(options?.sessionContext ? { sessionContext: options.sessionContext } : {}),
+      ...(options?.tokenHasher ? { tokenHashingOptions: { tokenHasher: options.tokenHasher } } : {}),
+      ...(options?.deltaOptions ? { deltaOptions: options.deltaOptions } : {}),
+    };
+
     for (const stageId of selectedPlan.stageIds) {
       try {
-        const result = executeBuiltInStage(stageId, currentBundle, request.budget);
+        const result = executeBuiltInStage(
+          stageId,
+          currentBundle,
+          request.budget,
+          options?.sessionContext,
+          compressionContext,
+        );
         stageResults.push(result);
         if (result.status === 'ok' && result.changed) {
           currentBundle = result.bundle;
@@ -47,9 +75,112 @@ export function optimize(request: OptimizationRequest): OptimizationResult {
       }
     }
 
+    // Record any new elisions into the confidence ledger if available
+    const turn = options?.currentTurn ?? 1;
+    if (options?.confidenceLedger) {
+      for (const item of currentBundle.items) {
+        if (item.metadata.elided) {
+          const blockHash = typeof item.metadata.blockHash === 'string' ? item.metadata.blockHash : item.contentHash;
+          const originalBytes = typeof item.metadata.originalBytes === 'number' ? item.metadata.originalBytes : item.content.length;
+          options.confidenceLedger.recordElision({
+            itemId: item.id,
+            blockHash,
+            turn,
+            originalBytes,
+            ...(item.path ? { path: item.path } : {}),
+            kind: item.kind,
+            elisionType: item.metadata.tokenHashed
+              ? 'token-hashing'
+              : item.metadata.deltaCompressed
+                ? 'delta-compression'
+                : 'session-dedup',
+          });
+        }
+      }
+    }
+
     let validation = createValidationReport(
       validate(request.bundle, currentBundle, selectedPlan, request.budget),
     );
+
+    const minimumConfidence = request.config.validation.minimumConfidence;
+    const overallLedgerConfidence = options?.confidenceLedger
+      ? options.confidenceLedger.getOverallConfidence(turn)
+      : 1.0;
+
+    // Trigger automated re-hydration when validation or ledger confidence falls below threshold
+    if (
+      (!validation.passed || validation.confidence < minimumConfidence || overallLedgerConfidence < minimumConfidence) &&
+      !stageFailed
+    ) {
+      const rehydratedBundle = attemptAutomatedRehydration(
+        currentBundle,
+        options?.tokenHasher,
+        options?.confidenceLedger,
+        turn,
+      );
+
+      if (rehydratedBundle && rehydratedBundle !== currentBundle) {
+        const revalidated = createValidationReport(
+          validate(request.bundle, rehydratedBundle, selectedPlan, request.budget),
+        );
+
+        if (revalidated.passed && revalidated.confidence >= minimumConfidence) {
+          currentBundle = rehydratedBundle;
+          validation = revalidated;
+        }
+      }
+    }
+
+    const finalLedgerConfidence = options?.confidenceLedger
+      ? options.confidenceLedger.getOverallConfidence(turn)
+      : 1.0;
+
+    const corruptedBlockHashes = detectCorruptedPlaceholders(currentBundle, options?.tokenHasher);
+    const hasBlockCorruption = corruptedBlockHashes.length > 0;
+
+    if (
+      !validation.passed ||
+      validation.confidence < minimumConfidence ||
+      finalLedgerConfidence < minimumConfidence ||
+      hasBlockCorruption
+    ) {
+      const reason =
+        validation.reason ??
+        (hasBlockCorruption
+          ? `Block hash corruption detected: missing block hash [${corruptedBlockHashes.join(', ')}] in token hasher.`
+          : finalLedgerConfidence < minimumConfidence
+            ? `Elision confidence score (${finalLedgerConfidence.toFixed(2)}) dropped below minimum threshold (${minimumConfidence}).`
+            : 'Validation failed');
+      const combinedIssues = [
+        ...validation.issues,
+        ...(hasBlockCorruption
+          ? [
+              {
+                code: 'BLOCK_HASH_CORRUPTED',
+                message: `Block hash corruption detected: missing block hash [${corruptedBlockHashes.join(', ')}] in token hasher.`,
+                severity: 'error' as const,
+              },
+            ]
+          : []),
+        ...(finalLedgerConfidence < minimumConfidence
+          ? [
+              {
+                code: 'CONFIDENCE_THRESHOLD_BELOW_MINIMUM',
+                message: `Elision confidence score (${finalLedgerConfidence.toFixed(2)}) dropped below minimum threshold (${minimumConfidence}).`,
+                severity: 'error' as const,
+              },
+            ]
+          : []),
+      ];
+      validation = createValidationReport({
+        passed: false,
+        confidence: hasBlockCorruption ? 0 : Math.min(validation.confidence, finalLedgerConfidence),
+        issues: combinedIssues,
+        shouldFallback: true,
+        reason,
+      });
+    }
 
     if (stageFailed) {
       const combinedIssues = [
@@ -86,7 +217,7 @@ export function optimize(request: OptimizationRequest): OptimizationResult {
       planId: `${request.bundle.bundleId}:fallback`,
       mode: 'pass_through' as const,
       stageIds: Object.freeze([]),
-      revalidationPoints: Object.freeze(['end']),
+      revalidationPoints: Object.freeze(['end' as const]),
       fallbackPolicy: 'original_input' as const,
     };
     const validation = createValidationReport({
@@ -117,4 +248,108 @@ export function optimize(request: OptimizationRequest): OptimizationResult {
       fallbackUsed: true,
     });
   }
+}
+
+/**
+ * Attempts automated re-hydration of elided placeholders in the bundle when confidence is compromised.
+ */
+function attemptAutomatedRehydration(
+  bundle: ContextBundle,
+  hasher?: TokenHasher,
+  ledger?: ConfidenceLedger,
+  turn = 1,
+): ContextBundle | undefined {
+  if (!hasher && !ledger) {
+    return undefined;
+  }
+
+  let rehydratedAny = false;
+  const candidates = ledger ? new Set(ledger.getRehydrationCandidates(turn).map((c) => c.itemId)) : null;
+
+  const newItems: ContextItem[] = bundle.items.map((item) => {
+    // If ledger specifies candidates, target those; otherwise rehydrate any elided placeholder item
+    if (candidates && candidates.size > 0 && !candidates.has(item.id)) {
+      return item;
+    }
+
+    let newContent = item.content;
+    if (item.metadata.deltaCompressed && typeof item.metadata.originalContent === 'string') {
+      newContent = item.metadata.originalContent as string;
+    }
+    if (hasher && newContent.includes('<BLOCK_HASH:')) {
+      newContent = hasher.rehydrateText(newContent);
+    }
+
+    if (newContent !== item.content) {
+      rehydratedAny = true;
+      if (ledger) {
+        ledger.removeElision(item.id);
+      }
+
+      const updatedMetadata: Record<string, string | number | boolean | null> = { ...item.metadata };
+      delete updatedMetadata.elided;
+      delete updatedMetadata.tokenHashed;
+      delete updatedMetadata.deltaCompressed;
+
+      return createContextItem({
+        id: item.id,
+        kind: item.kind,
+        contentType: item.contentType,
+        content: newContent,
+        origin: item.origin,
+        contentHash: hashContent(newContent),
+        ...(item.role ? { role: item.role } : {}),
+        ...(item.path ? { path: item.path } : {}),
+        ...(item.language ? { language: item.language } : {}),
+        metadata: freeze(updatedMetadata),
+      });
+    }
+
+    return item;
+  });
+
+  if (!rehydratedAny) {
+    return undefined;
+  }
+
+  const statistics = createBundleStatistics(newItems);
+  const bundleHash = hashContent({
+    source: bundle.source,
+    items: newItems.map((entry) => entry.contentHash),
+    statistics,
+  });
+
+  const rawCombined = newItems.map((i) => i.content).join('\n');
+  const tokenEstimate = Math.max(1, Math.ceil(rawCombined.length / 4));
+
+  return freeze({
+    id: bundleHash,
+    bundleId: bundleHash,
+    source: bundle.source,
+    items: freeze(newItems),
+    summary: freeze({
+      itemCount: newItems.length,
+      tokenEstimate,
+      preview: rawCombined.slice(0, 80),
+    }),
+    statistics,
+    contentHash: bundleHash,
+  });
+}
+
+function detectCorruptedPlaceholders(bundle: ContextBundle, hasher?: TokenHasher): string[] {
+  const corruptedHashes: string[] = [];
+  for (const item of bundle.items) {
+    if (item.content.includes('<BLOCK_HASH:')) {
+      const regex = /<BLOCK_HASH:([^>]+)>/g;
+      let match: RegExpExecArray | null;
+      while ((match = regex.exec(item.content)) !== null) {
+        const hash = match[1];
+        if (hash && hasher && !hasher.hasHash(hash)) {
+          corruptedHashes.push(hash);
+        }
+      }
+    }
+  }
+  return corruptedHashes;
 }

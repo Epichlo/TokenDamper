@@ -27,7 +27,7 @@ This document outlines the canonical 8-Milestone execution plan for TokenDamper,
   - 0/1 Knapsack Solver implementation in Stateless Planner for optimal value/token density.
   - Cache-aware token budgeting (prompt caching optimization for LLM prefix matching).
 
-- [ ] **Milestone 6: Reversible Token Hashing & Delta Compression**
+- [x] **Milestone 6: Reversible Token Hashing & Delta Compression**
   - Reversible placeholder token elision (`<BLOCK_HASH:sha256>`).
   - Cross-turn delta compression (transmitting diffs for modified context files).
   - Elision Confidence Ledger tracking restoration safety scores across turns.
@@ -52,7 +52,7 @@ This document outlines the canonical 8-Milestone execution plan for TokenDamper,
 6. [x] Cross-turn context deduplication & session cache index (M3)
 7. [x] AST validator & prompt constraint preservation ("must", "never", "only if") (M4)
 8. [x] Workspace topology graph pruner & 0/1 Knapsack planner (M5)
-9. [ ] Reversible token hashing (`<BLOCK_HASH>`) & delta compression (M6)
+9. [x] Reversible token hashing (`<BLOCK_HASH>`) & delta compression (M6)
 10. [ ] Visual `--diff` viewer & semantic drift ledger (M7)
 11. [ ] HumanEval / CodeXGLUE benchmark harness & accuracy evaluation (M8)
 

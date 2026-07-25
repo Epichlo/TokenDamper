@@ -25,6 +25,8 @@ export function plan(
   if (isKnapsackMode) {
     stageIds.push('cleanup:constraint-preservation');
     stageIds.push('pruning:topology-pruner');
+    stageIds.push('compression:token-hashing');
+    stageIds.push('compression:delta-compression');
   }
 
   return {
@@ -33,7 +35,7 @@ export function plan(
     stageIds: Object.freeze(stageIds),
     revalidationPoints: Object.freeze(['end']),
     fallbackPolicy: 'original_input',
-    expectedSavings: isKnapsackMode ? 0.3 : 0,
+    expectedSavings: isKnapsackMode ? 0.45 : 0,
   };
 }
 

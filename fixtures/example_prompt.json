@@ -1,0 +1,21 @@
+{
+  "model": "gpt-4o",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are an AI coding assistant. You MUST NOT leak secret keys."
+    },
+    {
+      "role": "user",
+      "content": "Here is the codebase context file:\n\nclass UserAuthenticationService {\n  private apiKey: string;\n  constructor(key: string) {\n    this.apiKey = key;\n  }\n  public authenticate(token: string): boolean {\n    return token === 'secret-token-123';\n  }\n}\n"
+    },
+    {
+      "role": "user",
+      "content": "Here is the codebase context file:\n\nclass UserAuthenticationService {\n  private apiKey: string;\n  constructor(key: string) {\n    this.apiKey = key;\n  }\n  public authenticate(token: string): boolean {\n    return token === 'secret-token-123';\n  }\n}\n"
+    },
+    {
+      "role": "user",
+      "content": "How do I use UserAuthenticationService?"
+    }
+  ]
+}

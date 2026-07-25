@@ -171,7 +171,7 @@ describe('engine end-to-end with topology knapsack optimization', () => {
     const result = optimize(requestWithBudget);
 
     expect(result.trace.planMode).toBe('topology_knapsack');
-    expect(result.trace.stageCount).toBe(2);
+    expect(result.trace.stageCount).toBe(4);
     expect(result.validation.passed).toBe(true);
     expect(result.fallbackUsed).toBe(false);
     expect(result.finalBundle.items.length).toBeLessThan(multiItemBundle.items.length);
