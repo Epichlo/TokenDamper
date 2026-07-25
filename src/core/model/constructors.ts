@@ -321,6 +321,7 @@ export function createValidationReport(report: ValidationReport): ValidationRepo
     issues: freeze(report.issues.map((issue) => freeze({ ...issue }))),
     shouldFallback: report.shouldFallback,
     ...(report.reason === undefined ? {} : { reason: report.reason }),
+    ...(report.driftReport === undefined ? {} : { driftReport: report.driftReport }),
   });
 }
 
@@ -342,6 +343,8 @@ export function createOptimizationTrace(trace: OptimizationTrace): OptimizationT
     bundleStatistics: trace.bundleStatistics,
     fallbackUsed: trace.fallbackUsed,
     ...(trace.fallbackReason === undefined ? {} : { fallbackReason: trace.fallbackReason }),
+    ...(trace.debtScore === undefined ? {} : { debtScore: trace.debtScore }),
+    ...(trace.driftScore === undefined ? {} : { driftScore: trace.driftScore }),
   });
 }
 

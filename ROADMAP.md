@@ -32,7 +32,7 @@ This document outlines the canonical 8-Milestone execution plan for TokenDamper,
   - Cross-turn delta compression (transmitting diffs for modified context files).
   - Elision Confidence Ledger tracking restoration safety scores across turns.
 
-- [ ] **Milestone 7: Visual Diff Dashboard & Optimization Debt Tracking**
+- [x] **Milestone 7: Visual Diff Dashboard & Optimization Debt Tracking**
   - Visual terminal/HTML diff viewer (`--diff`).
   - Optimization debt & semantic drift tracking over long multi-turn sessions.
   - Interactive trace exploration and explainability reporting.
@@ -53,7 +53,7 @@ This document outlines the canonical 8-Milestone execution plan for TokenDamper,
 7. [x] AST validator & prompt constraint preservation ("must", "never", "only if") (M4)
 8. [x] Workspace topology graph pruner & 0/1 Knapsack planner (M5)
 9. [x] Reversible token hashing (`<BLOCK_HASH>`) & delta compression (M6)
-10. [ ] Visual `--diff` viewer & semantic drift ledger (M7)
+10. [x] Visual `--diff` viewer & semantic drift ledger (M7)
 11. [ ] HumanEval / CodeXGLUE benchmark harness & accuracy evaluation (M8)
 
 ## Expected Outputs per Milestone

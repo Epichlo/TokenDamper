@@ -171,6 +171,8 @@ export interface StageResult {
   readonly notes?: string;
 }
 
+import type { DriftReport } from '../ledger/drift-tracker';
+
 /**
  * A validation issue emitted by a validator.
  */
@@ -188,7 +190,8 @@ export interface ValidationReport {
   readonly confidence: number;
   readonly issues: ReadonlyArray<ValidationIssue>;
   readonly shouldFallback: boolean;
-  readonly reason?: string;
+  readonly reason?: string | undefined;
+  readonly driftReport?: DriftReport | undefined;
 }
 
 /**
@@ -217,7 +220,9 @@ export interface OptimizationTrace {
   readonly tokenAfter: number;
   readonly bundleStatistics: BundleStatistics;
   readonly fallbackUsed: boolean;
-  readonly fallbackReason?: string;
+  readonly fallbackReason?: string | undefined;
+  readonly debtScore?: number | undefined;
+  readonly driftScore?: number | undefined;
 }
 
 /**

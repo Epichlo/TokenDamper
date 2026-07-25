@@ -18,6 +18,7 @@ export function buildTrace(
   validation: ValidationReport,
   fallback: FallbackOutcome,
   finalOutput: string,
+  metrics?: { readonly debtScore?: number; readonly driftScore?: number },
 ): OptimizationTrace {
   const stageTraces = stageResults.map((stage) => ({
     stageId: stage.stageId,
@@ -40,6 +41,10 @@ export function buildTrace(
     bundleStatistics: request.bundle.statistics,
     fallbackUsed: fallback.used,
     ...(fallback.reason ?? validation.reason ? { fallbackReason: fallback.reason ?? validation.reason } : {}),
+    ...(metrics?.debtScore !== undefined ? { debtScore: metrics.debtScore } : {}),
+    ...(metrics?.driftScore !== undefined || validation.driftReport?.driftScore !== undefined
+      ? { driftScore: metrics?.driftScore ?? validation.driftReport?.driftScore }
+      : {}),
   });
 }
 

@@ -4,6 +4,8 @@ import { format as formatCliOutput, parse } from '../adapters/cli';
 import { loadConfig } from '../config';
 import { optimize } from '../core/engine';
 import { runExecCommand } from '../gateway/exec';
+import { renderTerminalDiff } from './diff-renderer';
+import { generateHtmlReport } from './html-reporter';
 import type { ConfigOverrides } from '../config';
 
 /**
@@ -45,10 +47,25 @@ export function runCli(
       sourceKind: isStdin ? 'stdin' : 'file',
       ...(inputPath ? { sourcePath: inputPath } : {}),
     });
-    const result = optimize(request);
-    const output = formatCliOutput(result);
 
+    const result = optimize(request, {
+      ...(parsed.maxDebt !== undefined ? { maxDebtThreshold: parsed.maxDebt } : {}),
+      ...(parsed.maxDrift !== undefined ? { maxDriftThreshold: parsed.maxDrift } : {}),
+    });
+
+    const output = formatCliOutput(result);
     io.stdout.write(output);
+
+    if (parsed.diff) {
+      const diffStr = renderTerminalDiff(request.bundle, result.finalBundle);
+      io.stdout.write(`\n${diffStr}\n`);
+    }
+
+    if (parsed.diffHtmlPath) {
+      const htmlPath = resolve(cwd, parsed.diffHtmlPath);
+      generateHtmlReport(result, request.bundle, { outputPath: htmlPath });
+    }
+
     io.stderr.write(`${JSON.stringify(result.trace, null, 2)}\n`);
     return 0;
   } catch (error) {
@@ -72,6 +89,10 @@ interface ParsedArguments {
   readonly execArgs: readonly string[];
   readonly configPath?: string;
   readonly configOverrides?: Partial<ConfigOverrides>;
+  readonly diff?: boolean;
+  readonly diffHtmlPath?: string;
+  readonly maxDebt?: number;
+  readonly maxDrift?: number;
 }
 
 function parseArguments(argv: readonly string[], cwd: string): ParsedArguments {
@@ -109,6 +130,10 @@ function parseArguments(argv: readonly string[], cwd: string): ParsedArguments {
   const configOverrides: Partial<ConfigOverrides> = {};
   let minimumConfidence: number | undefined;
   let budgetOverrides: NonNullable<Partial<ConfigOverrides>['budget']> | undefined;
+  let diff = false;
+  let diffHtmlPath: string | undefined;
+  let maxDebt: number | undefined;
+  let maxDrift: number | undefined;
 
   while (args.length > 0) {
     const flag = args.shift();
@@ -245,6 +270,46 @@ function parseArguments(argv: readonly string[], cwd: string): ParsedArguments {
       continue;
     }
 
+    if (flag === '--diff') {
+      diff = true;
+      continue;
+    }
+
+    if (flag === '--diff-html') {
+      const value = args.shift();
+      if (!value) {
+        throw new Error('Missing value for --diff-html.');
+      }
+      diffHtmlPath = value;
+      continue;
+    }
+
+    if (flag === '--max-debt') {
+      const value = args.shift();
+      if (!value) {
+        throw new Error('Missing value for --max-debt.');
+      }
+      const parsedVal = Number(value);
+      if (!Number.isFinite(parsedVal) || parsedVal < 0 || parsedVal > 100) {
+        throw new Error('Invalid value for --max-debt.');
+      }
+      maxDebt = parsedVal;
+      continue;
+    }
+
+    if (flag === '--max-drift') {
+      const value = args.shift();
+      if (!value) {
+        throw new Error('Missing value for --max-drift.');
+      }
+      const parsedVal = Number(value);
+      if (!Number.isFinite(parsedVal) || parsedVal < 0 || parsedVal > 1) {
+        throw new Error('Invalid value for --max-drift.');
+      }
+      maxDrift = parsedVal;
+      continue;
+    }
+
     throw new Error(`Unknown argument: ${flag ?? ''}`);
   }
 
@@ -253,6 +318,10 @@ function parseArguments(argv: readonly string[], cwd: string): ParsedArguments {
     inputPath,
     execArgs: [],
     ...(configPath ? { configPath } : {}),
+    ...(diff ? { diff } : {}),
+    ...(diffHtmlPath ? { diffHtmlPath } : {}),
+    ...(maxDebt !== undefined ? { maxDebt } : {}),
+    ...(maxDrift !== undefined ? { maxDrift } : {}),
     configOverrides:
       minimumConfidence === undefined && budgetOverrides === undefined
         ? configOverrides

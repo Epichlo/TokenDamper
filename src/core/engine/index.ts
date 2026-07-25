@@ -1,5 +1,13 @@
 import type { ContextBundle, ContextItem, OptimizationRequest, OptimizationResult, StageResult } from '../model';
-import { createOptimizationResult, createValidationReport, createStageResult, createContextItem, createBundleStatistics, freeze, hashContent } from '../model';
+import {
+  createOptimizationResult,
+  createValidationReport,
+  createStageResult,
+  createContextItem,
+  createBundleStatistics,
+  freeze,
+  hashContent,
+} from '../model';
 import { getBuiltInStageCatalog, executeBuiltInStage, type CompressionStageContext } from '../stage-registry';
 import { plan } from '../planner';
 import { resolveFallback } from '../fallback';
@@ -8,19 +16,25 @@ import { validate } from '../validation';
 import type { SessionDedupContext } from '../../stages/cleanup/session-dedup';
 import type { TokenHasher } from '../hashing/token-hasher';
 import type { ConfidenceLedger } from '../ledger/confidence-ledger';
+import { DebtTracker, type DebtTrackerOptions } from '../ledger/debt-tracker';
 import type { DeltaCompressionOptions } from '../../stages/compression/delta-compression';
 
 export interface EngineOptimizationOptions {
   readonly sessionContext?: SessionDedupContext;
   readonly tokenHasher?: TokenHasher;
   readonly confidenceLedger?: ConfidenceLedger;
+  readonly debtTracker?: DebtTracker;
+  readonly debtOptions?: DebtTrackerOptions;
+  readonly maxDebtThreshold?: number;
+  readonly maxDriftThreshold?: number;
   readonly deltaOptions?: DeltaCompressionOptions;
   readonly currentTurn?: number;
 }
 
 /**
  * Runs the optimization flow end-to-end across planned stages.
- * Handles compression stage execution, confidence ledger tracking, and automated re-hydration.
+ * Handles compression stage execution, confidence ledger tracking, debt score calculation,
+ * semantic drift validation, and automated re-hydration.
  */
 export function optimize(
   request: OptimizationRequest,
@@ -81,7 +95,8 @@ export function optimize(
       for (const item of currentBundle.items) {
         if (item.metadata.elided) {
           const blockHash = typeof item.metadata.blockHash === 'string' ? item.metadata.blockHash : item.contentHash;
-          const originalBytes = typeof item.metadata.originalBytes === 'number' ? item.metadata.originalBytes : item.content.length;
+          const originalBytes =
+            typeof item.metadata.originalBytes === 'number' ? item.metadata.originalBytes : item.content.length;
           options.confidenceLedger.recordElision({
             itemId: item.id,
             blockHash,
@@ -99,8 +114,19 @@ export function optimize(
       }
     }
 
+    const debtTracker =
+      options?.debtTracker ??
+      new DebtTracker({
+        ...(options?.maxDebtThreshold !== undefined ? { maxDebtThreshold: options.maxDebtThreshold } : {}),
+        ...options?.debtOptions,
+      });
+
+    let debtBreakdown = computeDebtBreakdown(debtTracker, currentBundle, options?.confidenceLedger, turn);
+
+    const valOptions = options?.maxDriftThreshold !== undefined ? { maxDriftThreshold: options.maxDriftThreshold } : undefined;
+
     let validation = createValidationReport(
-      validate(request.bundle, currentBundle, selectedPlan, request.budget),
+      validate(request.bundle, currentBundle, selectedPlan, request.budget, valOptions),
     );
 
     const minimumConfidence = request.config.validation.minimumConfidence;
@@ -108,9 +134,12 @@ export function optimize(
       ? options.confidenceLedger.getOverallConfidence(turn)
       : 1.0;
 
-    // Trigger automated re-hydration when validation or ledger confidence falls below threshold
+    // Trigger automated re-hydration when debt threshold exceeded, validation failed, or confidence compromised
     if (
-      (!validation.passed || validation.confidence < minimumConfidence || overallLedgerConfidence < minimumConfidence) &&
+      (debtBreakdown.shouldRehydrate ||
+        !validation.passed ||
+        validation.confidence < minimumConfidence ||
+        overallLedgerConfidence < minimumConfidence) &&
       !stageFailed
     ) {
       const rehydratedBundle = attemptAutomatedRehydration(
@@ -122,12 +151,13 @@ export function optimize(
 
       if (rehydratedBundle && rehydratedBundle !== currentBundle) {
         const revalidated = createValidationReport(
-          validate(request.bundle, rehydratedBundle, selectedPlan, request.budget),
+          validate(request.bundle, rehydratedBundle, selectedPlan, request.budget, valOptions),
         );
 
         if (revalidated.passed && revalidated.confidence >= minimumConfidence) {
           currentBundle = rehydratedBundle;
           validation = revalidated;
+          debtBreakdown = computeDebtBreakdown(debtTracker, currentBundle, options?.confidenceLedger, turn);
         }
       }
     }
@@ -179,6 +209,7 @@ export function optimize(
         issues: combinedIssues,
         shouldFallback: true,
         reason,
+        ...(validation.driftReport ? { driftReport: validation.driftReport } : {}),
       });
     }
 
@@ -197,12 +228,18 @@ export function optimize(
         issues: combinedIssues,
         shouldFallback: true,
         reason: failureReason ?? 'Stage execution failed',
+        ...(validation.driftReport ? { driftReport: validation.driftReport } : {}),
       });
     }
 
     const fallback = resolveFallback(request, validation);
     const emittedOutput = fallback.output;
-    const trace = buildTrace(request, selectedPlan, stageResults, validation, fallback, emittedOutput);
+    const trace = buildTrace(request, selectedPlan, stageResults, validation, fallback, emittedOutput, {
+      debtScore: debtBreakdown.debtScore,
+      ...(validation.driftReport?.driftScore !== undefined
+        ? { driftScore: validation.driftReport.driftScore }
+        : {}),
+    });
 
     return createOptimizationResult({
       finalBundle: currentBundle,
@@ -248,6 +285,44 @@ export function optimize(
       fallbackUsed: true,
     });
   }
+}
+
+function computeDebtBreakdown(
+  debtTracker: DebtTracker,
+  bundle: ContextBundle,
+  ledger?: ConfidenceLedger,
+  currentTurn = 1,
+) {
+  let elidedBytes = 0;
+  let totalBytes = 0;
+  let oldestElidedTurn: number | undefined;
+
+  for (const item of bundle.items) {
+    const itemBytes = item.content.length;
+    totalBytes += typeof item.metadata.originalBytes === 'number' ? item.metadata.originalBytes : itemBytes;
+    if (item.metadata.elided) {
+      elidedBytes += typeof item.metadata.originalBytes === 'number' ? item.metadata.originalBytes : itemBytes;
+    }
+  }
+
+  const overallConfidence = ledger ? ledger.getOverallConfidence(currentTurn) : 1.0;
+
+  if (ledger) {
+    const elisions = ledger.getAllElisions(currentTurn);
+    for (const el of elisions) {
+      if (oldestElidedTurn === undefined || el.elisionTurn < oldestElidedTurn) {
+        oldestElidedTurn = el.elisionTurn;
+      }
+    }
+  }
+
+  return debtTracker.calculateDebt({
+    currentTurn,
+    overallConfidence,
+    elidedBytes,
+    totalBytes,
+    ...(oldestElidedTurn !== undefined ? { oldestElidedTurn } : {}),
+  });
 }
 
 /**

@@ -6,19 +6,25 @@ import type {
   ValidationReport,
 } from '../model';
 import { extractConstraintDirectives } from '../../stages/cleanup/constraint-preservation';
+import { DriftTracker } from '../ledger/drift-tracker';
 import { validateBundleAst } from './ast';
 
 export * from './ast';
 
+export interface ValidationOptions {
+  readonly maxDriftThreshold?: number | undefined;
+}
+
 /**
- * Validates the optimization result by performing AST validation and verifying
- * that imperative constraint directives are retained in the output bundle.
+ * Validates the optimization result by performing AST validation, verifying
+ * imperative constraint directive retention, and calculating semantic drift.
  */
 export function validate(
   before: ContextBundle,
   after: ContextBundle,
   _plan: OptimizationPlan,
   budget: OptimizationBudget,
+  options?: ValidationOptions,
 ): ValidationReport {
   const issues: ValidationIssue[] = [];
 
@@ -48,7 +54,22 @@ export function validate(
     }
   }
 
-  // 3. Verify Budget Boundary Compliance
+  // 3. Evaluate Semantic Drift Tracker
+  const driftTrackerOptions = options?.maxDriftThreshold !== undefined ? { maxDriftThreshold: options.maxDriftThreshold } : {};
+  const driftTracker = new DriftTracker(driftTrackerOptions);
+  const driftReport = driftTracker.calculateDrift(before, after);
+
+  if (driftReport.shouldFallback) {
+    issues.push({
+      code: 'SEMANTIC_DRIFT_EXCEEDED',
+      message:
+        driftReport.reason ??
+        `Semantic drift metric (${driftReport.driftScore.toFixed(2)}) exceeds maximum threshold (${(options?.maxDriftThreshold ?? 0.40).toFixed(2)}).`,
+      severity: 'error',
+    });
+  }
+
+  // 4. Verify Budget Boundary Compliance
   if (typeof budget?.maxInputTokens === 'number' && budget.maxInputTokens > 0) {
     if (after.summary.tokenEstimate > budget.maxInputTokens) {
       issues.push({
@@ -69,6 +90,7 @@ export function validate(
     confidence,
     issues: Object.freeze(issues),
     shouldFallback,
+    driftReport,
     ...(reason ? { reason } : {}),
   };
 }
