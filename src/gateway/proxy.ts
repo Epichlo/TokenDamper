@@ -17,6 +17,8 @@ export async function handleProxyRequest(
   rawBody: string,
   options: ProxyHandlerOptions,
 ): Promise<ProxyRequestResult> {
+  const requestUrl = new URL(urlPath, 'http://tokendamper.local');
+  const routePath = requestUrl.pathname;
   const sessionId = getSessionIdFromHeaders(headers, rawBody);
   const session = options.sessionStore.getOrCreateSession(sessionId);
 
@@ -27,14 +29,49 @@ export async function handleProxyRequest(
     }
   }
 
+  if (method.toUpperCase() !== 'POST' && (routePath === '/v1/chat/completions' || routePath === '/v1/messages')) {
+    return {
+      statusCode: 405,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ error: `Method ${method} is not allowed for ${routePath}` }),
+      session,
+    };
+  }
+
   // Handle OpenAI API endpoint
-  if (urlPath === '/v1/chat/completions') {
-    return processOpenAiRequest(rawBody, cleanHeaders, session, options);
+  if (routePath === '/v1/chat/completions') {
+    const optimized = processOpenAiRequest(rawBody, cleanHeaders, session, options);
+    if (optimized.statusCode !== 200 || shouldUseMockUpstream(cleanHeaders)) {
+      return optimized;
+    }
+
+    return forwardUpstreamRequest({
+      provider: 'openai',
+      requestUrl,
+      body: optimized.body,
+      incomingHeaders: cleanHeaders,
+      streamRequested: isStreamRequested(optimized.body),
+      session: optimized.session,
+      options,
+    });
   }
 
   // Handle Anthropic API endpoint
-  if (urlPath === '/v1/messages') {
-    return processAnthropicRequest(rawBody, cleanHeaders, session, options);
+  if (routePath === '/v1/messages') {
+    const optimized = processAnthropicRequest(rawBody, cleanHeaders, session, options);
+    if (optimized.statusCode !== 200 || shouldUseMockUpstream(cleanHeaders)) {
+      return optimized;
+    }
+
+    return forwardUpstreamRequest({
+      provider: 'anthropic',
+      requestUrl,
+      body: optimized.body,
+      incomingHeaders: cleanHeaders,
+      streamRequested: isStreamRequested(optimized.body),
+      session: optimized.session,
+      options,
+    });
   }
 
   // Fallback pass-through for unknown endpoints
@@ -44,6 +81,164 @@ export async function handleProxyRequest(
     body: JSON.stringify({ error: `Unknown gateway endpoint: ${urlPath}` }),
     session,
   };
+}
+
+type UpstreamProvider = 'openai' | 'anthropic';
+
+interface ForwardUpstreamOptions {
+  readonly provider: UpstreamProvider;
+  readonly requestUrl: URL;
+  readonly body: string;
+  readonly incomingHeaders: Record<string, string>;
+  readonly streamRequested: boolean;
+  readonly session: ReturnType<GatewaySessionStore['getOrCreateSession']>;
+  readonly options: ProxyHandlerOptions;
+}
+
+async function forwardUpstreamRequest(params: ForwardUpstreamOptions): Promise<ProxyRequestResult> {
+  const upstreamBase =
+    params.provider === 'openai'
+      ? (params.options.upstreamOpenAiUrl ?? 'https://api.openai.com')
+      : (params.options.upstreamAnthropicUrl ?? 'https://api.anthropic.com');
+  const upstreamUrl = buildUpstreamUrl(upstreamBase, params.requestUrl);
+
+  let upstreamResponse: Response;
+  try {
+    const fetchInit: RequestInit = {
+      method: 'POST',
+      headers: buildForwardHeaders(params.incomingHeaders, params.provider),
+      body: params.body,
+    };
+    if (params.options.abortSignal) {
+      fetchInit.signal = params.options.abortSignal;
+    }
+
+    upstreamResponse = await fetch(upstreamUrl, fetchInit);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown upstream fetch error';
+    return {
+      statusCode: 502,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ error: `Upstream ${params.provider} request failed: ${message}` }),
+      session: params.session,
+    };
+  }
+
+  const responseHeaders = copyResponseHeaders(upstreamResponse.headers);
+  const contentType = upstreamResponse.headers.get('content-type') ?? '';
+  const shouldStream = params.streamRequested || contentType.toLowerCase().includes('text/event-stream');
+
+  if (shouldStream && upstreamResponse.body) {
+    return {
+      statusCode: upstreamResponse.status,
+      headers: responseHeaders,
+      body: '',
+      upstreamBody: upstreamResponse.body,
+      session: params.session,
+    };
+  }
+
+  return {
+    statusCode: upstreamResponse.status,
+    headers: responseHeaders,
+    body: await upstreamResponse.text(),
+    session: params.session,
+  };
+}
+
+function buildUpstreamUrl(upstreamBase: string, requestUrl: URL): string {
+  const base = upstreamBase.endsWith('/') ? upstreamBase.slice(0, -1) : upstreamBase;
+  return `${base}${requestUrl.pathname}${requestUrl.search}`;
+}
+
+function shouldUseMockUpstream(headers: Record<string, string>): boolean {
+  if (process.env.TOKENDAMPER_MOCK_UPSTREAM === 'true') {
+    return true;
+  }
+
+  return !getHeader(headers, 'authorization') && !getHeader(headers, 'x-api-key');
+}
+
+function isStreamRequested(body: string): boolean {
+  try {
+    const parsed = JSON.parse(body) as { stream?: unknown };
+    return parsed.stream === true;
+  } catch {
+    return false;
+  }
+}
+
+function getHeader(headers: Record<string, string>, headerName: string): string | undefined {
+  const wanted = headerName.toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === wanted && value.trim().length > 0) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function buildForwardHeaders(headers: Record<string, string>, provider: UpstreamProvider): Record<string, string> {
+  const forwarded: Record<string, string> = {};
+  const blockedHeaders = new Set([
+    'host',
+    'content-length',
+    'connection',
+    'keep-alive',
+    'proxy-authenticate',
+    'proxy-authorization',
+    'te',
+    'trailer',
+    'transfer-encoding',
+    'upgrade',
+    'x-session-id',
+    'x-tokendamper-session-id',
+  ]);
+  const providerPrefixes = provider === 'openai' ? ['openai-'] : ['anthropic-'];
+
+  for (const [key, value] of Object.entries(headers)) {
+    const lower = key.toLowerCase();
+    if (blockedHeaders.has(lower)) {
+      continue;
+    }
+
+    if (
+      lower === 'authorization' ||
+      lower === 'x-api-key' ||
+      lower === 'accept' ||
+      lower === 'user-agent' ||
+      lower === 'content-type' ||
+      providerPrefixes.some((prefix) => lower.startsWith(prefix))
+    ) {
+      forwarded[key] = value;
+    }
+  }
+
+  forwarded['content-type'] = forwarded['content-type'] ?? 'application/json';
+  return forwarded;
+}
+
+function copyResponseHeaders(headers: Headers): Record<string, string> {
+  const copied: Record<string, string> = {};
+  const blockedHeaders = new Set([
+    'connection',
+    'content-length',
+    'keep-alive',
+    'proxy-authenticate',
+    'proxy-authorization',
+    'te',
+    'trailer',
+    'transfer-encoding',
+    'upgrade',
+  ]);
+
+  headers.forEach((value, key) => {
+    if (!blockedHeaders.has(key.toLowerCase())) {
+      copied[key] = value;
+    }
+  });
+
+  return copied;
 }
 
 function getSessionIdFromHeaders(headers: IncomingHttpHeaders, body: string): string {

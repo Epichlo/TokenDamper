@@ -45,6 +45,7 @@ export interface ProxyHandlerOptions {
   readonly sessionStore: GatewaySessionStoreInterface;
   readonly upstreamOpenAiUrl?: string | undefined;
   readonly upstreamAnthropicUrl?: string | undefined;
+  readonly abortSignal?: AbortSignal | undefined;
 }
 
 export interface GatewaySessionStoreInterface {
@@ -60,6 +61,7 @@ export interface ProxyRequestResult {
   readonly statusCode: number;
   readonly headers: Record<string, string>;
   readonly body: string;
+  readonly upstreamBody?: ReadableStream<Uint8Array> | null | undefined;
   readonly session: GatewaySession;
   readonly optimizationResult?: OptimizationResult | undefined;
 }

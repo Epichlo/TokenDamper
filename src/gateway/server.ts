@@ -1,7 +1,8 @@
+import { once } from 'node:events';
 import { createServer, IncomingMessage, Server, ServerResponse } from 'node:http';
 import { handleProxyRequest } from './proxy';
 import { GatewaySessionStore } from './session-store';
-import type { GatewayConfig } from './types';
+import type { GatewayConfig, ProxyRequestResult } from './types';
 
 export class GatewayServer {
   private readonly server: Server;
@@ -81,20 +82,56 @@ export class GatewayServer {
     });
 
     req.on('end', async () => {
+      const abortController = new AbortController();
+      res.on('close', () => {
+        if (!res.writableEnded) {
+          abortController.abort();
+        }
+      });
+
       try {
         const result = await handleProxyRequest(method, url, req.headers, body, {
           sessionStore: this.sessionStore,
           upstreamOpenAiUrl: this.config.upstreamOpenAiUrl,
           upstreamAnthropicUrl: this.config.upstreamAnthropicUrl,
+          abortSignal: abortController.signal,
         });
 
-        res.writeHead(result.statusCode, result.headers);
-        res.end(result.body);
+        await this.writeProxyResult(res, result);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Gateway Internal Error';
         res.writeHead(500, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ error: message }));
       }
     });
+  }
+
+  private async writeProxyResult(res: ServerResponse, result: ProxyRequestResult): Promise<void> {
+    res.writeHead(result.statusCode, result.headers);
+
+    if (!result.upstreamBody) {
+      res.end(result.body);
+      return;
+    }
+
+    const reader = result.upstreamBody.getReader();
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        if (value && !res.write(value)) {
+          await once(res, 'drain');
+        }
+      }
+      res.end();
+    } catch (error) {
+      if (!res.destroyed) {
+        res.destroy(error instanceof Error ? error : new Error('Gateway stream forwarding failed'));
+      }
+    } finally {
+      reader.releaseLock();
+    }
   }
 }

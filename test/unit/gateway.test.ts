@@ -1,3 +1,4 @@
+import { createServer, type Server as HttpServer } from 'node:http';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { handleProxyRequest } from '../../src/gateway/proxy';
 import { GatewayServer } from '../../src/gateway/server';
@@ -48,6 +49,7 @@ describe('GatewaySessionStore', () => {
 describe('Gateway HTTP & Proxy Interceptor', () => {
   let server: GatewayServer;
   let port: number;
+  let upstreamServer: HttpServer | undefined;
 
   beforeEach(async () => {
     server = new GatewayServer({ port: 0 });
@@ -56,6 +58,15 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
 
   afterEach(async () => {
     await server.stop();
+    if (upstreamServer) {
+      await new Promise<void>((resolve, reject) => {
+        upstreamServer?.close((error) => {
+          if (error) reject(error);
+          else resolve();
+        });
+      });
+      upstreamServer = undefined;
+    }
   });
 
   it('responds to GET /health', async () => {
@@ -113,6 +124,84 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
     expect(res2Json.messages[0].content).toContain('[TokenDamper Elided: ref=');
     // Message 1 should remain unchanged
     expect(res2Json.messages[1].content).toBe('What does this code do?');
+  });
+
+  it('forwards optimized OpenAI requests upstream with authorization headers', async () => {
+    const sessionStore = server.getSessionStore();
+    let forwardedBody = '';
+    let forwardedAuthorization = '';
+
+    upstreamServer = createServer((req, res) => {
+      forwardedAuthorization = req.headers.authorization ?? '';
+      req.on('data', (chunk) => {
+        forwardedBody += chunk;
+      });
+      req.on('end', () => {
+        res.writeHead(200, { 'content-type': 'application/json', 'x-request-id': 'upstream-openai' });
+        res.end(JSON.stringify({ id: 'chatcmpl-test', choices: [{ message: { role: 'assistant', content: 'ok' } }] }));
+      });
+    });
+
+    const upstreamPort = await listenOnEphemeralPort(upstreamServer);
+    const payload = {
+      model: 'gpt-4o',
+      messages: [{ role: 'user', content: 'Forward this upstream' }],
+    };
+
+    const result = await handleProxyRequest(
+      'POST',
+      '/v1/chat/completions',
+      { authorization: 'Bearer test-openai-key', 'x-session-id': 'forward-openai-session' },
+      JSON.stringify(payload),
+      { sessionStore, upstreamOpenAiUrl: `http://127.0.0.1:${upstreamPort}` },
+    );
+
+    expect(result.statusCode).toBe(200);
+    expect(result.headers['content-type']).toContain('application/json');
+    expect(JSON.parse(result.body)).toMatchObject({ id: 'chatcmpl-test' });
+    expect(forwardedAuthorization).toBe('Bearer test-openai-key');
+    expect(JSON.parse(forwardedBody)).toMatchObject(payload);
+  });
+
+  it('streams upstream SSE chunks through the gateway server', async () => {
+    upstreamServer = createServer((req, res) => {
+      expect(req.url).toBe('/v1/chat/completions');
+      expect(req.headers.authorization).toBe('Bearer test-openai-key');
+      req.resume();
+      req.on('end', () => {
+        res.writeHead(200, {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache',
+        });
+        res.write('data: {"choices":[{"delta":{"content":"hello"}}]}\n\n');
+        res.end('data: [DONE]\n\n');
+      });
+    });
+
+    const upstreamPort = await listenOnEphemeralPort(upstreamServer);
+    await server.stop();
+    server = new GatewayServer({
+      port: 0,
+      upstreamOpenAiUrl: `http://127.0.0.1:${upstreamPort}`,
+    });
+    port = await server.start();
+
+    const response = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer test-openai-key',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o',
+        stream: true,
+        messages: [{ role: 'user', content: 'stream this' }],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/event-stream');
+    await expect(response.text()).resolves.toBe('data: {"choices":[{"delta":{"content":"hello"}}]}\n\ndata: [DONE]\n\n');
   });
 
   it('deduplicates Anthropic messages while preserving system prompt', async () => {
@@ -181,3 +270,17 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
     expect(res.body).toContain('Invalid Anthropic JSON payload');
   });
 });
+
+async function listenOnEphemeralPort(server: HttpServer): Promise<number> {
+  return new Promise((resolve, reject) => {
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (address && typeof address === 'object') {
+        resolve(address.port);
+      } else {
+        reject(new Error('Failed to bind test server'));
+      }
+    });
+    server.on('error', (error) => reject(error));
+  });
+}
