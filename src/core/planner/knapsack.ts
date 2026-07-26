@@ -30,37 +30,32 @@ function solveKnapsackDP(
   const W = Math.floor(capacity);
   if (N === 0 || W <= 0) return [];
 
-  const dp: Float64Array[] = [];
-  for (let i = 0; i <= N; i++) {
-    dp.push(new Float64Array(W + 1));
-  }
+  const dp = new Float64Array(W + 1);
+  const bitset = new Uint8Array(Math.ceil((N * (W + 1)) / 8));
 
-  for (let i = 1; i <= N; i++) {
-    const item = candidates[i - 1];
+  for (let i = 0; i < N; i++) {
+    const item = candidates[i];
     if (!item) continue;
     const w = Math.ceil(item.weight);
     const v = item.value;
-    const prevRow = dp[i - 1]!;
-    const currRow = dp[i]!;
 
-    for (let cap = 0; cap <= W; cap++) {
-      if (w <= cap) {
-        const take = prevRow[cap - w]! + v;
-        const skip = prevRow[cap]!;
-        currRow[cap] = take > skip ? take : skip;
-      } else {
-        currRow[cap] = prevRow[cap]!;
+    for (let cap = W; cap >= w; cap--) {
+      const take = dp[cap - w]! + v;
+      const skip = dp[cap]!;
+      if (take > skip) {
+        dp[cap] = take;
+        const bitIdx = i * (W + 1) + cap;
+        bitset[bitIdx >> 3]! |= 1 << (bitIdx & 7);
       }
     }
   }
 
   let cap = W;
   const selected: KnapsackItem[] = [];
-  for (let i = N; i > 0; i--) {
-    const currVal = dp[i]![cap]!;
-    const prevVal = dp[i - 1]![cap]!;
-    if (currVal !== prevVal) {
-      const item = candidates[i - 1];
+  for (let i = N - 1; i >= 0; i--) {
+    const bitIdx = i * (W + 1) + cap;
+    if ((bitset[bitIdx >> 3]! & (1 << (bitIdx & 7))) !== 0) {
+      const item = candidates[i];
       if (item) {
         selected.push(item);
         cap -= Math.ceil(item.weight);
