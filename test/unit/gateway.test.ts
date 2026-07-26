@@ -121,6 +121,35 @@ describe('GatewaySessionStore', () => {
     expect(store.sessionCount).toBe(2);
     expect(store.getOrCreateSession('session-3').sessionId).toBe('session-3');
   });
+
+  it('evicts oldest content entries when maxContentEntriesPerSession limit is reached', () => {
+    const lruStore = new GatewaySessionStore({ maxContentEntriesPerSession: 2 });
+    lruStore.storeContent('session-1', 'hash-1', 'content-1');
+    lruStore.storeContent('session-1', 'hash-2', 'content-2');
+    expect(lruStore.getContent('session-1', 'hash-1')).toBe('content-1');
+    expect(lruStore.getContent('session-1', 'hash-2')).toBe('content-2');
+
+    // Adding 3rd item should evict hash-1 (since hash-2 was accessed last)
+    lruStore.storeContent('session-1', 'hash-3', 'content-3');
+    expect(lruStore.getContent('session-1', 'hash-1')).toBeUndefined();
+    expect(lruStore.getContent('session-1', 'hash-2')).toBe('content-2');
+    expect(lruStore.getContent('session-1', 'hash-3')).toBe('content-3');
+  });
+
+  it('refreshes LRU position on cache hits', () => {
+    const lruStore = new GatewaySessionStore({ maxContentEntriesPerSession: 2 });
+    lruStore.storeContent('session-1', 'hash-1', 'content-1');
+    lruStore.storeContent('session-1', 'hash-2', 'content-2');
+
+    // Access hash-1 to refresh its LRU position (making hash-2 the oldest)
+    expect(lruStore.getContent('session-1', 'hash-1')).toBe('content-1');
+
+    // Adding hash-3 should now evict hash-2 instead of hash-1
+    lruStore.storeContent('session-1', 'hash-3', 'content-3');
+    expect(lruStore.getContent('session-1', 'hash-1')).toBe('content-1');
+    expect(lruStore.getContent('session-1', 'hash-2')).toBeUndefined();
+    expect(lruStore.getContent('session-1', 'hash-3')).toBe('content-3');
+  });
 });
 
 describe('Gateway HTTP & Proxy Interceptor', () => {

@@ -16,6 +16,7 @@ export class GatewayServer {
       host: config?.host ?? '127.0.0.1',
       sessionTtlMs: config?.sessionTtlMs ?? 60 * 60 * 1000,
       maxSessions: config?.maxSessions ?? 100,
+      maxContentEntriesPerSession: config?.maxContentEntriesPerSession ?? 100,
       upstreamOpenAiUrl: config?.upstreamOpenAiUrl,
       upstreamAnthropicUrl: config?.upstreamAnthropicUrl,
     };
@@ -23,6 +24,7 @@ export class GatewayServer {
     this.sessionStore = new GatewaySessionStore({
       sessionTtlMs: this.config.sessionTtlMs,
       maxSessions: this.config.maxSessions,
+      maxContentEntriesPerSession: this.config.maxContentEntriesPerSession,
     });
 
     this.server = createServer((req, res) => this.onRequest(req, res));

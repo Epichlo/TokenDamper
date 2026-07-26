@@ -7,10 +7,18 @@ export class GatewaySessionStore {
   private readonly sessions = new Map<string, GatewaySession>();
   private readonly sessionTtlMs: number;
   private readonly maxSessions: number;
+  private readonly maxContentEntriesPerSession: number;
 
-  constructor(options: { sessionTtlMs?: number; maxSessions?: number } = {}) {
+  constructor(
+    options: {
+      sessionTtlMs?: number | undefined;
+      maxSessions?: number | undefined;
+      maxContentEntriesPerSession?: number | undefined;
+    } = {},
+  ) {
     this.sessionTtlMs = options.sessionTtlMs ?? 60 * 60 * 1000; // 1 hour default
     this.maxSessions = options.maxSessions ?? 100;
+    this.maxContentEntriesPerSession = options.maxContentEntriesPerSession ?? 100;
   }
 
   /**
@@ -70,7 +78,7 @@ export class GatewaySessionStore {
       const hash = typeof block === 'string' ? block : block.hash;
       session.seenBlockHashes.add(hash);
       if (typeof block !== 'string') {
-        session.contentByHash.set(hash, block.content);
+        this.storeContent(sessionId, hash, block.content);
       }
     }
 
@@ -83,7 +91,20 @@ export class GatewaySessionStore {
   public storeContent(sessionId: string, hash: string, content: string): void {
     const session = this.getOrCreateSession(sessionId);
     session.seenBlockHashes.add(hash);
+
+    if (session.contentByHash.has(hash)) {
+      session.contentByHash.delete(hash);
+    }
     session.contentByHash.set(hash, content);
+
+    while (session.contentByHash.size > this.maxContentEntriesPerSession) {
+      const oldestKey = session.contentByHash.keys().next().value;
+      if (oldestKey !== undefined) {
+        session.contentByHash.delete(oldestKey);
+      } else {
+        break;
+      }
+    }
   }
 
   /**
@@ -96,17 +117,26 @@ export class GatewaySessionStore {
     const normalizedRef = normalizeHashOrRef(hashOrRef);
     const exactMatch = session.contentByHash.get(normalizedRef);
     if (exactMatch !== undefined) {
+      session.contentByHash.delete(normalizedRef);
+      session.contentByHash.set(normalizedRef, exactMatch);
       return exactMatch;
     }
 
-    const prefixMatches: string[] = [];
+    const prefixMatches: Array<{ hash: string; content: string }> = [];
     for (const [hash, content] of session.contentByHash.entries()) {
       if (hash.startsWith(normalizedRef)) {
-        prefixMatches.push(content);
+        prefixMatches.push({ hash, content });
       }
     }
 
-    return prefixMatches.length === 1 ? prefixMatches[0] : undefined;
+    if (prefixMatches.length === 1 && prefixMatches[0]) {
+      const match = prefixMatches[0];
+      session.contentByHash.delete(match.hash);
+      session.contentByHash.set(match.hash, match.content);
+      return match.content;
+    }
+
+    return undefined;
   }
 
   /**

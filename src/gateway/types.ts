@@ -45,6 +45,7 @@ export interface GatewayConfig {
   readonly upstreamAnthropicUrl?: string | undefined;
   readonly sessionTtlMs: number;
   readonly maxSessions: number;
+  readonly maxContentEntriesPerSession?: number | undefined;
 }
 
 /**
