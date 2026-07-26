@@ -8,4 +8,5 @@ export * from './core/validation';
 export * from './core/fallback';
 export * from './core/trace';
 export * from './core/ledger';
-
+export * from './bench';
+export * from './cli/bench-table-renderer';

@@ -230,5 +230,7 @@ coverage/
 !.env.example
 repomix-output.xml
 scratch/
+.agents/
+diff_report.html
 
 

@@ -1,0 +1,42 @@
+[
+  {
+    "id": "CodeXGLUE/py/101",
+    "repo": "pallets/flask",
+    "path": "src/flask/json/provider.py",
+    "prompt": "import json\nfrom typing import Any, Callable\n\nclass DefaultJSONProvider:\n    \"\"\"Default JSON provider implementation for serialization.\"\"\"\n    def dumps(self, obj: Any, **kwargs: Any) -> str:\n",
+    "completion": "        return json.dumps(obj, **kwargs)\n",
+    "language": "python"
+  },
+  {
+    "id": "CodeXGLUE/py/102",
+    "repo": "psf/requests",
+    "path": "src/requests/utils.py",
+    "prompt": "import os\nfrom typing import Dict, Optional\n\ndef parse_dict_header(value: str) -> Dict[str, str]:\n    \"\"\"Parse a dictionary-style header string.\"\"\"\n    result = {}\n",
+    "completion": "    for item in value.split(','):\n        if '=' in item:\n            k, v = item.split('=', 1)\n            result[k.strip()] = v.strip()\n    return result\n",
+    "language": "python"
+  },
+  {
+    "id": "CodeXGLUE/ts/201",
+    "repo": "microsoft/vscode",
+    "path": "src/vs/base/common/strings.ts",
+    "prompt": "export interface StringMatch {\n  start: number;\n  end: number;\n}\n\nexport function escapeRegExpCharacters(value: string): string {\n",
+    "completion": "  return value.replace(/[\\-\\[\\]\\/\\{\\}\\(\\)\\*\\+\\?\\.\\\\\\^\\$\\|]/g, '\\\\$&');\n}\n",
+    "language": "typescript"
+  },
+  {
+    "id": "CodeXGLUE/ts/202",
+    "repo": "facebook/react",
+    "path": "packages/react/src/ReactUtils.ts",
+    "prompt": "export function isArray(obj: unknown): boolean {\n",
+    "completion": "  return Array.isArray(obj);\n}\n",
+    "language": "typescript"
+  },
+  {
+    "id": "CodeXGLUE/js/301",
+    "repo": "expressjs/express",
+    "path": "lib/utils.js",
+    "prompt": "function etag(body, encoding) {\n  var buf = Buffer.isBuffer(body)\n    ? body\n    : Buffer.from(body, encoding);\n",
+    "completion": "  return '\"' + buf.length.toString(16) + '\"';\n}\nmodule.exports = etag;\n",
+    "language": "javascript"
+  }
+]

@@ -37,7 +37,7 @@ This document outlines the canonical 8-Milestone execution plan for TokenDamper,
   - Optimization debt & semantic drift tracking over long multi-turn sessions.
   - Interactive trace exploration and explainability reporting.
 
-- [ ] **Milestone 8: Empirical Benchmarking & Quality Evaluation**
+- [x] **Milestone 8: Empirical Benchmarking & Quality Evaluation (Done)**
   - Benchmark suite evaluated on HumanEval and CodeXGLUE datasets.
   - Automated pass-rate and code completion accuracy evaluation vs token reduction ratios.
   - Regression testing harness and performance baseline verification.
@@ -54,7 +54,7 @@ This document outlines the canonical 8-Milestone execution plan for TokenDamper,
 8. [x] Workspace topology graph pruner & 0/1 Knapsack planner (M5)
 9. [x] Reversible token hashing (`<BLOCK_HASH>`) & delta compression (M6)
 10. [x] Visual `--diff` viewer & semantic drift ledger (M7)
-11. [ ] HumanEval / CodeXGLUE benchmark harness & accuracy evaluation (M8)
+11. [x] HumanEval / CodeXGLUE benchmark harness & accuracy evaluation (M8)
 
 ## Expected Outputs per Milestone
 

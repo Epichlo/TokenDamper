@@ -1,0 +1,14 @@
+{
+  "version": "1.0.0",
+  "dataset": "combined_humaneval_codexglue",
+  "thresholds": {
+    "minTokenReductionRatio": 0.40,
+    "maxFallbackRate": 0.0,
+    "maxAvgLatencyMs": 50.0,
+    "minSyntaxPassRate": 1.0
+  },
+  "expectedMetrics": {
+    "targetReductionRatio": 0.50,
+    "targetFallbackRate": 0.0
+  }
+}
