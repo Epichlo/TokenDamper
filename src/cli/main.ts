@@ -8,6 +8,7 @@ import { renderTerminalDiff } from './diff-renderer';
 import { generateHtmlReport } from './html-reporter';
 import { loadBenchmarkFixtures, BenchmarkRunner } from '../bench';
 import { renderBenchTable } from './bench-table-renderer';
+import { startMcpServer } from '../adapters/mcp';
 import type { BenchmarkRunnerConfig } from '../bench/types';
 import type { ConfigOverrides } from '../config';
 
@@ -24,6 +25,21 @@ export function runCli(
 ): number {
   try {
     const parsed = parseArguments(argv, cwd);
+
+    if (parsed.command === 'mcp') {
+      const config = loadConfig({
+        cwd,
+        ...(parsed.configPath ? { configPath: parsed.configPath } : {}),
+        ...(parsed.configOverrides ? { cliOverrides: parsed.configOverrides } : {}),
+      });
+      startMcpServer({
+        input: process.stdin,
+        output: io.stdout as NodeJS.WritableStream,
+        log: io.stderr as NodeJS.WritableStream,
+        config,
+      });
+      return 0;
+    }
 
     if (parsed.command === 'exec') {
       // Async exec command runner handled synchronously or spawned
@@ -76,7 +92,7 @@ export function runCli(
 
     if (parsed.command !== 'optimize') {
       io.stderr.write(
-        'Usage: tokendamper optimize <input-file|-> | tokendamper bench [dataset-path] | tokendamper exec -- <command>\n',
+        'Usage: tokendamper optimize <input-file|-> | tokendamper bench [dataset-path] | tokendamper exec -- <command> | tokendamper mcp\n',
       );
       return 1;
     }
@@ -130,7 +146,7 @@ export function main(): void {
 }
 
 export interface ParsedArguments {
-  readonly command: 'optimize' | 'exec' | 'bench' | 'unknown';
+  readonly command: 'optimize' | 'exec' | 'bench' | 'mcp' | 'unknown';
   readonly inputPath: string;
   readonly datasetPath?: string;
   readonly reportJsonPath?: string;
@@ -149,6 +165,14 @@ function parseArguments(argv: readonly string[], cwd: string): ParsedArguments {
 
   const args = [...argv];
   let command = args.shift();
+
+  if (command === 'mcp') {
+    return {
+      command: 'mcp',
+      inputPath: '',
+      execArgs: [],
+    };
+  }
 
   if (command === 'exec') {
     // Drop optional '--' separator if present
