@@ -1,8 +1,11 @@
 import { createServer, type Server as HttpServer } from 'node:http';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createBundleStatistics, createContextItem, createOptimizationBudget, freeze, hashContent } from '../../src/core/model/constructors';
+import type { ContextBundle } from '../../src/core/model/types';
 import { handleProxyRequest } from '../../src/gateway/proxy';
 import { GatewayServer } from '../../src/gateway/server';
 import { GatewaySessionStore } from '../../src/gateway/session-store';
+import { runSessionDedupStage } from '../../src/stages/cleanup/session-dedup';
 
 describe('GatewaySessionStore', () => {
   let store: GatewaySessionStore;
@@ -31,8 +34,82 @@ describe('GatewaySessionStore', () => {
     const updated = store.getOrCreateSession('session-123');
     expect(updated.turnCount).toBe(1);
     expect(updated.seenBlockHashes.has('hash-abc')).toBe(true);
+    expect(updated.contentByHash.size).toBe(0);
     expect(store.hasBlockHash('session-123', 'hash-abc')).toBe(true);
     expect(store.hasBlockHash('session-123', 'hash-unknown')).toBe(false);
+  });
+
+  it('stores raw content and retrieves it by full hash, short ref, or elision marker', () => {
+    const rawContent = 'Original long context content retained for later rehydration.';
+    const contentHash = hashContent({ role: 'user', content: rawContent });
+    const shortRef = contentHash.slice(0, 12);
+
+    store.storeContent('session-123', contentHash, rawContent);
+
+    expect(store.getContent('session-123', contentHash)).toBe(rawContent);
+    expect(store.getContent('session-123', shortRef)).toBe(rawContent);
+    expect(store.getContent('session-123', `[TokenDamper Elided: ref=${shortRef} bytes=60 kind=conversation]`)).toBe(rawContent);
+  });
+
+  it('records raw content entries during turn recording', () => {
+    store.recordTurn(
+      'session-123',
+      {
+        rawTokens: 50,
+        optimizedTokens: 25,
+        tokensSaved: 25,
+        dedupRatio: 0.5,
+        fallbackUsed: false,
+      },
+      [{ hash: 'hash-with-content', content: 'raw session content' }],
+    );
+
+    expect(store.hasBlockHash('session-123', 'hash-with-content')).toBe(true);
+    expect(store.getContent('session-123', 'hash-with-content')).toBe('raw session content');
+  });
+
+  it('rehydrates an elided session item from stored raw content when requested', () => {
+    const rawContent = 'Detailed context that was elided but must be restored when confidence decays.';
+    const contentHash = hashContent({ role: 'user', content: rawContent });
+    const shortRef = contentHash.slice(0, 12);
+    store.storeContent('session-123', contentHash, rawContent);
+
+    const elidedItem = createContextItem({
+      id: 'item-1',
+      kind: 'conversation',
+      contentType: 'text',
+      content: `[TokenDamper Elided: ref=${shortRef} bytes=${rawContent.length} kind=conversation]`,
+      origin: 'test',
+      contentHash: hashContent({ originalHash: contentHash, elided: true }),
+      metadata: freeze({
+        elided: true,
+        originalContentHash: contentHash,
+        originalBytes: rawContent.length,
+      }),
+    });
+    const items = freeze([elidedItem]);
+    const statistics = createBundleStatistics(items);
+    const bundle: ContextBundle = freeze({
+      id: 'bundle-1',
+      bundleId: 'bundle-1',
+      source: 'text',
+      items,
+      summary: freeze({ itemCount: 1, tokenEstimate: 10, preview: elidedItem.content.slice(0, 20) }),
+      statistics,
+      contentHash: 'bundle-1',
+    });
+
+    const result = runSessionDedupStage(bundle, createOptimizationBudget({ riskTolerance: 'low' }), {
+      previousBlockHashes: new Set<string>(),
+      getContent: (hashOrRef) => store.getContent('session-123', hashOrRef),
+      rehydrateRefs: new Set([shortRef]),
+    });
+
+    expect(result.changed).toBe(true);
+    expect(result.metrics.itemsRehydrated).toBe(1);
+    expect(result.bundle.items[0]?.content).toBe(rawContent);
+    expect(result.bundle.items[0]?.metadata.rehydrated).toBe(true);
+    expect(result.bundle.items[0]?.contentHash).toBe(contentHash);
   });
 
   it('evicts oldest session when maxSessions limit is reached', () => {
@@ -122,6 +199,7 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
 
     // Message 0 should be elided
     expect(res2Json.messages[0].content).toContain('[TokenDamper Elided: ref=');
+    expect(sessionStore.getContent('test-openai-session', res2Json.messages[0].content)).toBe(repeatedContext);
     // Message 1 should remain unchanged
     expect(res2Json.messages[1].content).toBe('What does this code do?');
   });

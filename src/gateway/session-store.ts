@@ -1,4 +1,4 @@
-import type { GatewaySession, SessionTurn } from './types';
+import type { GatewaySession, SessionContentEntry, SessionTurn } from './types';
 
 /**
  * Stateful in-memory session manager for cross-turn context deduplication.
@@ -33,6 +33,7 @@ export class GatewaySessionStore {
         lastActiveAt: now,
         turnCount: 0,
         seenBlockHashes: new Set<string>(),
+        contentByHash: new Map<string, string>(),
         turns: [],
       };
       this.sessions.set(sessionId, session);
@@ -46,7 +47,11 @@ export class GatewaySessionStore {
   /**
    * Records a turn result into the active session state.
    */
-  public recordTurn(sessionId: string, turn: Omit<SessionTurn, 'turnIndex' | 'timestamp'>, newBlockHashes: string[]): GatewaySession {
+  public recordTurn(
+    sessionId: string,
+    turn: Omit<SessionTurn, 'turnIndex' | 'timestamp'>,
+    newBlocks: ReadonlyArray<string | SessionContentEntry>,
+  ): GatewaySession {
     const session = this.getOrCreateSession(sessionId);
     const now = Date.now();
 
@@ -61,11 +66,47 @@ export class GatewaySessionStore {
 
     session.turns.push(fullTurn);
 
-    for (const hash of newBlockHashes) {
+    for (const block of newBlocks) {
+      const hash = typeof block === 'string' ? block : block.hash;
       session.seenBlockHashes.add(hash);
+      if (typeof block !== 'string') {
+        session.contentByHash.set(hash, block.content);
+      }
     }
 
     return session;
+  }
+
+  /**
+   * Stores original raw content by hash for later rehydration.
+   */
+  public storeContent(sessionId: string, hash: string, content: string): void {
+    const session = this.getOrCreateSession(sessionId);
+    session.seenBlockHashes.add(hash);
+    session.contentByHash.set(hash, content);
+  }
+
+  /**
+   * Retrieves original raw content by full content hash, short ref, or elision marker.
+   */
+  public getContent(sessionId: string, hashOrRef: string): string | undefined {
+    const session = this.sessions.get(sessionId);
+    if (!session) return undefined;
+
+    const normalizedRef = normalizeHashOrRef(hashOrRef);
+    const exactMatch = session.contentByHash.get(normalizedRef);
+    if (exactMatch !== undefined) {
+      return exactMatch;
+    }
+
+    const prefixMatches: string[] = [];
+    for (const [hash, content] of session.contentByHash.entries()) {
+      if (hash.startsWith(normalizedRef)) {
+        prefixMatches.push(content);
+      }
+    }
+
+    return prefixMatches.length === 1 ? prefixMatches[0] : undefined;
   }
 
   /**
@@ -126,4 +167,13 @@ export class GatewaySessionStore {
   public clear(): void {
     this.sessions.clear();
   }
+}
+
+function normalizeHashOrRef(hashOrRef: string): string {
+  const elisionRef = /\bref=([A-Za-z0-9_-]+)/.exec(hashOrRef);
+  if (elisionRef?.[1]) {
+    return elisionRef[1];
+  }
+
+  return hashOrRef.trim();
 }

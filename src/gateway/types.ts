@@ -22,8 +22,17 @@ export interface GatewaySession {
   lastActiveAt: number;
   turnCount: number;
   readonly seenBlockHashes: Set<string>;
+  readonly contentByHash: Map<string, string>;
   prefixHash?: string | undefined;
   readonly turns: SessionTurn[];
+}
+
+/**
+ * Original raw content retained for later session rehydration.
+ */
+export interface SessionContentEntry {
+  readonly hash: string;
+  readonly content: string;
 }
 
 /**
@@ -50,8 +59,14 @@ export interface ProxyHandlerOptions {
 
 export interface GatewaySessionStoreInterface {
   getOrCreateSession(sessionId: string): GatewaySession;
-  recordTurn(sessionId: string, turn: Omit<SessionTurn, 'turnIndex' | 'timestamp'>, newBlockHashes: string[]): GatewaySession;
+  recordTurn(
+    sessionId: string,
+    turn: Omit<SessionTurn, 'turnIndex' | 'timestamp'>,
+    newBlocks: ReadonlyArray<string | SessionContentEntry>,
+  ): GatewaySession;
   hasBlockHash(sessionId: string, hash: string): boolean;
+  storeContent(sessionId: string, hash: string, content: string): void;
+  getContent(sessionId: string, hashOrRef: string): string | undefined;
 }
 
 /**

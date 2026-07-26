@@ -4,7 +4,7 @@ import { createContextItem, createOptimizationBudget, freeze, hashContent } from
 import type { ContextBundle, ContextItem, ContextItemKind } from '../core/model/types';
 import { runSessionDedupStage } from '../stages/cleanup/session-dedup';
 import { GatewaySessionStore } from './session-store';
-import type { AnthropicMessagesPayload, OpenAiChatPayload, ProxyHandlerOptions, ProxyRequestResult } from './types';
+import type { AnthropicMessagesPayload, OpenAiChatPayload, ProxyHandlerOptions, ProxyRequestResult, SessionContentEntry } from './types';
 
 /**
  * Handles incoming API requests, normalizing payloads, running cross-turn deduplication,
@@ -290,7 +290,6 @@ function processOpenAiRequest(
   }
 
   const items: ContextItem[] = [];
-  const itemHashes: string[] = [];
 
   const messages = parsedPayload.messages || [];
   for (let i = 0; i < messages.length; i++) {
@@ -308,8 +307,6 @@ function processOpenAiRequest(
       role: msg.role,
       content: textContent,
     });
-
-    itemHashes.push(contentHash);
 
     items.push(
       createContextItem({
@@ -349,9 +346,15 @@ function processOpenAiRequest(
     statistics: freeze(statistics),
     contentHash: bundleHash,
   });
+  const contentEntries: SessionContentEntry[] = items.map((item) => ({
+    hash: item.contentHash,
+    content: item.content,
+  }));
 
   const stageResult = runSessionDedupStage(initialBundle, budget, {
     previousBlockHashes: session.seenBlockHashes,
+    storeContent: (hash, content) => options.sessionStore.storeContent(session.sessionId, hash, content),
+    getContent: (hashOrRef) => options.sessionStore.getContent(session.sessionId, hashOrRef),
   });
 
   let finalBody = rawBody;
@@ -385,7 +388,7 @@ function processOpenAiRequest(
       dedupRatio: rawTokens > 0 ? (stageResult.metrics.tokenEstimateSaved || 0) / rawTokens : 0,
       fallbackUsed: false,
     },
-    itemHashes,
+    contentEntries,
   );
 
   return {
@@ -416,12 +419,10 @@ function processAnthropicRequest(
   }
 
   const items: ContextItem[] = [];
-  const itemHashes: string[] = [];
 
   if (parsedPayload.system) {
     const systemText = typeof parsedPayload.system === 'string' ? parsedPayload.system : JSON.stringify(parsedPayload.system);
     const contentHash = hashContent({ role: 'system', content: systemText });
-    itemHashes.push(contentHash);
     items.push(
       createContextItem({
         id: `sys-${contentHash.slice(0, 8)}`,
@@ -443,7 +444,6 @@ function processAnthropicRequest(
 
     const textContent = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
     const contentHash = hashContent({ role: msg.role, content: textContent });
-    itemHashes.push(contentHash);
 
     items.push(
       createContextItem({
@@ -483,9 +483,15 @@ function processAnthropicRequest(
     statistics: freeze(statistics),
     contentHash: bundleHash,
   });
+  const contentEntries: SessionContentEntry[] = items.map((item) => ({
+    hash: item.contentHash,
+    content: item.content,
+  }));
 
   const stageResult = runSessionDedupStage(initialBundle, budget, {
     previousBlockHashes: session.seenBlockHashes,
+    storeContent: (hash, content) => options.sessionStore.storeContent(session.sessionId, hash, content),
+    getContent: (hashOrRef) => options.sessionStore.getContent(session.sessionId, hashOrRef),
   });
 
   let finalBody = rawBody;
@@ -520,7 +526,7 @@ function processAnthropicRequest(
       dedupRatio: rawTokens > 0 ? (stageResult.metrics.tokenEstimateSaved || 0) / rawTokens : 0,
       fallbackUsed: false,
     },
-    itemHashes,
+    contentEntries,
   );
 
   return {
