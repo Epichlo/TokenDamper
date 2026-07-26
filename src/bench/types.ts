@@ -13,6 +13,11 @@ export interface QualityEvaluationResult {
   readonly optimizedAstIssues: ReadonlyArray<AstIssue>;
   readonly keySymbolPreservationRatio: number;
   readonly tokenSimilarityScore: number;
+  readonly rawExecutionPassed: boolean;
+  readonly optimizedExecutionPassed: boolean;
+  readonly executionPassed: boolean;
+  readonly executionMode: 'python-subprocess' | 'structural-fallback';
+  readonly executionNote: string;
   readonly overallPassed: boolean;
 }
 
@@ -85,6 +90,7 @@ export interface BenchmarkMetricSummary {
   readonly avgLatencyMs: number;
   readonly p95LatencyMs: number;
   readonly syntaxPassRate: number;
+  readonly passAt1Rate: number;
   readonly totalValidationIssues: number;
 }
 

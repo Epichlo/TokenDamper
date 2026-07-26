@@ -3,6 +3,7 @@ import {
   BenchmarkEvaluator,
   computeKeySymbolPreservation,
   computeTokenSimilarity,
+  executePythonCheck,
 } from '../../../src/bench/evaluator';
 import type { BenchmarkFixture } from '../../../src/bench/fixtures/types';
 import { optimize } from '../../../src/core/engine';
@@ -19,6 +20,7 @@ describe('BenchmarkEvaluator', () => {
     language: 'python',
     path: 'src/add_one.py',
     entryPoint: 'add_one',
+    testCode: 'def check(add_one):\n    assert add_one([1, 2, 3]) == [2, 3, 4]\n',
     metadata: {},
   };
 
@@ -45,6 +47,12 @@ describe('BenchmarkEvaluator', () => {
       expect(evalResult.syntaxPreserved).toBe(true);
       expect(evalResult.keySymbolPreservationRatio).toBeGreaterThan(0.5);
       expect(evalResult.tokenSimilarityScore).toBeGreaterThan(0);
+      if (evalResult.executionMode === 'python-subprocess') {
+        expect(evalResult.executionPassed).toBe(true);
+        expect(evalResult.optimizedExecutionPassed).toBe(true);
+      } else {
+        expect(evalResult.executionNote).toContain('Structural fallback');
+      }
       expect(evalResult.overallPassed).toBe(true);
     });
 
@@ -57,6 +65,8 @@ describe('BenchmarkEvaluator', () => {
       expect(evalResult.rawSyntaxValid).toBe(true);
       expect(evalResult.optimizedSyntaxValid).toBe(true);
       expect(evalResult.syntaxPreserved).toBe(true);
+      expect(evalResult.executionMode).toBe('structural-fallback');
+      expect(evalResult.executionPassed).toBe(false);
     });
 
     it('should detect invalid AST syntax when reference completion has bracket syntax errors', () => {
@@ -126,6 +136,40 @@ describe('BenchmarkEvaluator', () => {
       const similarity = computeTokenSimilarity(textA, textC);
       expect(similarity).toBeGreaterThanOrEqual(0);
       expect(similarity).toBeLessThan(1.0);
+    });
+  });
+
+  describe('executePythonCheck', () => {
+    it('executes Python check() when an interpreter is available', () => {
+      const result = executePythonCheck(
+        'def add_one(numbers):\n    return [x + 1 for x in numbers]\n',
+        'def check(add_one):\n    assert add_one([1, 2]) == [2, 3]\n',
+        'add_one',
+      );
+
+      if (result.attempted) {
+        expect(result.passed).toBe(true);
+        expect(result.exitCode).toBe(0);
+        expect(result.timedOut).toBe(false);
+      } else {
+        expect(result.note).toContain('structural/AST fallback');
+      }
+    });
+
+    it('marks failed assertions as execution failures', () => {
+      const result = executePythonCheck(
+        'def add_one(numbers):\n    return numbers\n',
+        'def check(add_one):\n    assert add_one([1, 2]) == [2, 3]\n',
+        'add_one',
+      );
+
+      if (result.attempted) {
+        expect(result.passed).toBe(false);
+        expect(result.exitCode).not.toBe(0);
+        expect(result.stderr).toContain('AssertionError');
+      } else {
+        expect(result.note).toContain('structural/AST fallback');
+      }
     });
   });
 });

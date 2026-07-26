@@ -66,8 +66,8 @@ export function fixtureToOptimizationRequest(
     ...config,
     budget: { ...baseConfig.budget, ...config?.budget },
     validation: { ...baseConfig.validation, ...config?.validation },
-    ...((baseConfig as any)?.limits || (config as any)?.limits
-      ? { limits: { ...(baseConfig as any)?.limits, ...(config as any)?.limits } }
+    ...((baseConfig as unknown as Record<string, unknown>)?.limits || (config as unknown as Record<string, unknown>)?.limits
+      ? { limits: { ...((baseConfig as unknown as Record<string, unknown>)?.limits as object), ...((config as unknown as Record<string, unknown>)?.limits as object) } }
       : {}),
   } as unknown as ResolvedConfig;
 

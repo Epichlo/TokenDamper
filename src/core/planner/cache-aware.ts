@@ -1,6 +1,7 @@
 import type { ContextItem, OptimizationBudget } from '../model/types';
 import type { TopologyScoreMap } from '../topology/topology-scorer';
 import type { KnapsackItem } from './knapsack';
+import { containsImperativeDirective } from '../constraints/directives';
 
 export interface CacheAwareConfig {
   readonly provider: 'anthropic' | 'openai' | 'generic';
@@ -13,8 +14,6 @@ const DEFAULT_CACHE_CONFIG: CacheAwareConfig = {
   minCacheBlockTokens: 1024,
   prefixPinHorizonTokens: 1024,
 };
-
-const IMPERATIVE_KEYWORD_REGEX = /\b(MUST|NEVER|ONLY IF|DO NOT)\b/;
 
 /**
  * Calculates estimated token count for a context item.
@@ -55,7 +54,7 @@ export function applyCacheAwarePrefixLocking(
     const isPreservedKind = preserveKinds.has(item.kind);
 
     // Rule 3: Constraint items
-    const hasConstraints = scoreObj?.hasConstraints ?? IMPERATIVE_KEYWORD_REGEX.test(item.content);
+    const hasConstraints = scoreObj?.hasConstraints ?? containsImperativeDirective(item.content);
 
     // Rule 4: Prefix horizon pinning (items in early sequence up to prefixPinHorizonTokens)
     let isPrefixHorizon = false;

@@ -28,7 +28,7 @@ describe('Empirical Challenger M2 - CLI & JSON Exporter Stress Testing Suite', (
 
     const exitCode = runCli(
       ['bench', 'test/fixtures/bench', '--report-json', tempReportPath],
-      { stdout: stdout as any, stderr: stderr as any },
+      { stdout: stdout as never, stderr: stderr as never },
     );
 
     expect(exitCode).toBe(0);
@@ -91,7 +91,7 @@ describe('Empirical Challenger M2 - CLI & JSON Exporter Stress Testing Suite', (
 
     const exitCode = runCli(
       ['bench', 'test/fixtures/bench/humaneval-subset.json', '--report-json', customReportPath],
-      { stdout: stdout as any, stderr: stderr as any },
+      { stdout: stdout as never, stderr: stderr as never },
     );
 
     expect(exitCode).toBe(0);
@@ -111,7 +111,7 @@ describe('Empirical Challenger M2 - CLI & JSON Exporter Stress Testing Suite', (
 
     const exitCode = runCli(
       ['bench', 'test/fixtures/bench/codexglue-subset.json', '--report-json', customReportPath],
-      { stdout: stdout as any, stderr: stderr as any },
+      { stdout: stdout as never, stderr: stderr as never },
     );
 
     expect(exitCode).toBe(0);
@@ -130,7 +130,7 @@ describe('Empirical Challenger M2 - CLI & JSON Exporter Stress Testing Suite', (
 
     const exitCode = runCli(
       ['bench', 'test/fixtures/bench/non_existent_dataset.json'],
-      { stdout: stdout as any, stderr: stderr as any },
+      { stdout: stdout as never, stderr: stderr as never },
     );
 
     expect(exitCode).toBe(1);
@@ -145,7 +145,7 @@ describe('Empirical Challenger M2 - CLI & JSON Exporter Stress Testing Suite', (
 
     const exitCode = runCli(
       ['bench', tempCorruptFile],
-      { stdout: stdout as any, stderr: stderr as any },
+      { stdout: stdout as never, stderr: stderr as never },
     );
 
     expect(exitCode).toBe(1);
@@ -159,7 +159,7 @@ describe('Empirical Challenger M2 - CLI & JSON Exporter Stress Testing Suite', (
 
     const exitCode = runCli(
       ['bench', 'test/fixtures/bench', '--quiet', '--report-json', quietReportPath],
-      { stdout: stdout as any, stderr: stderr as any },
+      { stdout: stdout as never, stderr: stderr as never },
     );
 
     expect(exitCode).toBe(0);
@@ -186,7 +186,7 @@ describe('Empirical Challenger M2 - CLI & JSON Exporter Stress Testing Suite', (
         '--risk-tolerance', 'low',
         '--report-json', overrideReportPath,
       ],
-      { stdout: stdout as any, stderr: stderr as any },
+      { stdout: stdout as never, stderr: stderr as never },
     );
 
     expect(exitCode).toBe(0);
@@ -209,7 +209,7 @@ describe('Empirical Challenger M2 - CLI & JSON Exporter Stress Testing Suite', (
       const stderr = new MemoryStream();
       const exitCode = runCli(
         ['bench', 'test/fixtures/bench', '--risk-tolerance', 'ultra_high'],
-        { stdout: stdout as any, stderr: stderr as any },
+        { stdout: stdout as never, stderr: stderr as never },
       );
       expect(exitCode).toBe(1);
       expect(stderr.content).toContain('Invalid value for --risk-tolerance.');
@@ -221,7 +221,7 @@ describe('Empirical Challenger M2 - CLI & JSON Exporter Stress Testing Suite', (
       const stderr = new MemoryStream();
       const exitCode = runCli(
         ['bench', 'test/fixtures/bench', '--target-reduction-ratio', '1.5'],
-        { stdout: stdout as any, stderr: stderr as any },
+        { stdout: stdout as never, stderr: stderr as never },
       );
       expect(exitCode).toBe(1);
       expect(stderr.content).toContain('Invalid value for --target-reduction-ratio.');
@@ -233,7 +233,7 @@ describe('Empirical Challenger M2 - CLI & JSON Exporter Stress Testing Suite', (
       const stderr = new MemoryStream();
       const exitCode = runCli(
         ['bench', 'test/fixtures/bench', '--max-input-tokens', '-50'],
-        { stdout: stdout as any, stderr: stderr as any },
+        { stdout: stdout as never, stderr: stderr as never },
       );
       expect(exitCode).toBe(1);
       expect(stderr.content).toContain('Invalid value for --max-input-tokens.');
@@ -246,7 +246,7 @@ describe('Empirical Challenger M2 - CLI & JSON Exporter Stress Testing Suite', (
 
     const exitCode = runCli(
       ['bench', 'test/fixtures/bench', '--report-json'],
-      { stdout: stdout as any, stderr: stderr as any },
+      { stdout: stdout as never, stderr: stderr as never },
     );
 
     expect(exitCode).toBe(1);

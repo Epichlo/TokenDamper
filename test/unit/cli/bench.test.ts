@@ -34,6 +34,7 @@ describe('CLI Bench Subcommand & Renderer', () => {
         avgLatencyMs: 5.2,
         p95LatencyMs: 8.1,
         syntaxPassRate: 1.0,
+        passAt1Rate: 1.0,
         totalValidationIssues: 0,
       },
       sweepResults: [
@@ -53,6 +54,7 @@ describe('CLI Bench Subcommand & Renderer', () => {
             avgLatencyMs: 5.2,
             p95LatencyMs: 8.1,
             syntaxPassRate: 1.0,
+            passAt1Rate: 1.0,
             totalValidationIssues: 0,
           },
           itemResults: [

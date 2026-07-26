@@ -3,6 +3,7 @@ import type { GitStatusResult } from './git-inspector';
 import { normalizeGitPath } from './git-inspector';
 import type { DependencyGraph } from './dependency-graph';
 import { getShortestGraphDistance } from './dependency-graph';
+import { containsImperativeDirective } from '../constraints/directives';
 
 export interface ItemTopologyScore {
   readonly itemId: string;
@@ -14,8 +15,6 @@ export interface ItemTopologyScore {
 }
 
 export type TopologyScoreMap = ReadonlyMap<string, ItemTopologyScore>;
-
-const IMPERATIVE_KEYWORD_REGEX = /\b(MUST|NEVER|ONLY IF|DO NOT)\b/;
 
 /**
  * Calculates graph distance score S_graph(i).
@@ -74,7 +73,7 @@ function calculateConstraintScore(item: ContextItem): { score: number; hasConstr
   if (item.metadata?.hasConstraints === true) {
     return { score: 25.0, hasConstraints: true };
   }
-  const hasKeywords = IMPERATIVE_KEYWORD_REGEX.test(item.content);
+  const hasKeywords = containsImperativeDirective(item.content);
   if (hasKeywords) {
     return { score: 25.0, hasConstraints: true };
   }

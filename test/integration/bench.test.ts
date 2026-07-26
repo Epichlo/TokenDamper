@@ -189,6 +189,9 @@ describe('TokenDamper Regression Test Suite & Performance Baseline (R5)', () => 
       baseline.thresholds.minSyntaxPassRate,
     );
     expect(report.overallSummary.syntaxPassRate).toBe(1.0);
+    expect(report.overallSummary.passAt1Rate).toBeGreaterThanOrEqual(
+      baseline.thresholds.minSyntaxPassRate,
+    );
   });
 
   it('Test 6: Execute CLI command runCli([\'bench\', \'test/fixtures/bench\', \'--report-json\', tempPath]) and assert exported JSON report matches BenchmarkReport schema and passes all baseline thresholds', () => {
@@ -234,6 +237,7 @@ describe('TokenDamper Regression Test Suite & Performance Baseline (R5)', () => 
     expect(typeof exportedReport.overallSummary.fallbackRate).toBe('number');
     expect(typeof exportedReport.overallSummary.avgLatencyMs).toBe('number');
     expect(typeof exportedReport.overallSummary.syntaxPassRate).toBe('number');
+    expect(typeof exportedReport.overallSummary.passAt1Rate).toBe('number');
     expect(Array.isArray(exportedReport.sweepResults)).toBe(true);
     expect(exportedReport.sweepResults.length).toBeGreaterThan(0);
     expect(exportedReport.environment).toBeDefined();
@@ -248,7 +252,7 @@ describe('TokenDamper Regression Test Suite & Performance Baseline (R5)', () => 
     expect(exportedReport.overallSummary.syntaxPassRate).toBeGreaterThanOrEqual(
       baseline.thresholds.minSyntaxPassRate,
     );
+    expect(exportedReport.overallSummary.passAt1Rate).toBeGreaterThanOrEqual(0);
   });
 });
-
 

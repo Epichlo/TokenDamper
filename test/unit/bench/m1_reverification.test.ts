@@ -4,6 +4,7 @@ import { BenchmarkRunner } from '../../../src/bench/runner';
 import { computeKeySymbolPreservation } from '../../../src/bench/evaluator';
 import { createOptimizationBudget } from '../../../src/core/model/constructors';
 import type { BenchmarkRunnerConfig } from '../../../src/bench/types';
+import type { ResolvedConfig } from '../../../src/core/model/types';
 
 describe('M1 Challenger Re-verification Suite', () => {
   const humanevalFixtures = loadBenchmarkFixtures('humaneval');
@@ -11,7 +12,7 @@ describe('M1 Challenger Re-verification Suite', () => {
   describe('Requirement 1: Partial baseConfig handling', () => {
     it('handles partial baseConfig with budget.maxInputTokens without throwing or fallbacks', () => {
       const runnerConfig: BenchmarkRunnerConfig = {
-        baseConfig: { budget: { maxInputTokens: 500 } } as any,
+        baseConfig: { budget: { maxInputTokens: 500 } } as unknown as ResolvedConfig,
         sweeps: [
           {
             sweepId: 'sweep-partial-budget',
@@ -32,7 +33,7 @@ describe('M1 Challenger Re-verification Suite', () => {
 
     it('handles partial baseConfig with validation object only', () => {
       const runnerConfig: BenchmarkRunnerConfig = {
-        baseConfig: { validation: { minimumConfidence: 0.8 } } as any,
+        baseConfig: { validation: { minimumConfidence: 0.8 } } as unknown as ResolvedConfig,
         sweeps: [
           {
             sweepId: 'sweep-partial-validation',
@@ -48,7 +49,7 @@ describe('M1 Challenger Re-verification Suite', () => {
 
     it('handles empty baseConfig object {}', () => {
       const runnerConfig: BenchmarkRunnerConfig = {
-        baseConfig: {} as any,
+        baseConfig: {} as unknown as ResolvedConfig,
         sweeps: [
           {
             sweepId: 'sweep-empty-config',
@@ -67,7 +68,7 @@ describe('M1 Challenger Re-verification Suite', () => {
       const fixture = humanevalFixtures.fixtures[0]!;
       const budget = createOptimizationBudget({ riskTolerance: 'low' });
 
-      const request = fixtureToOptimizationRequest(fixture, budget, { budget: { maxInputTokens: 300 } } as any);
+      const request = fixtureToOptimizationRequest(fixture, budget, { budget: { maxInputTokens: 300 } } as unknown as ResolvedConfig);
 
       expect(request.config).toBeDefined();
       expect(request.config.appName).toBe('TokenDamper');

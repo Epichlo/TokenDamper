@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { loadBenchmarkFixtures } from '../../../src/bench/fixtures';
 import { BenchmarkRunner, computeMetricSummary } from '../../../src/bench/runner';
 import type { BenchmarkRunnerConfig, FixtureRunResult } from '../../../src/bench/types';
+import type { ResolvedConfig } from '../../../src/core/model/types';
 import { DEFAULT_CONFIG } from '../../../src/config/schema';
 import { createOptimizationBudget } from '../../../src/core/model/constructors';
 
@@ -74,7 +75,7 @@ describe('BenchmarkRunner Harness', () => {
       const sweep = report.sweepResults[0]!;
       expect(sweep.itemResults.length).toBe(fixtureSet.count * 2);
       expect(sweep.summary.totalRuns).toBe(fixtureSet.count * 2);
-    });
+    }, 15000);
 
     it('should throw an error for invalid fixture set', () => {
       // @ts-expect-error Testing invalid input
@@ -91,7 +92,7 @@ describe('BenchmarkRunner Harness', () => {
 
     it('should execute without throwing or falling back when passed a partial baseConfig', () => {
       const partialRunnerConfig = {
-        baseConfig: { budget: { maxInputTokens: 500 } } as any,
+        baseConfig: { budget: { maxInputTokens: 500 } } as unknown as ResolvedConfig,
         sweeps: [
           {
             sweepId: 'sweep-partial-config',
@@ -137,6 +138,11 @@ describe('BenchmarkRunner Harness', () => {
             optimizedAstIssues: [],
             keySymbolPreservationRatio: 1.0,
             tokenSimilarityScore: 0.8,
+            rawExecutionPassed: true,
+            optimizedExecutionPassed: true,
+            executionPassed: true,
+            executionMode: 'python-subprocess',
+            executionNote: 'Python subprocess check completed.',
             overallPassed: true,
           },
         },
@@ -160,6 +166,11 @@ describe('BenchmarkRunner Harness', () => {
             optimizedAstIssues: [{ code: 'SYNTAX_ERR', message: 'Syntax error' }],
             keySymbolPreservationRatio: 0.5,
             tokenSimilarityScore: 0.5,
+            rawExecutionPassed: true,
+            optimizedExecutionPassed: false,
+            executionPassed: false,
+            executionMode: 'python-subprocess',
+            executionNote: 'Python subprocess check failed.',
             overallPassed: false,
           },
         },
@@ -173,6 +184,7 @@ describe('BenchmarkRunner Harness', () => {
       expect(summary.avgLatencyMs).toBe(20); // (10 + 30) / 2
       expect(summary.p95LatencyMs).toBe(30);
       expect(summary.syntaxPassRate).toBe(0.5); // 1 out of 2 valid
+      expect(summary.passAt1Rate).toBe(0.5); // 1 out of 2 passes
       expect(summary.totalValidationIssues).toBe(1);
     });
 
@@ -185,6 +197,7 @@ describe('BenchmarkRunner Harness', () => {
       expect(summary.avgLatencyMs).toBe(0);
       expect(summary.p95LatencyMs).toBe(0);
       expect(summary.syntaxPassRate).toBe(0);
+      expect(summary.passAt1Rate).toBe(0);
       expect(summary.totalValidationIssues).toBe(0);
     });
   });

@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { createContextItem } from '../core/model/constructors';
 import type { OptimizationResult } from '../core/model/types';
 import { validateItemAst } from '../core/validation/ast';
@@ -14,6 +15,18 @@ const KEYWORD_SET = new Set([
   'private', 'protected', 'async', 'await', 'str', 'int', 'float', 'bool',
   'list', 'dict', 'set', 'tuple', 'any', 'string', 'number', 'boolean', 'void',
 ]);
+
+const PYTHON_CHECK_TIMEOUT_MS = 3000;
+
+export interface PythonCheckResult {
+  readonly attempted: boolean;
+  readonly passed: boolean;
+  readonly exitCode: number | null;
+  readonly timedOut: boolean;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly note: string;
+}
 
 export class BenchmarkEvaluator {
   /**
@@ -59,7 +72,22 @@ export class BenchmarkEvaluator {
     );
 
     const syntaxPreserved = !rawAstResult.valid || optAstResult.valid;
-    const overallPassed = syntaxPreserved && keySymbolPreservationRatio >= 0.7;
+    const structuralPassed = syntaxPreserved && keySymbolPreservationRatio >= 0.7;
+    const canExecutePython = fixture.language === 'python' && typeof fixture.testCode === 'string' && fixture.testCode.trim().length > 0;
+
+    const rawExecution = canExecutePython
+      ? executePythonCheck(rawFullCode, fixture.testCode!, fixture.entryPoint)
+      : createStructuralFallbackResult('Python execution skipped: fixture has no Python testCode.');
+    const optimizedExecution = canExecutePython
+      ? executePythonCheck(optimizedFullCode, fixture.testCode!, fixture.entryPoint)
+      : createStructuralFallbackResult('Python execution skipped: fixture has no Python testCode.');
+    const executionMode = rawExecution.attempted && optimizedExecution.attempted ? 'python-subprocess' : 'structural-fallback';
+    const executionPassed = executionMode === 'python-subprocess' && optimizedExecution.passed;
+    const executionNote =
+      executionMode === 'python-subprocess'
+        ? `Python subprocess check completed: raw=${rawExecution.passed ? 'pass' : 'fail'}, optimized=${optimizedExecution.passed ? 'pass' : 'fail'}.`
+        : `Structural fallback used: ${optimizedExecution.note}`;
+    const overallPassed = executionMode === 'python-subprocess' ? executionPassed : structuralPassed;
 
     return Object.freeze({
       fixtureId: fixture.id,
@@ -70,6 +98,11 @@ export class BenchmarkEvaluator {
       optimizedAstIssues: Object.freeze(optAstResult.issues),
       keySymbolPreservationRatio,
       tokenSimilarityScore,
+      rawExecutionPassed: rawExecution.passed,
+      optimizedExecutionPassed: optimizedExecution.passed,
+      executionPassed,
+      executionMode,
+      executionNote,
       overallPassed,
     });
   }
@@ -96,8 +129,8 @@ export class BenchmarkEvaluator {
       evaluations.push(evalResult);
 
 
-      if (evalResult.rawSyntaxValid) rawValidCount++;
-      if (evalResult.optimizedSyntaxValid) optValidCount++;
+      if (evalResult.executionMode === 'python-subprocess' ? evalResult.rawExecutionPassed : evalResult.rawSyntaxValid) rawValidCount++;
+      if (evalResult.overallPassed) optValidCount++;
       sumSymbolRatio += evalResult.keySymbolPreservationRatio;
       sumSimilarity += evalResult.tokenSimilarityScore;
     }
@@ -119,6 +152,54 @@ export class BenchmarkEvaluator {
       evaluations: Object.freeze(evaluations),
     });
   }
+}
+
+/**
+ * Executes generated Python code plus dataset check code in a child process.
+ */
+export function executePythonCheck(code: string, testCode: string, entryPoint?: string): PythonCheckResult {
+  if (process.env.TOKENDAMPER_BENCH_DISABLE_PYTHON === 'true') {
+    return createStructuralFallbackResult('Python execution disabled by TOKENDAMPER_BENCH_DISABLE_PYTHON=true.');
+  }
+
+  const script = buildPythonCheckScript(code, testCode, entryPoint);
+  const candidates = getPythonCommandCandidates(script);
+  let unavailableNotes: string[] = [];
+
+  for (const candidate of candidates) {
+    const result = spawnSync(candidate.command, candidate.args, {
+      encoding: 'utf8',
+      timeout: PYTHON_CHECK_TIMEOUT_MS,
+      windowsHide: true,
+      maxBuffer: 1024 * 1024,
+    });
+
+    if (result.error && isCommandUnavailableError(result.error)) {
+      unavailableNotes.push(`${candidate.command}: ${result.error.message}`);
+      continue;
+    }
+
+    const timedOut = result.error?.name === 'Error' && /timed out/i.test(result.error.message);
+    const status = typeof result.status === 'number' ? result.status : null;
+    const stderr = normalizeProcessOutput(result.stderr);
+    const stdout = normalizeProcessOutput(result.stdout);
+
+    return Object.freeze({
+      attempted: true,
+      passed: status === 0 && !timedOut && !/AssertionError/.test(stderr),
+      exitCode: status,
+      timedOut,
+      stdout,
+      stderr,
+      note: timedOut
+        ? `Python subprocess timed out after ${PYTHON_CHECK_TIMEOUT_MS}ms.`
+        : `Python subprocess exited with code ${status ?? 'unknown'}.`,
+    });
+  }
+
+  return createStructuralFallbackResult(
+    `Python interpreter unavailable; structural/AST fallback used. ${unavailableNotes.join(' | ')}`.trim(),
+  );
 }
 
 /**
@@ -164,6 +245,62 @@ export function computeTokenSimilarity(prompt: string, emittedOutput: string): n
 
   const unionSize = new Set([...promptTokens, ...emittedTokens]).size;
   return unionSize > 0 ? intersectionSize / unionSize : 1.0;
+}
+
+function buildPythonCheckScript(code: string, testCode: string, entryPoint?: string): string {
+  const invocation = entryPoint && /^[A-Za-z_][A-Za-z0-9_]*$/.test(entryPoint)
+    ? `\ncheck(${entryPoint})\n`
+    : '';
+
+  return [
+    'import math',
+    'import re',
+    'import sys',
+    'from typing import *',
+    '',
+    code,
+    '',
+    testCode,
+    invocation,
+  ].join('\n');
+}
+
+function getPythonCommandCandidates(script: string): ReadonlyArray<{ readonly command: string; readonly args: ReadonlyArray<string> }> {
+  if (process.platform === 'win32') {
+    return Object.freeze([
+      { command: 'python', args: Object.freeze(['-c', script]) },
+      { command: 'py', args: Object.freeze(['-3', '-c', script]) },
+      { command: 'python3', args: Object.freeze(['-c', script]) },
+    ]);
+  }
+
+  return Object.freeze([
+    { command: 'python3', args: Object.freeze(['-c', script]) },
+    { command: 'python', args: Object.freeze(['-c', script]) },
+  ]);
+}
+
+function createStructuralFallbackResult(note: string): PythonCheckResult {
+  return Object.freeze({
+    attempted: false,
+    passed: false,
+    exitCode: null,
+    timedOut: false,
+    stdout: '',
+    stderr: '',
+    note,
+  });
+}
+
+function isCommandUnavailableError(error: Error): boolean {
+  return 'code' in error && (error as NodeJS.ErrnoException).code === 'ENOENT';
+}
+
+function normalizeProcessOutput(output: string | Buffer | null | undefined): string {
+  if (output === null || output === undefined) {
+    return '';
+  }
+  return typeof output === 'string' ? output : output.toString('utf8');
 }
 
 function extractKeySymbols(text: string): string[] {

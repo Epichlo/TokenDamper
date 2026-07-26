@@ -15,6 +15,7 @@ describe('Empirical Stress Testing of bench-table-renderer', () => {
       avgLatencyMs: 12.34,
       p95LatencyMs: 45.67,
       syntaxPassRate: 0.98,
+      passAt1Rate: 0.98,
       totalValidationIssues: 2,
     },
     sweepResults: [
@@ -34,6 +35,7 @@ describe('Empirical Stress Testing of bench-table-renderer', () => {
           avgLatencyMs: 12.34,
           p95LatencyMs: 45.67,
           syntaxPassRate: 0.98,
+          passAt1Rate: 0.98,
           totalValidationIssues: 1,
         },
         itemResults: [
@@ -79,10 +81,10 @@ describe('Empirical Stress Testing of bench-table-renderer', () => {
     // Line 1: Header title line (must be strictly 80)
     expect(lines[1]?.length).toBe(80);
     expect(lines[2]?.length).toBe(80);
-    // Table header line (Line 19)
-    expect(lines[19]?.length).toBe(80);
-    // Data row line (Line 21)
-    expect(lines[21]?.length).toBe(80);
+    // Table header line (Line 20)
+    expect(lines[20]?.length).toBe(80);
+    // Data row line (Line 22)
+    expect(lines[22]?.length).toBe(80);
   });
 
   it('stress tests long dataset paths', () => {
@@ -118,6 +120,7 @@ describe('Empirical Stress Testing of bench-table-renderer', () => {
             avgLatencyMs: 12.34,
             p95LatencyMs: 45.67,
             syntaxPassRate: 1.0,
+            passAt1Rate: 1.0,
             totalValidationIssues: 0,
           },
           itemResults: Array.from({ length: 10 }, (_, i) => ({
@@ -156,6 +159,7 @@ describe('Empirical Stress Testing of bench-table-renderer', () => {
         avgLatencyMs: 0,
         p95LatencyMs: 0,
         syntaxPassRate: 0,
+        passAt1Rate: 0,
         totalValidationIssues: 0,
       },
       sweepResults: [],

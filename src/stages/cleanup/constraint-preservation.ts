@@ -1,43 +1,20 @@
 import type { ContextBundle, ContextItem, OptimizationBudget, StageResult } from '../../core/model/types';
 import { createBundleStatistics, createContextItem, createStageResult, freeze, hashContent } from '../../core/model/constructors';
-
-const IMPERATIVE_KEYWORD_REGEX = /\b(MUST|NEVER|ONLY IF|DO NOT)\b/g;
+import { extractImperativeDirectives } from '../../core/constraints/directives';
 
 /**
- * Extracts constraint directive lines containing imperative keywords ('MUST', 'NEVER', 'ONLY IF', 'DO NOT').
+ * Extracts constraint directive sentences or clauses containing imperative keywords.
  */
 export function extractConstraintDirectives(content: string): {
   readonly directives: ReadonlyArray<string>;
   readonly keywords: ReadonlyArray<string>;
 } {
-  const lines = content.split(/\r?\n/);
-  const directives: string[] = [];
-  const keywordsSet = new Set<string>();
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-
-    const matches = Array.from(trimmed.matchAll(IMPERATIVE_KEYWORD_REGEX));
-    if (matches.length > 0) {
-      directives.push(trimmed);
-      for (const m of matches) {
-        if (m[1]) {
-          keywordsSet.add(m[1]);
-        }
-      }
-    }
-  }
-
-  return {
-    directives: Object.freeze(directives),
-    keywords: Object.freeze(Array.from(keywordsSet)),
-  };
+  return extractImperativeDirectives(content);
 }
 
 /**
  * Built-in cleanup stage: `cleanup:constraint-preservation`.
- * Scans context items for imperative keywords ('MUST', 'NEVER', 'ONLY IF', 'DO NOT')
+ * Scans context items for imperative constraint directives
  * and records constraint directives in item metadata.
  */
 export function runConstraintPreservationStage(

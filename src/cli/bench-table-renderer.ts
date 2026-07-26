@@ -55,6 +55,7 @@ export function renderBenchTable(
   const meanLatencyStr = summary.avgLatencyMs.toFixed(2) + ' ms';
   const p95LatencyStr = summary.p95LatencyMs.toFixed(2) + ' ms';
   const syntaxPassStr = (summary.syntaxPassRate * 100).toFixed(1) + '%';
+  const passAt1Str = (summary.passAt1Rate * 100).toFixed(1) + '%';
 
   lines.push(c('OVERALL METRICS SUMMARY', '\x1b[1;33m'));
   lines.push(borderSgl);
@@ -62,11 +63,13 @@ export function renderBenchTable(
   const redColor = summary.avgReductionRatio >= 0.3 ? '\x1b[32m' : '\x1b[33m';
   const fbColor = totalFallbacks === 0 ? '\x1b[32m' : '\x1b[1;31m';
   const synColor = summary.syntaxPassRate >= 0.95 ? '\x1b[32m' : '\x1b[1;31m';
+  const passAt1Color = summary.passAt1Rate >= 0.95 ? '\x1b[32m' : '\x1b[1;31m';
 
   lines.push(`  ${c('Aggregate Token Reduction:', '\x1b[1m')}  ${c(aggReduction, redColor)}`);
   lines.push(`  ${c('Fallback Count & Rate:', '\x1b[1m')}      ${c(`${totalFallbacks} (${fallbackRateStr})`, fbColor)}`);
   lines.push(`  ${c('Mean / P95 Latency:', '\x1b[1m')}         Mean: ${meanLatencyStr} | P95: ${p95LatencyStr}`);
   lines.push(`  ${c('Syntax Pass Rate:', '\x1b[1m')}           ${c(syntaxPassStr, synColor)}`);
+  lines.push(`  ${c('Pass@1 Rate:', '\x1b[1m')}                ${c(passAt1Str, passAt1Color)}`);
   lines.push(`  ${c('Total Validation Issues:', '\x1b[1m')}    ${summary.totalValidationIssues}`);
   lines.push(borderSgl);
 

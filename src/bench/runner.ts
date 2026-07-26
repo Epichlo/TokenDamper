@@ -117,6 +117,7 @@ export function computeMetricSummary(
       avgLatencyMs: 0,
       p95LatencyMs: 0,
       syntaxPassRate: 0,
+      passAt1Rate: 0,
       totalValidationIssues: 0,
     });
   }
@@ -125,6 +126,7 @@ export function computeMetricSummary(
   let fallbackCount = 0;
   let sumLatency = 0;
   let syntaxPassedCount = 0;
+  let passAt1Count = 0;
   let totalValidationIssues = 0;
 
   const latencies: number[] = [];
@@ -140,6 +142,11 @@ export function computeMetricSummary(
     const isValid = item.qualityResult ? item.qualityResult.optimizedSyntaxValid : item.validationPassed;
     if (isValid) {
       syntaxPassedCount++;
+    }
+
+    const passAt1 = item.qualityResult ? item.qualityResult.overallPassed : item.validationPassed;
+    if (passAt1) {
+      passAt1Count++;
     }
 
     totalValidationIssues += item.validationIssues.length;
@@ -158,6 +165,7 @@ export function computeMetricSummary(
     avgLatencyMs: sumLatency / totalRuns,
     p95LatencyMs,
     syntaxPassRate: syntaxPassedCount / totalRuns,
+    passAt1Rate: passAt1Count / totalRuns,
     totalValidationIssues,
   });
 }

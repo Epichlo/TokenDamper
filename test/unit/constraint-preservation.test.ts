@@ -37,6 +37,30 @@ describe('extractConstraintDirectives', () => {
     expect(directives).toHaveLength(0);
     expect(keywords).toHaveLength(0);
   });
+
+  it('extracts natural language constraints case-insensitively', () => {
+    const text = [
+      'General implementation notes should not be preserved as directives.',
+      'Before saving, you must not mutate state in place.',
+      'The parser should be defensive; never return null; return a typed error instead.',
+      'Always make sure to validate user input.',
+      'Proceed only if the caller has provided explicit approval.',
+      'This cleanup is required except when the file is generated.',
+      'Critical security checks stay enabled.',
+    ].join('\n');
+
+    const { directives, keywords } = extractConstraintDirectives(text);
+
+    expect(directives).toEqual([
+      'Before saving, you must not mutate state in place.',
+      'never return null;',
+      'Always make sure to validate user input.',
+      'Proceed only if the caller has provided explicit approval.',
+      'This cleanup is required except when the file is generated.',
+      'Critical security checks stay enabled.',
+    ]);
+    expect(keywords).toEqual(expect.arrayContaining(['must not', 'never', 'Always', 'make sure to', 'only if', 'required', 'except when', 'Critical']));
+  });
 });
 
 describe('runConstraintPreservationStage', () => {
@@ -93,6 +117,42 @@ describe('runConstraintPreservationStage', () => {
     const secondItem = result.bundle.items[1];
     expect(secondItem?.metadata.hasConstraints).toBe(false);
     expect(secondItem?.metadata.directiveCount).toBe(0);
+  });
+
+  it('records natural language constraints in existing metadata schema fields', () => {
+    const item = createContextItem({
+      id: 'item-1',
+      kind: 'prompt',
+      contentType: 'text',
+      content: 'You must not mutate state. Ordinary text. Never return null.',
+      origin: 'prompt',
+      contentHash: 'hash-1',
+      metadata: {},
+    });
+
+    const bundle: ContextBundle = freeze({
+      id: 'bundle-1',
+      bundleId: 'bundle-1',
+      source: 'text',
+      items: freeze([item]),
+      summary: freeze({ itemCount: 1, tokenEstimate: 15, preview: 'preview' }),
+      statistics: freeze({
+        itemCount: 1,
+        contentTypeCounts: freeze({ text: 1, markdown: 0, code: 0, html: 0, json: 0, yaml: 0, logs: 0, unknown: 0 }),
+        kindCounts: freeze({ prompt: 1, file: 0, diff: 0, conversation: 0, note: 0 }),
+        totalCharacters: item.content.length,
+      }),
+      contentHash: 'bundle-1',
+    });
+
+    const result = runConstraintPreservationStage(bundle, createOptimizationBudget({ riskTolerance: 'low' }));
+    const firstItem = result.bundle.items[0];
+
+    expect(result.changed).toBe(true);
+    expect(result.metrics.directivesFound).toBe(2);
+    expect(firstItem?.metadata.hasConstraints).toBe(true);
+    expect(firstItem?.metadata.directiveCount).toBe(2);
+    expect(firstItem?.metadata.constraintDirectives).toBe(JSON.stringify(['You must not mutate state.', 'Never return null.']));
   });
 
   it('returns changed false when item metadata is already up to date', () => {
