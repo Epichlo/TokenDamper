@@ -51,8 +51,19 @@ export class McpStdioServer {
     this.logMessage('MCP stdio server started');
 
     this.input.setEncoding('utf8');
+    const MAX_BUFFER_SIZE = 10 * 1024 * 1024;
     this.input.on('data', (chunk: string) => {
       this.buffer += chunk;
+      if (this.buffer.length > MAX_BUFFER_SIZE) {
+        this.sendResponse({
+          jsonrpc: '2.0',
+          id: null,
+          error: { code: JSON_RPC_ERROR_CODES.PARSE_ERROR, message: 'Buffer limit exceeded: request line too long without newline' },
+        });
+        this.logMessage('Buffer limit exceeded: request line too long without newline');
+        this.buffer = '';
+        return;
+      }
       this.processBuffer();
     });
 

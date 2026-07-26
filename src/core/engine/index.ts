@@ -232,7 +232,7 @@ export function optimize(
       });
     }
 
-    const fallback = resolveFallback(request, validation);
+    const fallback = resolveFallback(request, validation, currentBundle);
     const emittedOutput = fallback.output;
     const trace = buildTrace(request, selectedPlan, stageResults, validation, fallback, emittedOutput, {
       debtScore: debtBreakdown.debtScore,

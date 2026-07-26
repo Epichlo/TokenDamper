@@ -1,6 +1,6 @@
 import { PassThrough } from 'node:stream';
 import { describe, expect, it, beforeEach } from 'vitest';
-import { createMcpServer, MCP_PROTOCOL_VERSION, SERVER_NAME, SERVER_VERSION } from '../../src/adapters/mcp';
+import { createMcpServer, MCP_PROTOCOL_VERSION, SERVER_NAME, SERVER_VERSION, getStoredTrace, clearTraceStore } from '../../src/adapters/mcp';
 import { GatewaySessionStore } from '../../src/gateway/session-store';
 import { TokenHasher } from '../../src/core/hashing/token-hasher';
 import { runCli } from '../../src/cli/main';
@@ -311,5 +311,51 @@ describe('MCP Adapter', () => {
     const stderrMock = new PassThrough();
     const code = runCli(['mcp'], { stdout: stdoutMock, stderr: stderrMock });
     expect(code).toBe(0);
+  });
+
+  it('bounds traceStore to 100 entries and evicts oldest', async () => {
+    const server = createMcpServer({ input, output, log, sessionStore, tokenHasher });
+    server.start();
+    clearTraceStore();
+
+    const requestIds: string[] = [];
+    for (let i = 0; i < 105; i++) {
+      sendRpcRequest(input, {
+        jsonrpc: '2.0',
+        id: `call-${i}`,
+        method: 'tools/call',
+        params: {
+          name: 'optimize_context',
+          arguments: { rawInput: `Input chunk ${i}` },
+        },
+      });
+      const res = (await readRpcResponse(output)) as { result: { content: Array<{ text: string }> } };
+      const parsedText = JSON.parse(res.result.content[0]!.text) as { requestId: string };
+      requestIds.push(parsedText.requestId);
+    }
+    server.stop();
+
+    // Check that we only have 100 entries max.
+    // The first 5 should be evicted.
+    expect(getStoredTrace(requestIds[0]!)).toBeUndefined();
+    expect(getStoredTrace(requestIds[4]!)).toBeUndefined();
+    expect(getStoredTrace(requestIds[5]!)).toBeDefined();
+    expect(getStoredTrace(requestIds[104]!)).toBeDefined();
+  });
+
+  it('rejects input chunk exceeding 10MB buffer size', async () => {
+    const server = createMcpServer({ input, output, log, sessionStore, tokenHasher });
+    server.start();
+
+    const responsePromise = readRpcResponse(output);
+    const largeChunk = 'a'.repeat(10 * 1024 * 1024 + 100);
+    input.write(largeChunk);
+
+    const res = (await responsePromise) as { error?: { code: number; message: string } };
+    expect(res.error).toBeDefined();
+    expect(res.error?.code).toBe(-32700);
+    expect(res.error?.message).toContain('Buffer limit exceeded');
+
+    server.stop();
   });
 });

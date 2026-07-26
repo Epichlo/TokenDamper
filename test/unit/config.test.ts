@@ -102,4 +102,13 @@ describe('config loading', () => {
     expect(config.budget.riskTolerance).toBe('medium');
     expect(config.budget.preserveKinds).toEqual(['prompt', 'file']);
   });
+
+  it('throws a clear message on invalid JSON syntax in config file', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'tokendamper-config-err-'));
+    const configPath = join(cwd, 'tokendamper.config.json');
+
+    writeFileSync(configPath, '{ invalid json }', 'utf8');
+
+    expect(() => loadConfig({ cwd, configPath })).toThrow(/Failed to parse TokenDamper config file at ".*": /);
+  });
 });

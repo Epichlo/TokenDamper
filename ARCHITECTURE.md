@@ -8,40 +8,35 @@ The architecture is frozen. This document describes what must be implemented, no
 
 TokenDamper is a context optimization engine for AI coding assistants.
 
-It takes raw assistant input, normalizes it into a `ContextBundle`, plans a constrained optimization pass with a stateless planner, executes a linear pipeline of built-in stages, validates the result, and emits either the optimized output or the original input via explicit fallback.
-
-The design goals are:
-
-- preserve intent and correctness
-- reduce token usage
-- remain deterministic and testable
-- keep the runtime small and maintainable
+TokenDamper operates in three modes: direct CLI optimization, a local Gateway HTTP proxy, and a Model Context Protocol (MCP) server.
 
 ## Architecture Diagram
 
 ```text
 Raw Input
-  -> Adapter
+  -> Adapter (CLI / Gateway Proxy / MCP)
   -> OptimizationRequest
   -> ContextBundle + OptimizationBudget
-  -> Stateless Planner
+  -> Stateless 0/1 Knapsack Planner
   -> Linear Engine
-      -> Built-in Stages
-      -> Validators
-      -> Fallback if needed
+      -> Session Deduplication (TokenHasher)
+      -> Delta Compression (Myers Diff)
+      -> Workspace Topology Pruning
+  -> Validators (ConfidenceLedger, DebtTracker, DriftTracker)
+  -> Fallback if needed
   -> Final Output
   -> Explainability Trace
 ```
 
 ## Execution Flow
 
-1. The adapter parses raw input into an `OptimizationRequest`.
+1. The adapter (CLI, Gateway Proxy, or MCP) parses raw input into an `OptimizationRequest`.
 2. The engine validates the request and resolves the active config.
-3. The planner produces a single `OptimizationPlan`.
-4. The engine executes the selected built-in stages in order.
-5. Validators check the intermediate and final results.
+3. The planner produces a single `OptimizationPlan` (e.g. 0/1 Knapsack packing).
+4. The engine executes the selected built-in stages in order (e.g., Session Deduplication, Delta Compression, Topology Pruning).
+5. Validators check the intermediate and final results using `ConfidenceLedger`, `DebtTracker`, and `DriftTracker`.
 6. If validation fails or confidence is too low, the engine falls back to the original input.
-7. The adapter formats the final output.
+7. The adapter formats the final output (or returns standard MCP JSON-RPC).
 8. The engine emits a lightweight explainability trace.
 
 The pipeline is linear by design. There is no DAG execution in MVP.
@@ -106,14 +101,34 @@ Builds the lightweight explainability trace.
 ### `src/stages/*`
 
 Contains the built-in stage implementations.
-
 Stages must be deterministic, side-effect free, and built around the frozen core model.
+- `delta-compression`: Implements line-based Myers diff algorithm to transmit only changed lines across turns instead of full file blobs.
+- `session-dedup`: Implements cross-turn deduplication.
+- `topology-pruner`: Implements workspace topology pruning.
+
+### `src/core/hashing` & `src/core/ledger`
+
+Implements the **Compression & Ledger Subsystem**.
+- `TokenHasher`: Generates reversible SHA-256 placeholder hashes (`<BLOCK_HASH>`) and rehydrates them.
+- `ConfidenceLedger`: Tracks block restoration safety scores across conversation turns.
+- `DebtTracker` ($D_k$) & `DriftTracker` ($S_k$): Calculates optimization debt (information loss) and semantic drift (structural deviation).
 
 ### `src/adapters/cli`
 
-Defines the first adapter only.
+Defines the direct CLI adapter. It parses raw input into normalized requests and formats the final output.
 
-It parses raw input into normalized requests and formats the final output.
+### `src/adapters/mcp`
+
+Implements the **MCP Adapter Subsystem**.
+- Stdio JSON-RPC 2.0 transport exposing tools (`optimize_context`, `rehydrate_context`, `get_session_metrics`, `get_optimization_trace`) and resources (`tokendamper://config`, `tokendamper://session/{sessionId}`).
+
+### `src/gateway`
+
+Implements the **Gateway Proxy Subsystem**.
+- Local proxy intercepting Anthropic/OpenAI API requests.
+- Handles upstream streaming backpressure and large payloads.
+- Enforces session authentication (`TOKENDAMPER_GATEWAY_TOKEN`).
+- Manages `GatewaySessionStore` for session-scoped hash tracking.
 
 ### `src/config`
 

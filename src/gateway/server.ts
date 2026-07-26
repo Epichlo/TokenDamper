@@ -19,6 +19,7 @@ export class GatewayServer {
       maxContentEntriesPerSession: config?.maxContentEntriesPerSession ?? 100,
       upstreamOpenAiUrl: config?.upstreamOpenAiUrl,
       upstreamAnthropicUrl: config?.upstreamAnthropicUrl,
+      gatewayToken: config?.gatewayToken,
     };
 
     this.sessionStore = new GatewaySessionStore({
@@ -56,6 +57,9 @@ export class GatewayServer {
 
   public async stop(): Promise<void> {
     return new Promise((res, rej) => {
+      if ('closeAllConnections' in this.server) {
+        this.server.closeAllConnections();
+      }
       this.server.close((err) => {
         if (err) rej(err);
         else res();
@@ -78,12 +82,38 @@ export class GatewayServer {
       return;
     }
 
+    if (this.config.gatewayToken) {
+      const headerToken = req.headers['x-tokendamper-token'];
+      let queryToken: string | null = null;
+      try {
+        const urlObj = new URL(url, `http://${this.config.host}`);
+        queryToken = urlObj.searchParams.get('token');
+      } catch {
+        // Ignore URL parse errors
+      }
+      
+      if (headerToken !== this.config.gatewayToken && queryToken !== this.config.gatewayToken) {
+        res.writeHead(401, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Unauthorized: Invalid or missing gateway token' }));
+        return;
+      }
+    }
+
     let body = '';
+    const MAX_BODY_BYTES = 10 * 1024 * 1024;
+
     req.on('data', (chunk) => {
       body += chunk;
+      if (Buffer.byteLength(body, 'utf8') > MAX_BODY_BYTES) {
+        res.writeHead(413, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Payload Too Large' }));
+        req.destroy();
+      }
     });
 
     req.on('end', async () => {
+      if (req.destroyed) return;
+
       const abortController = new AbortController();
       res.on('close', () => {
         if (!res.writableEnded) {

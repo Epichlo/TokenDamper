@@ -32,12 +32,23 @@ export function runCli(
         ...(parsed.configPath ? { configPath: parsed.configPath } : {}),
         ...(parsed.configOverrides ? { cliOverrides: parsed.configOverrides } : {}),
       });
-      startMcpServer({
+      const server = startMcpServer({
         input: process.stdin,
         output: io.stdout as NodeJS.WritableStream,
         log: io.stderr as NodeJS.WritableStream,
         config,
       });
+
+      const shutdown = () => {
+        server.stop();
+        process.removeListener('SIGINT', shutdown);
+        process.removeListener('SIGTERM', shutdown);
+        process.exit(0);
+      };
+
+      process.on('SIGINT', shutdown);
+      process.on('SIGTERM', shutdown);
+
       return 0;
     }
 

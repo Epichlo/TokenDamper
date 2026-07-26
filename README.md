@@ -1,114 +1,118 @@
 # TokenDamper
 
-TokenDamper is a universal context optimization engine for AI coding assistants.
+TokenDamper is a universal context optimization engine for AI coding assistants. 
 
-It reduces token usage by transforming context before it reaches an LLM, while preserving intent, correctness, and traceability.
+It acts as an intelligent middleware proxy that compresses and deduplicates context before it reaches an LLM, reducing token usage, speeding up responses, and lowering API costs—while guaranteeing correctness and semantics.
 
-## Problem Statement
+## Overview & Features
 
-AI coding assistants consume large and noisy context bundles: prompts, files, diffs, logs, conversations, and web-derived text. A lot of that input is redundant, poorly structured, or irrelevant to the current task. The result is wasted tokens, slower responses, and higher failure rates.
+TokenDamper addresses the problem of large and noisy context bundles (prompts, files, diffs, conversations) sent to LLMs by intelligently optimizing them:
 
-TokenDamper addresses that problem by normalizing incoming context, planning a constrained optimization pass, executing a small set of built-in stages, validating the result, and falling back to the original input when the output is not safe enough to use.
+- **0/1 Knapsack Planning**: Evaluates value-density of context nodes and optimally packs them under strict token budgets.
+- **Cross-turn Session Deduplication**: Tracks LLM conversation state and deduplicates previously seen code blocks using robust SHA-256 caching.
+- **Reversible Token Hashing**: Safely elides repetitive files by injecting `<BLOCK_HASH>` placeholders, recovering them transparently.
+- **Delta Compression**: Compresses modified files using deterministic Myers diff algorithm.
+- **Local Gateway HTTP Proxy**: Intercepts OpenAI/Anthropic API calls transparently with full streaming support.
+- **Model Context Protocol (MCP)**: Out-of-the-box support for the official MCP stdio standard to integrate seamlessly with Claude Desktop and Cursor.
 
-## Vision
+## Installation & Quickstart
 
-TokenDamper should become a reliable, extensible foundation for context optimization across coding assistants without becoming a monolithic prompt compressor.
+To install globally via npm:
+```bash
+npm install -g tokendamper
+```
 
-The project is intentionally conservative:
+For local development setup:
+```bash
+git clone https://github.com/tokendamper/tokendamper.git
+cd tokendamper
+npm install
+npm run build
+```
 
-- preserve meaning before chasing maximum compression
-- keep core behavior deterministic and testable
-- make the architecture stable enough to support future expansion
+## CLI Usage Guide
 
-## Goals
+TokenDamper offers a comprehensive CLI to fit various workflows:
 
-- Reduce token usage without changing user intent
-- Preserve correctness and traceability
-- Keep the runtime deterministic and easy to test
-- Support a small, stable core that contributors can understand
-- Provide a foundation for future assistant integrations and optimization stages
+### 1. Optimize Files Directly
+Quickly compress a prompt or codebase context bundle directly from your terminal.
+```bash
+tokendamper optimize prompt.txt --max-input-tokens 5000
+```
+Or read from stdin:
+```bash
+cat prompt.txt | tokendamper optimize -
+```
 
-## Non-goals
+### 2. Transparent Proxy Wrapper (`exec`)
+Automatically intercept and optimize LLM API calls made by CLI tools like `aider`, `curl`, or Python scripts by wrapping them with `tokendamper exec`:
+```bash
+tokendamper exec -- aider --message "fix the bug"
+```
+*Note: This automatically provisions a local Gateway proxy and sets `OPENAI_BASE_URL` and `ANTHROPIC_BASE_URL` for the child process.*
 
-- Plugins in MVP
-- DAG execution in MVP
-- Embeddings in MVP
-- Strategy generation in MVP
-- Database-backed state in MVP
-- Multi-adapter support in MVP
+### 3. Model Context Protocol (`mcp`)
+Launch the TokenDamper MCP stdio server to provide context optimization tools directly to MCP-compatible clients:
+```bash
+tokendamper mcp
+```
+
+## MCP Integration Setup
+
+TokenDamper exposes optimization tools via the Model Context Protocol (MCP).
+
+**Claude Desktop Configuration**
+Add the following to your `claude_desktop_config.json`:
+```json
+{
+  "mcpServers": {
+    "tokendamper": {
+      "command": "tokendamper",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+**Cursor Configuration**
+In Cursor settings, navigate to the MCP section, add a new server using the command `tokendamper mcp`.
+
+## Environment Variables Reference
+
+TokenDamper behavior can be configured dynamically using environment variables:
+
+| Variable | Description |
+|----------|-------------|
+| `TOKENDAMPER_GATEWAY_TOKEN` | Auth token for gateway proxy requests (auto-generated in `exec` mode). |
+| `TOKENDAMPER_MAX_INPUT_TOKENS` | Hard budget cap on the number of context tokens sent to the LLM. |
+| `TOKENDAMPER_RISK_TOLERANCE` | Sets optimization aggressiveness (`low`, `medium`, `high`). |
+| `TOKENDAMPER_PRESERVE_KINDS` | Comma-separated list of items to never prune (e.g. `prompt,file`). |
+| `TOKENDAMPER_LOG_LEVEL` | Logging verbosity (`debug`, `info`, `warn`, `error`, `silent`). |
+
+## Visual Diff & Trace Flags
+
+TokenDamper provides detailed explainability for how your context was optimized via built-in trace reporters and visual diffs:
+
+- `--diff`: Prints a visual ANSI terminal diff comparing the raw input against the optimized output.
+- `--diff-html <path>`: Generates a beautiful HTML report visualizing exact token elisions and metrics.
+- `--max-debt <0-100>`: Fails validation if optimization debt (information loss score) exceeds this threshold.
+- `--max-drift <0-1>`: Fails validation if semantic drift (structural deviation) exceeds this threshold.
+
+---
 
 ## High-Level Architecture
 
 ```text
 Raw Input
-  -> Adapter
+  -> Adapter (CLI / HTTP Gateway / MCP)
   -> ContextBundle + OptimizationBudget
-  -> Stateless Planner
+  -> Stateless 0/1 Knapsack Planner
   -> Linear Engine
-      -> Built-in Stages
-      -> Validators
-      -> Explicit Fallback if needed
+      -> Topology Pruning & Delta Compression
+      -> AST Validators
+      -> Explicit Fallback (on constraint violation)
   -> Final Output + Explainability Trace
 ```
 
-## Core Concepts
-
-### ContextBundle
-
-The normalized representation of input context. It is immutable and contains ordered context items plus minimal metadata.
-
-### OptimizationBudget
-
-The constraint model that defines how aggressively TokenDamper may optimize, how much latency is allowed, and what must be preserved.
-
-### Planner
-
-A pure, stateless decision component that selects a plan from the bundle, budget, config, and available built-in stages.
-
-### Engine
-
-The orchestrator that executes the selected plan, runs stages, invokes validators, and applies fallback.
-
-### Validators
-
-Checks that determine whether the transformed result is safe enough to emit.
-
-### Fallback
-
-The explicit path back to the original input when the optimized output cannot be trusted.
-
-## MVP Scope
-
-The MVP includes:
-
-- `ContextBundle`
-- `OptimizationBudget`
-- stateless planner
-- linear engine
-- built-in stages only
-- validators
-- explicit fallback to original input
-- lightweight explainability trace
-- offline benchmark fixtures
-
-## Future Roadmap
-
-The long-term architecture is designed to support future expansion, but those extensions are intentionally deferred until the MVP proves the core behavior.
-
-See [ROADMAP.md](./ROADMAP.md) for the frozen implementation roadmap and [ARCHITECTURE.md](./ARCHITECTURE.md) for the canonical system design.
-
-## Build Instructions
-
-The repository is still at the documentation and implementation-contract stage.
-
-Once the implementation lands, the root package scripts will define the supported local build, test, and benchmark commands.
-
-## Contributing
-
-Contributors should read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening a pull request.
-
-Architectural decisions are tracked in [DECISIONS.md](./DECISIONS.md).
-
 ## License
-
 TokenDamper is distributed under the MIT License. See [LICENSE](./LICENSE).

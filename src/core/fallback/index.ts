@@ -1,4 +1,4 @@
-import type { OptimizationRequest, ValidationReport } from '../model';
+import type { OptimizationRequest, ValidationReport, ContextBundle } from '../model';
 
 /**
  * The explicit fallback outcome for the frozen MVP.
@@ -12,11 +12,11 @@ export interface FallbackOutcome {
 /**
  * Resolves the explicit fallback decision for the current request.
  */
-export function resolveFallback(request: OptimizationRequest, validation: ValidationReport): FallbackOutcome {
+export function resolveFallback(request: OptimizationRequest, validation: ValidationReport, currentBundle: ContextBundle): FallbackOutcome {
   if (!validation.shouldFallback) {
     return {
       used: false,
-      output: request.rawInput,
+      output: currentBundle.items.map(i => i.content).join('\n'),
     };
   }
 

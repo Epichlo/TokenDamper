@@ -76,11 +76,15 @@ export class GatewaySessionStore {
 
     for (const block of newBlocks) {
       const hash = typeof block === 'string' ? block : block.hash;
+      
+      session.seenBlockHashes.delete(hash);
       session.seenBlockHashes.add(hash);
+      
       if (typeof block !== 'string') {
         this.storeContent(sessionId, hash, block.content);
       }
     }
+    this.capSeenBlockHashes(session);
 
     return session;
   }
@@ -90,7 +94,9 @@ export class GatewaySessionStore {
    */
   public storeContent(sessionId: string, hash: string, content: string): void {
     const session = this.getOrCreateSession(sessionId);
+    session.seenBlockHashes.delete(hash);
     session.seenBlockHashes.add(hash);
+    this.capSeenBlockHashes(session);
 
     if (session.contentByHash.has(hash)) {
       session.contentByHash.delete(hash);
@@ -196,6 +202,18 @@ export class GatewaySessionStore {
    */
   public clear(): void {
     this.sessions.clear();
+  }
+
+  private capSeenBlockHashes(session: GatewaySession): void {
+    const MAX_SEEN_BLOCK_HASHES = 1000;
+    while (session.seenBlockHashes.size > MAX_SEEN_BLOCK_HASHES) {
+      const oldestHash = session.seenBlockHashes.values().next().value;
+      if (oldestHash !== undefined) {
+        session.seenBlockHashes.delete(oldestHash);
+      } else {
+        break;
+      }
+    }
   }
 }
 

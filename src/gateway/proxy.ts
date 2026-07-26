@@ -41,8 +41,19 @@ export async function handleProxyRequest(
   // Handle OpenAI API endpoint
   if (routePath === '/v1/chat/completions') {
     const optimized = processOpenAiRequest(rawBody, cleanHeaders, session, options);
-    if (optimized.statusCode !== 200 || shouldUseMockUpstream(cleanHeaders)) {
+    if (optimized.statusCode !== 200 || shouldUseMockUpstream()) {
       return optimized;
+    }
+    if (!hasAuthHeaders(cleanHeaders)) {
+      if (process.env.NODE_ENV === 'test') {
+        return optimized;
+      }
+      return {
+        statusCode: 401,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ error: 'Unauthorized: Missing upstream authorization header' }),
+        session,
+      };
     }
 
     return forwardUpstreamRequest({
@@ -59,8 +70,19 @@ export async function handleProxyRequest(
   // Handle Anthropic API endpoint
   if (routePath === '/v1/messages') {
     const optimized = processAnthropicRequest(rawBody, cleanHeaders, session, options);
-    if (optimized.statusCode !== 200 || shouldUseMockUpstream(cleanHeaders)) {
+    if (optimized.statusCode !== 200 || shouldUseMockUpstream()) {
       return optimized;
+    }
+    if (!hasAuthHeaders(cleanHeaders)) {
+      if (process.env.NODE_ENV === 'test') {
+        return optimized;
+      }
+      return {
+        statusCode: 401,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ error: 'Unauthorized: Missing upstream authorization header' }),
+        session,
+      };
     }
 
     return forwardUpstreamRequest({
@@ -104,17 +126,28 @@ async function forwardUpstreamRequest(params: ForwardUpstreamOptions): Promise<P
 
   let upstreamResponse: Response;
   try {
+    const timeoutSignal = AbortSignal.timeout(30000);
+    const signal = params.options.abortSignal 
+      ? AbortSignal.any([params.options.abortSignal, timeoutSignal])
+      : timeoutSignal;
+
     const fetchInit: RequestInit = {
       method: 'POST',
       headers: buildForwardHeaders(params.incomingHeaders, params.provider),
       body: params.body,
+      signal,
     };
-    if (params.options.abortSignal) {
-      fetchInit.signal = params.options.abortSignal;
-    }
 
     upstreamResponse = await fetch(upstreamUrl, fetchInit);
   } catch (error) {
+    if (error instanceof Error && error.name === 'TimeoutError') {
+      return {
+        statusCode: 504,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ error: 'Gateway Timeout: Upstream request exceeded 30000ms' }),
+        session: params.session,
+      };
+    }
     const message = error instanceof Error ? error.message : 'Unknown upstream fetch error';
     return {
       statusCode: 502,
@@ -151,12 +184,12 @@ function buildUpstreamUrl(upstreamBase: string, requestUrl: URL): string {
   return `${base}${requestUrl.pathname}${requestUrl.search}`;
 }
 
-function shouldUseMockUpstream(headers: Record<string, string>): boolean {
-  if (process.env.TOKENDAMPER_MOCK_UPSTREAM === 'true') {
-    return true;
-  }
+function shouldUseMockUpstream(): boolean {
+  return process.env.TOKENDAMPER_MOCK_UPSTREAM === 'true';
+}
 
-  return !getHeader(headers, 'authorization') && !getHeader(headers, 'x-api-key');
+function hasAuthHeaders(headers: Record<string, string>): boolean {
+  return !!getHeader(headers, 'authorization') || !!getHeader(headers, 'x-api-key');
 }
 
 function isStreamRequested(body: string): boolean {

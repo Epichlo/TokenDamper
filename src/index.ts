@@ -10,3 +10,4 @@ export * from './core/trace';
 export * from './core/ledger';
 export * from './bench';
 export * from './cli/bench-table-renderer';
+export * from './adapters/mcp';

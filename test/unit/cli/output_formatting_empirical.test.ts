@@ -5,7 +5,6 @@ import { tmpdir } from 'node:os';
 import { renderTerminalDiff } from '../../../src/cli/diff-renderer';
 import { generateHtmlReport } from '../../../src/cli/html-reporter';
 import { createUnifiedDiff, runDeltaCompressionStage } from '../../../src/stages/compression/delta-compression';
-import { computeLineDiff } from '../../../src/core/utils/myers-diff';
 import {
   createContextBundle,
   createContextItem,
@@ -14,7 +13,7 @@ import {
   freeze,
   hashContent,
 } from '../../../src/core/model/constructors';
-import type { ContextBundle } from '../../../src/core/model/types';
+import type { ContextBundle, OptimizationResult } from '../../../src/core/model/types';
 
 describe('Empirical Verification: Visual Diff & Output Formatting', () => {
   // --------------------------------------------------------------------------
@@ -160,7 +159,7 @@ describe('Empirical Verification: Visual Diff & Output Formatting', () => {
         },
       },
       fallbackUsed: false,
-    } as any);
+    } as unknown as OptimizationResult);
 
     it('generates a valid HTML document with correct CSS classes and structure', () => {
       const html = generateHtmlReport(result, beforeBundle, { title: 'Custom Test Report' });
@@ -215,7 +214,7 @@ describe('Empirical Verification: Visual Diff & Output Formatting', () => {
         },
         validation: { passed: true, confidence: 1.0, issues: [], shouldFallback: false },
         fallbackUsed: false,
-      } as any);
+      } as unknown as OptimizationResult);
 
       const html = generateHtmlReport(unsafeResult, unsafeBefore);
 

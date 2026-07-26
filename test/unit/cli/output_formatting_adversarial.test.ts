@@ -10,7 +10,7 @@ import {
   createOptimizationResult,
   freeze,
 } from '../../../src/core/model/constructors';
-import type { ContextBundle } from '../../../src/core/model/types';
+import type { ContextBundle, OptimizationResult } from '../../../src/core/model/types';
 
 describe('Adversarial Stress Test: Output Formatting, Visual Diffs & Hunking', () => {
   // --------------------------------------------------------------------------
@@ -101,7 +101,7 @@ describe('Adversarial Stress Test: Output Formatting, Visual Diffs & Hunking', (
         },
         validation: { passed: true, confidence: 1.0, issues: [], shouldFallback: false },
         fallbackUsed: false,
-      } as any);
+      } as unknown as OptimizationResult);
 
       const html = generateHtmlReport(xssResult, xssBefore, { title: '"><script>alert(1)</script>' });
 
@@ -137,7 +137,7 @@ describe('Adversarial Stress Test: Output Formatting, Visual Diffs & Hunking', (
         },
         validation: { passed: false, confidence: 0.0, issues: [], shouldFallback: true },
         fallbackUsed: true,
-      } as any);
+      } as unknown as OptimizationResult);
 
       const html = generateHtmlReport(edgeResult, bundle);
 

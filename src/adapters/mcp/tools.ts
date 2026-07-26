@@ -138,6 +138,12 @@ export async function handleToolCall(
 
       const result = optimize(request, { tokenHasher: context.tokenHasher });
       traceStore.set(requestId, result.trace);
+      if (traceStore.size > 100) {
+        const oldestKey = traceStore.keys().next().value;
+        if (oldestKey !== undefined) {
+          traceStore.delete(oldestKey);
+        }
+      }
 
       const responsePayload = {
         requestId,

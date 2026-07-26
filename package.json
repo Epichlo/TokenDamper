@@ -1,8 +1,25 @@
 {
   "name": "tokendamper",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": false,
   "description": "Universal context optimization for AI coding assistants.",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tokendamper/tokendamper.git"
+  },
+  "keywords": [
+    "llm",
+    "context-optimization",
+    "token-reduction",
+    "mcp",
+    "model-context-protocol",
+    "prompt-engineering",
+    "anthropic",
+    "openai"
+  ],
   "license": "MIT",
   "type": "commonjs",
   "main": "dist/src/index.js",
@@ -30,13 +47,14 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "start": "node dist/src/cli/main.js"
+    "start": "node dist/src/cli/main.js",
+    "prepublishOnly": "npm run clean && npm run typecheck && npm run lint && npm run build && npm test"
   },
   "devDependencies": {
+    "@types/node": "^24.3.0",
     "@typescript-eslint/eslint-plugin": "^8.39.0",
     "@typescript-eslint/parser": "^8.39.0",
-    "@types/node": "^24.3.0",
-    "eslint": "^9.33.0",
+    "eslint": "^10.8.0",
     "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.6.2",
     "typescript": "^5.9.2",

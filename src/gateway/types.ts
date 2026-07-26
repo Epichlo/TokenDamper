@@ -46,6 +46,7 @@ export interface GatewayConfig {
   readonly sessionTtlMs: number;
   readonly maxSessions: number;
   readonly maxContentEntriesPerSession?: number | undefined;
+  readonly gatewayToken?: string | undefined;
 }
 
 /**

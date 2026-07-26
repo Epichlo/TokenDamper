@@ -26,7 +26,13 @@ function loadConfigFile(filePath: string): ConfigFileShape | undefined {
   }
 
   const raw = readFileSync(filePath, 'utf8');
-  const parsed: unknown = JSON.parse(raw);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to parse TokenDamper config file at "${filePath}": ${msg}`);
+  }
 
   if (!isConfigFileShape(parsed)) {
     throw new Error(`Invalid TokenDamper config file: ${filePath}`);

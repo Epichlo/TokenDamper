@@ -39,6 +39,26 @@ describe('GatewaySessionStore', () => {
     expect(store.hasBlockHash('session-123', 'hash-unknown')).toBe(false);
   });
 
+  it('bounds seenBlockHashes to 1000 items and evicts oldest', () => {
+    store.getOrCreateSession('session-bounds');
+    const hashes: string[] = [];
+    for (let i = 0; i < 1005; i++) {
+      hashes.push(`hash-${i}`);
+    }
+    
+    store.recordTurn(
+      'session-bounds',
+      { rawTokens: 100, optimizedTokens: 80, tokensSaved: 20, dedupRatio: 0.2, fallbackUsed: false },
+      hashes
+    );
+
+    const updated = store.getOrCreateSession('session-bounds');
+    expect(updated.seenBlockHashes.size).toBe(1000);
+    expect(updated.seenBlockHashes.has('hash-0')).toBe(false);
+    expect(updated.seenBlockHashes.has('hash-4')).toBe(false);
+    expect(updated.seenBlockHashes.has('hash-5')).toBe(true);
+  });
+
   it('stores raw content and retrieves it by full hash, short ref, or elision marker', () => {
     const rawContent = 'Original long context content retained for later rehydration.';
     const contentHash = hashContent({ role: 'user', content: rawContent });
@@ -375,6 +395,46 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.body).toContain('Invalid Anthropic JSON payload');
+  });
+});
+
+describe('GatewayServer Security & Limits', () => {
+  it('rejects requests missing valid gateway token with 401', async () => {
+    const server = new GatewayServer({ port: 0, gatewayToken: 'secret-token' });
+    const port = await server.start();
+
+    try {
+      const protectedResponse = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+        method: 'POST',
+        body: JSON.stringify({ messages: [] }),
+      });
+      expect(protectedResponse.status).toBe(401);
+
+      const validResponse = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'x-tokendamper-token': 'secret-token' },
+        body: JSON.stringify({ messages: [] }),
+      });
+      expect(validResponse.status).not.toBe(401);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('rejects payload exceeding 10MB with 413', async () => {
+    const server = new GatewayServer({ port: 0 });
+    const port = await server.start();
+    
+    try {
+      const largeBody = 'a'.repeat(10 * 1024 * 1024 + 100);
+      const response = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+        method: 'POST',
+        body: largeBody,
+      });
+      expect(response.status).toBe(413);
+    } finally {
+      await server.stop();
+    }
   });
 });
 
