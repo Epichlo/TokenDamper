@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { format as formatCliOutput, parse } from '../adapters/cli';
@@ -492,6 +493,10 @@ function parseBudgetRatio(value: string | undefined): number {
   return parsed;
 }
 
+
 if (require.main === module) {
-  main();
+  const exitCode = runCli(process.argv.slice(2));
+  if (typeof exitCode === 'number') {
+    process.exitCode = exitCode;
+  }
 }
