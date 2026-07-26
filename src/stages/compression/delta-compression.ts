@@ -1,5 +1,6 @@
 import type { ContextBundle, ContextItem, OptimizationBudget, StageResult } from '../../core/model/types';
 import { createBundleStatistics, createContextItem, createStageResult, freeze, hashContent } from '../../core/model/constructors';
+import { computeLineDiff } from '../../core/utils/myers-diff';
 
 export interface DeltaCompressionOptions {
   readonly previousItems?: ReadonlyArray<ContextItem>;
@@ -21,54 +22,11 @@ export function createUnifiedDiff(
   const oldLines = oldText.split(/\r?\n/);
   const newLines = newText.split(/\r?\n/);
 
-  const m = oldLines.length;
-  const n = newLines.length;
-
-  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
-
-  for (let i = 1; i <= m; i++) {
-    const row = dp[i]!;
-    const prevRow = dp[i - 1]!;
-    for (let j = 1; j <= n; j++) {
-      if (oldLines[i - 1] === newLines[j - 1]) {
-        row[j] = prevRow[j - 1]! + 1;
-      } else {
-        row[j] = Math.max(prevRow[j]!, row[j - 1]!);
-      }
-    }
-  }
-
-  let i = m;
-  let j = n;
-  const diffOps: Array<{ op: 'keep' | 'add' | 'delete'; line: string }> = [];
-
-  while (i > 0 || j > 0) {
-    const oldLine = oldLines[i - 1];
-    const newLine = newLines[j - 1];
-    const currRow = dp[i]!;
-    const prevRow = dp[i - 1]!;
-
-    if (i > 0 && j > 0 && oldLine === newLine && oldLine !== undefined) {
-      diffOps.push({ op: 'keep', line: oldLine });
-      i--;
-      j--;
-    } else if (
-      j > 0 &&
-      (i === 0 || currRow[j - 1]! >= prevRow[j]!)
-    ) {
-      if (newLine !== undefined) {
-        diffOps.push({ op: 'add', line: newLine });
-      }
-      j--;
-    } else if (i > 0) {
-      if (oldLine !== undefined) {
-        diffOps.push({ op: 'delete', line: oldLine });
-      }
-      i--;
-    }
-  }
-
-  diffOps.reverse();
+  const lineDiffs = computeLineDiff(oldLines, newLines);
+  const diffOps: Array<{ op: 'keep' | 'add' | 'delete'; line: string }> = lineDiffs.map((d) => ({
+    op: d.type,
+    line: d.line,
+  }));
 
   // Determine which lines are within context range of changes
   const len = diffOps.length;

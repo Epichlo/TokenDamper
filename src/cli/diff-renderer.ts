@@ -1,4 +1,5 @@
 import type { ContextBundle } from '../core/model';
+import { computeLineDiff as sharedComputeLineDiff } from '../core/utils/myers-diff';
 
 export interface DiffRenderOptions {
   readonly color?: boolean; // Default: true
@@ -65,42 +66,35 @@ function extractText(input: ContextBundle | string): string {
 }
 
 function computeLineDiff(a: string[], b: string[]): LineOp[] {
-  const m = a.length;
-  const n = b.length;
-
-  // Compute Longest Common Subsequence DP table
-  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array<number>(n + 1).fill(0));
-
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      if (a[i - 1] === b[j - 1]) {
-        dp[i]![j] = dp[i - 1]![j - 1]! + 1;
-      } else {
-        dp[i]![j] = Math.max(dp[i - 1]![j]!, dp[i]![j - 1]!);
-      }
-    }
-  }
-
-  // Backtrack to generate ops
+  const rawOps = sharedComputeLineDiff(a, b);
   const ops: LineOp[] = [];
-  let i = m;
-  let j = n;
+  let lineNoBefore = 1;
+  let lineNoAfter = 1;
 
-  while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && a[i - 1] === b[j - 1]) {
-      ops.push({ type: 'keep', line: a[i - 1]!, lineNoBefore: i, lineNoAfter: j });
-      i--;
-      j--;
-    } else if (j > 0 && (i === 0 || dp[i]![j - 1]! >= dp[i - 1]![j]!)) {
-      ops.push({ type: 'add', line: b[j - 1]!, lineNoAfter: j });
-      j--;
-    } else if (i > 0 && (j === 0 || dp[i]![j - 1]! < dp[i - 1]![j]!)) {
-      ops.push({ type: 'delete', line: a[i - 1]!, lineNoBefore: i });
-      i--;
+  for (const op of rawOps) {
+    if (op.type === 'keep') {
+      ops.push({
+        type: 'keep',
+        line: op.line,
+        lineNoBefore: lineNoBefore++,
+        lineNoAfter: lineNoAfter++,
+      });
+    } else if (op.type === 'delete') {
+      ops.push({
+        type: 'delete',
+        line: op.line,
+        lineNoBefore: lineNoBefore++,
+      });
+    } else if (op.type === 'add') {
+      ops.push({
+        type: 'add',
+        line: op.line,
+        lineNoAfter: lineNoAfter++,
+      });
     }
   }
 
-  return ops.reverse();
+  return ops;
 }
 
 function renderUnified(ops: LineOp[], contextLines: number, useColor: boolean): string {

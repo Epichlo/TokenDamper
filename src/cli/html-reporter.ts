@@ -1,5 +1,6 @@
 import { writeFileSync } from 'node:fs';
 import type { ContextBundle, OptimizationResult } from '../core/model';
+import { computeLineDiff } from '../core/utils/myers-diff';
 
 export interface HtmlReporterOptions {
   readonly title?: string;
@@ -268,43 +269,28 @@ function renderSvgGauge(ratio: number, color: string): string {
 function renderHtmlDiff(before: string, after: string): string {
   const linesBefore = before.split('\n');
   const linesAfter = after.split('\n');
-  const m = linesBefore.length;
-  const n = linesAfter.length;
-
-  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array<number>(n + 1).fill(0));
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      if (linesBefore[i - 1] === linesAfter[j - 1]) {
-        dp[i]![j] = dp[i - 1]![j - 1]! + 1;
-      } else {
-        dp[i]![j] = Math.max(dp[i - 1]![j]!, dp[i]![j - 1]!);
-      }
-    }
-  }
+  const rawOps = computeLineDiff(linesBefore, linesAfter);
 
   interface Op {
     type: 'keep' | 'add' | 'delete';
     line: string;
-    bNo?: number;
-    aNo?: number;
+    bNo?: number | undefined;
+    aNo?: number | undefined;
   }
+
+  let b = 1;
+  let a = 1;
   const ops: Op[] = [];
-  let i = m;
-  let j = n;
-  while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && linesBefore[i - 1] === linesAfter[j - 1]) {
-      ops.push({ type: 'keep', line: linesBefore[i - 1]!, bNo: i, aNo: j });
-      i--;
-      j--;
-    } else if (j > 0 && (i === 0 || dp[i]![j - 1]! >= dp[i - 1]![j]!)) {
-      ops.push({ type: 'add', line: linesAfter[j - 1]!, aNo: j });
-      j--;
-    } else if (i > 0 && (j === 0 || dp[i]![j - 1]! < dp[i - 1]![j]!)) {
-      ops.push({ type: 'delete', line: linesBefore[i - 1]!, bNo: i });
-      i--;
+
+  for (const item of rawOps) {
+    if (item.type === 'keep') {
+      ops.push({ type: 'keep', line: item.line, bNo: b++, aNo: a++ });
+    } else if (item.type === 'delete') {
+      ops.push({ type: 'delete', line: item.line, bNo: b++, aNo: undefined });
+    } else {
+      ops.push({ type: 'add', line: item.line, bNo: undefined, aNo: a++ });
     }
   }
-  ops.reverse();
 
   const rows: string[] = [];
   for (const op of ops) {
