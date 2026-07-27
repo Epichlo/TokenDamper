@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [v1.0.3] - 2026-07-27
+
+### Fixed
+- **CLI Executable Resolution**: Fixed "command not found" error following global installation (`npm install -g tokendamper`) by updating `"bin"` configuration in `package.json` to explicitly map `"./dist/src/cli/main.js"`.
+- **Shebang & Environment Integrity**: Validated CLI entrypoint shebang (`#!/usr/bin/env node`) to ensure seamless execution on Windows, macOS, and Linux.
+
+### Changed
+- **Version Alignment**: Synced package version, `CLI_ADAPTER_VERSION`, and MCP `SERVER_VERSION` to `1.0.3`.
+
 ## [v1.0.2] - 2026-07-27
 
 ### Fixed

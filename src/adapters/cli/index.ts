@@ -14,7 +14,7 @@ export const CLI_ADAPTER_NAME = 'cli';
 /**
  * The adapter version used by the frozen Milestone 1 CLI integration.
  */
-export const CLI_ADAPTER_VERSION = '1.0.2';
+export const CLI_ADAPTER_VERSION = '1.0.3';
 
 /**
  * Parses raw text input into the normalized optimization request contract.
