@@ -458,7 +458,7 @@ function stableSerialize(value: unknown): string {
     return `{${keys.map((key) => `${JSON.stringify(key)}:${stableSerialize(value[key])}`).join(',')}}`;
   }
 
-  return JSON.stringify(value);
+  return JSON.stringify(value) ?? 'null';
 }
 
 function looksLikeJson(text: string): boolean {

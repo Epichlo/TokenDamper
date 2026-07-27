@@ -242,7 +242,7 @@ export function optimize(
     });
 
     return createOptimizationResult({
-      finalBundle: currentBundle,
+      finalBundle: fallback.used ? request.bundle : currentBundle,
       emittedOutput,
       validation,
       trace,

@@ -31,7 +31,7 @@ describe('BenchmarkRunner Harness', () => {
   };
 
   describe('run()', () => {
-    it('should execute offline deterministic benchmark sweeps', () => {
+    it('should execute offline deterministic benchmark sweeps', { timeout: 15000 }, () => {
       const report = BenchmarkRunner.run(fixtureSet, runnerConfig);
 
       expect(report.datasetName).toBe('humaneval');

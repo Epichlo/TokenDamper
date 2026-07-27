@@ -2,7 +2,7 @@ import type { ContextBundle, ContextItem, OptimizationBudget } from '../model/ty
 import type { GitStatusResult } from './git-inspector';
 import { normalizeGitPath } from './git-inspector';
 import type { DependencyGraph } from './dependency-graph';
-import { getShortestGraphDistance } from './dependency-graph';
+import { computeAllDistances } from './dependency-graph';
 import { containsImperativeDirective } from '../constraints/directives';
 
 export interface ItemTopologyScore {
@@ -100,12 +100,15 @@ export function scoreBundleTopology(
     }
   }
 
+  // Run a single multi-source BFS to compute distances to all reachable nodes
+  const distanceMap = computeAllDistances(graph, sourcePaths);
+
   for (const item of bundle.items) {
     const pathNorm = item.path ? normalizeGitPath(item.path, gitStatus.repoRoot || undefined) : undefined;
 
     let distance = Infinity;
     if (pathNorm) {
-      distance = getShortestGraphDistance(graph, sourcePaths, pathNorm);
+      distance = distanceMap.get(pathNorm) ?? Infinity;
     }
 
     const graphScore = calculateGraphScore(distance);

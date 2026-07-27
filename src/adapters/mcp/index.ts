@@ -17,7 +17,7 @@ import { loadConfig } from '../../config';
 
 export const MCP_PROTOCOL_VERSION = '2024-11-05';
 export const SERVER_NAME = 'tokendamper-mcp';
-export const SERVER_VERSION = '0.1.0';
+export const SERVER_VERSION = '1.0.2';
 
 export interface CreateMcpServerOptions {
   readonly input?: Readable | NodeJS.ReadableStream;

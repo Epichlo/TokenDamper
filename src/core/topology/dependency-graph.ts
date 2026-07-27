@@ -300,54 +300,42 @@ export function buildDependencyGraph(items: ReadonlyArray<ContextItem>): Depende
 }
 
 /**
- * Calculates the shortest path distance (BFS) from any source path in sourcePaths to targetPath.
- * Returns 0 if targetPath is in sourcePaths.
- * Returns Infinity if targetPath is disconnected from sourcePaths.
+ * Computes the shortest path distance (BFS) from any source path in sourcePaths
+ * to ALL reachable nodes in the graph. Runs a single multi-source BFS traversal.
+ *
+ * Returns a Map where keys are normalized paths and values are distances.
+ * Nodes not present in the map are unreachable (distance = Infinity).
+ *
+ * Uses a head-index pointer for O(1) dequeue instead of Array.shift() which is O(V).
  */
-export function getShortestGraphDistance(
+export function computeAllDistances(
   graph: DependencyGraph,
   sourcePaths: ReadonlySet<string>,
-  targetPath: string,
-): number {
-  const normTarget = normalizePath(targetPath);
+): ReadonlyMap<string, number> {
+  const distances = new Map<string, number>();
 
-  // Normalize source paths
-  const normSources = new Set<string>();
-  for (const sp of sourcePaths) {
-    normSources.add(normalizePath(sp));
-  }
-
-  if (normSources.has(normTarget)) {
-    return 0;
-  }
-
-  if (normSources.size === 0) {
-    return Infinity;
-  }
-
-  // BFS starting from all sourcePaths simultaneously
+  // Normalize source paths and seed the BFS queue
   const queue: Array<{ path: string; dist: number }> = [];
-  const visited = new Set<string>();
+  let head = 0;
 
-  for (const src of normSources) {
-    queue.push({ path: src, dist: 0 });
-    visited.add(src);
+  for (const sp of sourcePaths) {
+    const norm = normalizePath(sp);
+    if (!distances.has(norm)) {
+      distances.set(norm, 0);
+      queue.push({ path: norm, dist: 0 });
+    }
   }
 
-  while (queue.length > 0) {
-    const { path: current, dist } = queue.shift()!;
-
-    if (current === normTarget) {
-      return dist;
-    }
+  while (head < queue.length) {
+    const { path: current, dist } = queue[head]!;
+    head++;
 
     // Neighbors via outgoing edges (imports)
     const outgoing = graph.edges.get(current);
     if (outgoing) {
       for (const next of outgoing) {
-        if (!visited.has(next)) {
-          visited.add(next);
-          if (next === normTarget) return dist + 1;
+        if (!distances.has(next)) {
+          distances.set(next, dist + 1);
           queue.push({ path: next, dist: dist + 1 });
         }
       }
@@ -357,14 +345,32 @@ export function getShortestGraphDistance(
     const incoming = graph.reverseEdges.get(current);
     if (incoming) {
       for (const next of incoming) {
-        if (!visited.has(next)) {
-          visited.add(next);
-          if (next === normTarget) return dist + 1;
+        if (!distances.has(next)) {
+          distances.set(next, dist + 1);
           queue.push({ path: next, dist: dist + 1 });
         }
       }
     }
   }
 
-  return Infinity;
+  return distances;
 }
+
+/**
+ * Calculates the shortest path distance (BFS) from any source path in sourcePaths to targetPath.
+ * Returns 0 if targetPath is in sourcePaths.
+ * Returns Infinity if targetPath is disconnected from sourcePaths.
+ *
+ * NOTE: If you need distances for multiple targets, prefer computeAllDistances() to avoid
+ * redundant BFS traversals.
+ */
+export function getShortestGraphDistance(
+  graph: DependencyGraph,
+  sourcePaths: ReadonlySet<string>,
+  targetPath: string,
+): number {
+  const distances = computeAllDistances(graph, sourcePaths);
+  const normTarget = normalizePath(targetPath);
+  return distances.get(normTarget) ?? Infinity;
+}
+
