@@ -19,10 +19,19 @@ export class EnhancedHeuristicTokenizer implements TokenizerAdapter {
     let p = 0;
 
     for (let i = 0; i < c; i++) {
-      const char = text.charAt(i);
-      if (char === ' ' || char === '\t' || char === '\n' || char === '\r') {
+      const charCode = text.charCodeAt(i);
+      
+      // Whitespace: space (32), tab (9), newline (10), carriage return (13)
+      if (charCode === 32 || charCode === 9 || charCode === 10 || charCode === 13) {
         w++;
-      } else if ('{}[]():;,.<>=+-*/!&|^%~$#"\'\\'.includes(char)) {
+      } 
+      // Punctuation and symbols (ASCII 33-47, 58-64, 91-96, 123-126)
+      else if (
+        (charCode >= 33 && charCode <= 47) ||
+        (charCode >= 58 && charCode <= 64) ||
+        (charCode >= 91 && charCode <= 96) ||
+        (charCode >= 123 && charCode <= 126)
+      ) {
         p++;
       }
     }
