@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [v1.1.0] - 2026-07-29
+
+### Added
+- **Config Schema Versioning**: Added `configSchemaVersion: "1.1"` support with automatic legacy migration.
+- **Git Workspace Caching**: Added in-memory TTL caching for `git status` commands, greatly speeding up Git inspections during proxy sessions.
+- **Heuristic Tokenizer**: Replaced the naive character count estimator with an optimized, zero-dependency `EnhancedHeuristicTokenizer`.
+
+### Performance
+- **Tokenizer Speedup**: Optimized the heuristic tokenizer using `charCodeAt` to achieve a 3.5x performance boost.
+
 ## [v1.0.3] - 2026-07-27
 
 ### Fixed
