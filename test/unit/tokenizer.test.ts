@@ -30,7 +30,7 @@ describe('EnhancedHeuristicTokenizer', () => {
 describe('createTiktokenAdapter', () => {
   it('creates an exact adapter', () => {
     const mockEncoder = {
-      encode: (text: string) => [1, 2, 3]
+      encode: (_text: string) => [1, 2, 3]
     };
     const adapter = createTiktokenAdapter(mockEncoder);
     expect(adapter.name).toBe('tiktoken_bpe');

@@ -48,7 +48,7 @@ export default EnhancedHeuristicTokenizer;
  * Exact 1,024-token prompt-cache boundary injection (in v1.3.0) requires isExact === true;
  * otherwise, boundary placement operates in Best-Effort Approximate Mode.
  */
-export function createTiktokenAdapter(encoderInstance: any): TokenizerAdapter {
+export function createTiktokenAdapter(encoderInstance: { encode: (text: string) => Uint32Array | number[] }): TokenizerAdapter {
   return {
     name: 'tiktoken_bpe',
     isExact: true,

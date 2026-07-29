@@ -38,6 +38,7 @@ function loadConfigFile(filePath: string): ConfigFileShape | undefined {
     throw new Error(`Invalid TokenDamper config file: ${filePath}`);
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const p = parsed as any;
   if (!p.configSchemaVersion || p.configSchemaVersion === '1.0') {
     p.configSchemaVersion = '1.1';
@@ -48,7 +49,6 @@ function loadConfigFile(filePath: string): ConfigFileShape | undefined {
     p.budget.riskTolerance = p.budget.riskTolerance ?? 'low';
     p.budget.preserveKinds = p.budget.preserveKinds ?? [];
     
-    // eslint-disable-next-line no-console
     console.debug('[Config] Migrated configSchemaVersion from legacy to 1.1.');
   }
 

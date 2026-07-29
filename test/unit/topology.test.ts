@@ -40,9 +40,7 @@ describe('git-inspector', () => {
       clearGitWorkspaceCache();
       const root = path.resolve(__dirname, '../..');
       
-      const start1 = performance.now();
       const result1 = inspectGitWorkspace(root);
-      const time1 = performance.now() - start1;
 
       const start2 = performance.now();
       const result2 = inspectGitWorkspace(root);
@@ -53,9 +51,7 @@ describe('git-inspector', () => {
 
       // Cache clear works
       clearGitWorkspaceCache();
-      const start3 = performance.now();
       const result3 = inspectGitWorkspace(root);
-      const time3 = performance.now() - start3;
       expect(result3).not.toBe(result1); // Different object
     });
   });
