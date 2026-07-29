@@ -115,4 +115,10 @@ Raw Input
 ```
 
 ## License
-TokenDamper is distributed under the MIT License. See [LICENSE](./LICENSE).
+TokenDamper is now licensed under the Mozilla Public License 2.0 (MPL-2.0). See [LICENSE](./LICENSE).
+
+## Copyright Notice
+Copyright (c) 2026 Ojas Sugur. All rights reserved.
+
+## Trademark Notice
+'TokenDamper' and its associated logos are trademarks of Ojas Sugur. You are free to fork, integrate, and modify the code under the terms of the MPL-2.0 license. However, you may not distribute, market, or publish your derivative works using the name 'TokenDamper' or imply any official endorsement without prior written permission.
