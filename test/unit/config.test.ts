@@ -111,4 +111,29 @@ describe('config loading', () => {
 
     expect(() => loadConfig({ cwd, configPath })).toThrow(/Failed to parse TokenDamper config file at ".*": /);
   });
+
+  it('migrates legacy config to schema version 1.1', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'tokendamper-legacy-'));
+    const configPath = join(cwd, 'tokendamper.config.json');
+
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        app: {
+          name: 'LegacyApp',
+          version: '0.1.0',
+        },
+      }),
+      'utf8',
+    );
+
+    const config = loadConfig({ cwd, configPath });
+
+    expect(config.configSchemaVersion).toBe('1.1');
+    expect(config.appVersion).toBe('0.1.0');
+    expect(config.appName).toBe('LegacyApp');
+    expect(config.planner.defaultMode).toBe('pass_through');
+    expect(config.budget.targetReductionRatio).toBe(0);
+    expect(config.budget.riskTolerance).toBe('low');
+  });
 });

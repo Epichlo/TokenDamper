@@ -10,6 +10,18 @@ export interface GitStatusResult {
   readonly recentCommitFiles: ReadonlyMap<string, number>; // path -> commit age (0 = latest commit)
 }
 
+interface GitCacheEntry {
+  result: GitStatusResult;
+  timestamp: number;
+  targetRepoRoot: string;
+}
+
+let globalGitCache: GitCacheEntry | null = null;
+
+export function clearGitWorkspaceCache(): void {
+  globalGitCache = null;
+}
+
 /**
  * Normalizes file paths to POSIX style (forward slashes) relative to repository root.
  */
@@ -30,7 +42,10 @@ export function normalizeGitPath(filePath: string, repoRoot?: string): string {
  * If git is not installed or the directory is not a git repository,
  * returns a safe default GitStatusResult with isGitRepo = false.
  */
-export function inspectGitWorkspace(workspaceRoot?: string): GitStatusResult {
+export function inspectGitWorkspace(
+  workspaceRoot?: string,
+  options?: { forceRefresh?: boolean; ttlMs?: number }
+): GitStatusResult {
   const defaultResult: GitStatusResult = {
     isGitRepo: false,
     repoRoot: null,
@@ -42,6 +57,17 @@ export function inspectGitWorkspace(workspaceRoot?: string): GitStatusResult {
   };
 
   const cwd = workspaceRoot || process.cwd();
+  const targetRepoRoot = cwd.replace(/\\/g, '/');
+  const ttlMs = options?.ttlMs ?? 2000;
+  const t_now = performance.now();
+
+  if (!options?.forceRefresh && globalGitCache) {
+    const deltaT = t_now - globalGitCache.timestamp;
+    const isCacheValid = (deltaT < ttlMs) && (globalGitCache.targetRepoRoot === targetRepoRoot);
+    if (isCacheValid) {
+      return globalGitCache.result;
+    }
+  }
 
   try {
     // 1. Get repository root
@@ -132,7 +158,7 @@ export function inspectGitWorkspace(workspaceRoot?: string): GitStatusResult {
       // Ignore git log errors
     }
 
-    return {
+    const result = {
       isGitRepo: true,
       repoRoot,
       modifiedFiles,
@@ -141,6 +167,14 @@ export function inspectGitWorkspace(workspaceRoot?: string): GitStatusResult {
       allDirtyFiles,
       recentCommitFiles,
     };
+
+    globalGitCache = {
+      result,
+      timestamp: performance.now(),
+      targetRepoRoot,
+    };
+
+    return result;
   } catch {
     return defaultResult;
   }

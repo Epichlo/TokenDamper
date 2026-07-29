@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as path from 'path';
-import { inspectGitWorkspace, normalizeGitPath } from '../../src/core/topology/git-inspector';
+import { inspectGitWorkspace, normalizeGitPath, clearGitWorkspaceCache } from '../../src/core/topology/git-inspector';
 import {
   parseTsJsImports,
   parsePythonImports,
@@ -33,6 +33,31 @@ describe('git-inspector', () => {
     expect(result.isGitRepo).toBe(false);
     expect(result.repoRoot).toBeNull();
     expect(result.allDirtyFiles.size).toBe(0);
+  });
+
+  describe('cache behavior', () => {
+    it('caches subsequent calls to inspectGitWorkspace', () => {
+      clearGitWorkspaceCache();
+      const root = path.resolve(__dirname, '../..');
+      
+      const start1 = performance.now();
+      const result1 = inspectGitWorkspace(root);
+      const time1 = performance.now() - start1;
+
+      const start2 = performance.now();
+      const result2 = inspectGitWorkspace(root);
+      const time2 = performance.now() - start2;
+
+      expect(result2).toBe(result1); // Reference equality means cache hit
+      expect(time2).toBeLessThan(5); // Fast return (< 1ms usually, 5ms upper bound)
+
+      // Cache clear works
+      clearGitWorkspaceCache();
+      const start3 = performance.now();
+      const result3 = inspectGitWorkspace(root);
+      const time3 = performance.now() - start3;
+      expect(result3).not.toBe(result1); // Different object
+    });
   });
 });
 

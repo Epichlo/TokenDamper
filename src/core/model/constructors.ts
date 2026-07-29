@@ -15,6 +15,7 @@ import type {
   StageResult,
   ValidationReport,
 } from './types';
+import EnhancedHeuristicTokenizer, { type TokenizerAdapter } from '../hashing/tokenizer';
 
 /**
  * The normalized source kind used when parsing CLI input.
@@ -39,8 +40,9 @@ export function createOptimizationRequest(
   rawInput: string,
   config: ResolvedConfig,
   options: CreateRequestOptions,
+  tokenizer: TokenizerAdapter = new EnhancedHeuristicTokenizer(),
 ): OptimizationRequest {
-  const bundle = createContextBundle(rawInput, options.source, options.sourcePath);
+  const bundle = createContextBundle(rawInput, options.source, options.sourcePath, tokenizer);
 
   return freeze({
     requestId: options.requestId,
@@ -60,6 +62,7 @@ export function createContextBundle(
   rawInput: string,
   source: NormalizedInputSource,
   sourcePath?: string,
+  tokenizer: TokenizerAdapter = new EnhancedHeuristicTokenizer(),
 ): ContextBundle {
   const contentType = classifyContent(rawInput, source, sourcePath);
   const kind: ContextItemKind = source === 'file' ? 'file' : 'prompt';
@@ -102,7 +105,7 @@ export function createContextBundle(
     items,
     summary: {
       itemCount: items.length,
-      tokenEstimate: estimateTokens(rawInput),
+      tokenEstimate: estimateTokens(rawInput, tokenizer),
       preview,
     },
     statistics,
@@ -116,6 +119,7 @@ export function createContextBundle(
 export function createBundleFromItems(
   items: ReadonlyArray<ContextItem>,
   source: ContextSource = 'text',
+  tokenizer: TokenizerAdapter = new EnhancedHeuristicTokenizer(),
 ): ContextBundle {
   const statistics = createBundleStatistics(items);
   const bundleHash = hashContent({
@@ -124,7 +128,7 @@ export function createBundleFromItems(
     statistics,
   });
   const rawCombined = items.map((i) => i.content).join('\n');
-  const tokenEstimate = Math.max(0, Math.ceil(rawCombined.length / 4));
+  const tokenEstimate = Math.max(0, estimateTokens(rawCombined, tokenizer));
 
   return freeze({
     id: bundleHash,
@@ -436,12 +440,12 @@ export function hashContent(value: unknown): string {
   return createHash('sha256').update(serialized).digest('hex');
 }
 
-function estimateTokens(text: string): number {
+function estimateTokens(text: string, tokenizer: TokenizerAdapter = new EnhancedHeuristicTokenizer()): number {
   if (text.length === 0) {
     return 0;
   }
 
-  return Math.max(1, Math.ceil(text.length / 4));
+  return tokenizer.countTokens(text);
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

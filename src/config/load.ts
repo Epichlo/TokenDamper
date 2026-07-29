@@ -38,7 +38,21 @@ function loadConfigFile(filePath: string): ConfigFileShape | undefined {
     throw new Error(`Invalid TokenDamper config file: ${filePath}`);
   }
 
-  return parsed;
+  const p = parsed as any;
+  if (!p.configSchemaVersion || p.configSchemaVersion === '1.0') {
+    p.configSchemaVersion = '1.1';
+    p.planner = p.planner || {};
+    p.planner.defaultMode = p.planner.defaultMode ?? 'pass_through';
+    p.budget = p.budget || {};
+    p.budget.targetReductionRatio = p.budget.targetReductionRatio ?? 0;
+    p.budget.riskTolerance = p.budget.riskTolerance ?? 'low';
+    p.budget.preserveKinds = p.budget.preserveKinds ?? [];
+    
+    // eslint-disable-next-line no-console
+    console.debug('[Config] Migrated configSchemaVersion from legacy to 1.1.');
+  }
+
+  return parsed as ConfigFileShape;
 }
 
 function applyFileConfig(base: TokenDamperConfig, fileConfig: ConfigFileShape | undefined): TokenDamperConfig {
@@ -48,6 +62,7 @@ function applyFileConfig(base: TokenDamperConfig, fileConfig: ConfigFileShape | 
 
   return freeze({
     ...base,
+    configSchemaVersion: fileConfig.configSchemaVersion ?? base.configSchemaVersion,
     appName: fileConfig.app?.name ?? base.appName,
     appVersion: fileConfig.app?.version ?? base.appVersion,
     appMode: fileConfig.app?.mode ?? base.appMode,

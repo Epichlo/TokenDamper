@@ -1,10 +1,12 @@
 import type { ContextBundle, ContextItem, OptimizationBudget, StageResult } from '../../core/model/types';
 import { createBundleStatistics, createContextItem, createStageResult, freeze, hashContent } from '../../core/model/constructors';
 import { TokenHasher } from '../../core/hashing/token-hasher';
+import EnhancedHeuristicTokenizer, { type TokenizerAdapter } from '../../core/hashing/tokenizer';
 
 export interface TokenHashingStageOptions {
   readonly tokenHasher?: TokenHasher;
   readonly minContentLength?: number;
+  readonly tokenizer?: TokenizerAdapter;
 }
 
 /**
@@ -19,6 +21,7 @@ export function runTokenHashingStage(
   const stageId = 'compression:token-hashing';
   const hasher = options?.tokenHasher ?? new TokenHasher();
   const minContentLength = options?.minContentLength ?? 40;
+  const tokenizer = options?.tokenizer ?? new EnhancedHeuristicTokenizer();
 
   const preserveKinds = new Set(budget.preserveKinds);
   let changed = false;
@@ -110,7 +113,7 @@ export function runTokenHashingStage(
   });
 
   const rawCombined = newItems.map((i) => i.content).join('\n');
-  const tokenEstimate = Math.max(1, Math.ceil(rawCombined.length / 4));
+  const tokenEstimate = Math.max(1, tokenizer.countTokens(rawCombined));
 
   const newBundle: ContextBundle = freeze({
     id: bundleHash,
@@ -126,7 +129,7 @@ export function runTokenHashingStage(
     contentHash: bundleHash,
   });
 
-  const tokenEstimateSaved = Math.max(0, Math.ceil(bytesSaved / 4));
+  const tokenEstimateSaved = Math.max(0, bundle.summary.tokenEstimate - tokenEstimate);
 
   return createStageResult({
     stageId,

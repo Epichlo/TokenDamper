@@ -11,6 +11,7 @@ import type {
  * The serialized configuration shape accepted from disk.
  */
 export interface ConfigFileShape {
+  readonly configSchemaVersion?: string;
   readonly app?: {
     readonly name?: string;
     readonly version?: string;
@@ -54,4 +55,6 @@ export interface LoadConfigOptions {
 /**
  * The fully resolved configuration returned by the loader.
  */
-export type TokenDamperConfig = ResolvedConfig;
+export type TokenDamperConfig = ResolvedConfig & {
+  readonly configSchemaVersion?: string;
+};

@@ -8,8 +8,9 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/tokendamper/tokendamper.git"
+    "url": "https://github.com/Epichlo/TokenDamper.git"
   },
+  "homepage": "https://github.com/Epichlo/TokenDamper",
   "keywords": [
     "llm",
     "context-optimization",

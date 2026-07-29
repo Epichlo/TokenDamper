@@ -2,6 +2,7 @@ import type { ContextItem, OptimizationBudget } from '../model/types';
 import type { TopologyScoreMap } from '../topology/topology-scorer';
 import type { KnapsackItem } from './knapsack';
 import { containsImperativeDirective } from '../constraints/directives';
+import EnhancedHeuristicTokenizer, { type TokenizerAdapter } from '../hashing/tokenizer';
 
 export interface CacheAwareConfig {
   readonly provider: 'anthropic' | 'openai' | 'generic';
@@ -18,8 +19,8 @@ const DEFAULT_CACHE_CONFIG: CacheAwareConfig = {
 /**
  * Calculates estimated token count for a context item.
  */
-function estimateItemTokens(item: ContextItem): number {
-  return Math.max(1, Math.ceil(item.content.length / 4));
+function estimateItemTokens(item: ContextItem, tokenizer: TokenizerAdapter = new EnhancedHeuristicTokenizer()): number {
+  return tokenizer.countTokens(item.content);
 }
 
 /**
@@ -31,6 +32,7 @@ export function applyCacheAwarePrefixLocking(
   scores: TopologyScoreMap,
   budget: OptimizationBudget,
   config?: Partial<CacheAwareConfig>,
+  tokenizer: TokenizerAdapter = new EnhancedHeuristicTokenizer(),
 ): ReadonlyArray<KnapsackItem> {
   const mergedConfig: CacheAwareConfig = {
     ...DEFAULT_CACHE_CONFIG,
@@ -43,7 +45,7 @@ export function applyCacheAwarePrefixLocking(
   let accumulatedPrefixTokens = 0;
 
   for (const item of items) {
-    const weight = estimateItemTokens(item);
+    const weight = estimateItemTokens(item, tokenizer);
     const scoreObj = scores.get(item.id);
     const value = scoreObj ? scoreObj.score : 10.0;
 
@@ -87,8 +89,9 @@ export function getCachePinnedItemIds(
   scores: TopologyScoreMap,
   budget: OptimizationBudget,
   config?: Partial<CacheAwareConfig>,
+  tokenizer: TokenizerAdapter = new EnhancedHeuristicTokenizer(),
 ): ReadonlySet<string> {
-  const knapsackItems = applyCacheAwarePrefixLocking(items, scores, budget, config);
+  const knapsackItems = applyCacheAwarePrefixLocking(items, scores, budget, config, tokenizer);
   const pinnedIds = new Set<string>();
 
   for (const item of knapsackItems) {

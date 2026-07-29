@@ -24,8 +24,8 @@ npm install -g tokendamper
 
 For local development setup:
 ```bash
-git clone https://github.com/tokendamper/tokendamper.git
-cd tokendamper
+git clone https://github.com/Epichlo/TokenDamper.git
+cd TokenDamper
 npm install
 npm run build
 ```

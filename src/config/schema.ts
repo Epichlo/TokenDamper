@@ -5,6 +5,7 @@ import type { ConfigFileShape, TokenDamperConfig } from './types';
  * The default resolved configuration used when no overrides are present.
  */
 export const DEFAULT_CONFIG: TokenDamperConfig = {
+  configSchemaVersion: '1.1',
   appName: 'TokenDamper',
   appVersion: '0.1.0',
   appMode: 'optimize',
@@ -37,11 +38,12 @@ export function isConfigFileShape(value: unknown): value is ConfigFileShape {
 
   const file = value as ConfigFileShape;
   return (
-    file.app === undefined ||
-    (isPlainObject(file.app) &&
-      (file.app.name === undefined || typeof file.app.name === 'string') &&
-      (file.app.version === undefined || typeof file.app.version === 'string') &&
-      (file.app.mode === undefined || isAppMode(file.app.mode))) &&
+    (file.configSchemaVersion === undefined || typeof file.configSchemaVersion === 'string') &&
+    (file.app === undefined ||
+      (isPlainObject(file.app) &&
+        (file.app.name === undefined || typeof file.app.name === 'string') &&
+        (file.app.version === undefined || typeof file.app.version === 'string') &&
+        (file.app.mode === undefined || isAppMode(file.app.mode)))) &&
     (file.traceOutput === undefined || isTraceOutput(file.traceOutput)) &&
     (file.planner === undefined ||
       (isPlainObject(file.planner) &&
