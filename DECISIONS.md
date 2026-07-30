@@ -407,3 +407,45 @@ Explainability is required for a system that rewrites context before it reaches 
 ### Future Revisit Conditions
 
 Revisit only if trace structure becomes too expensive or if a more formal observability system becomes necessary later.
+
+## 13. Why Deterministic AST/Hash Reduction over Neural Token Dropping?
+
+### Decision
+
+TokenDamper uses deterministic AST-validated, hash-based compression instead of neural or statistical token dropping (e.g., LLMLingua-2).
+
+### Context
+
+Neural token compressors drop tokens based on entropy probabilities, achieving high raw compression ratios but corrupting structured code and JSON tool schemas. In benchmarks like BFCL, these models degrade tool execution accuracy significantly (20%–27%) due to dropped required brackets, quotes, or keys.
+
+### Rationale
+
+Deterministic, AST-validated, hash-based approaches guarantee 100% syntax safety and reversible state restoration with zero neural or statistical hallucination risks.
+
+## 14. Cache-First Prefix Stabilization Protocol
+
+### Decision
+
+TokenDamper enforces strict prefix stabilization rules, including pinning system prompts and tool schemas at index 0, and respecting 1,024-token cache block quantizations.
+
+### Context
+
+Major LLM providers (Anthropic Claude, OpenAI GPT-4o) employ strict positional prefix KV-caching. A single byte change in the early prompt prefix invalidates the entire downstream cached KV state, forcing full input re-parsing.
+
+### Rationale
+
+Modifying an early-turn prompt prefix is economically negative unless the compression slashes >90% of the prefix size. By keeping tool schemas and system prompts immutable and operating strictly after the stable prefix horizon, we maximize prompt cache hit rates and reduce API costs.
+
+## 15. Zero-Code Local Proxy and MCP Server First Distribution Strategy
+
+### Decision
+
+TokenDamper prioritizes zero-code local proxy wrappers (`tokendamper exec`) and native MCP servers as its primary distribution and integration mechanisms, rather than complex application SDKs.
+
+### Context
+
+Developers overwhelmingly prefer transparent integration. Connecting multiple Model Context Protocol (MCP) servers can inject 10,000–30,000 input tokens of static JSON tool definitions into every single turn before user messages are processed, creating huge overhead.
+
+### Rationale
+
+A local proxy and MCP approach allows TokenDamper to deduplicate static schemas, track token usage invisibly, and implement circuit breakers without requiring users to alter their application code.

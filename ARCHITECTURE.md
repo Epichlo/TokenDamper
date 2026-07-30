@@ -65,6 +65,8 @@ Selects a single plan from the request, budget, config, and available built-in s
 
 The planner is stateless and deterministic.
 
+**Cache-Aligned 0/1 Knapsack Allocation:** Candidate context item weights are evaluated in 1,024-token cache block quantizations to align with provider cache structures. The planner ensures that items selected by the 0/1 Knapsack solver preserve the exact ordering of the pinned prefix horizon, maximizing prompt cache hit rates on Anthropic and OpenAI APIs.
+
 ### `src/core/engine`
 
 Orchestrates the full optimization flow.
@@ -112,6 +114,8 @@ Implements the **Compression & Ledger Subsystem**.
 - `TokenHasher`: Generates reversible SHA-256 placeholder hashes (`<BLOCK_HASH>`) and rehydrates them.
 - `ConfidenceLedger`: Tracks block restoration safety scores across conversation turns.
 - `DebtTracker` ($D_k$) & `DriftTracker` ($S_k$): Calculates optimization debt (information loss) and semantic drift (structural deviation).
+  - **Agent Loop Circuit Breaker:** Integrates with `DebtTracker` to track turn-over-turn similarity and tool call repetition. If $N \ge 5$ consecutive turns show near-identical tool output signatures with high token volume, it triggers a `LOOP_REPETITION_WARNING` or throttles execution to prevent billing runaway.
+  - **Atom-Aware Semantic Drift Tracking:** `DriftTracker` evaluates **Critical Atom Recall** (preserving imperative directives like `TD_PRESERVE`, file paths, line numbers, API URLs). The drift formula is $S_k = 1.0 - \left( w_{\text{AST}} \cdot R_{\text{AST}} + w_{\text{struct}} \cdot R_{\text{struct}} + w_{\text{atom}} \cdot R_{\text{atom}} \right)$. A hard threshold of $S_k \le 0.40$ triggers an explicit fallback to `rawInput`.
 
 ### `src/adapters/cli`
 
@@ -121,6 +125,7 @@ Defines the direct CLI adapter. It parses raw input into normalized requests and
 
 Implements the **MCP Adapter Subsystem**.
 - Stdio JSON-RPC 2.0 transport exposing tools (`optimize_context`, `rehydrate_context`, `get_session_metrics`, `get_optimization_trace`) and resources (`tokendamper://config`, `tokendamper://session/{sessionId}`).
+- **MCP Schema Pinning Layer:** Converts tool definitions into deterministic, sorted JSON structures at prompt position 0. Assigns content-addressed hashes to MCP tool suites, replacing repetitive static schemas across multi-turn sessions with deterministic schema anchors that preserve 1,024-token cache boundaries.
 
 ### `src/gateway`
 
@@ -141,6 +146,14 @@ Process entrypoint and command wiring.
 ### `src/bench`
 
 Offline benchmark harness and fixture runner.
+
+## Provider Cache Prefix Invalidation Rules
+
+To maximize economic viability and cache hit rates on providers like Anthropic and OpenAI:
+
+- **Immutable System Prompt & Tool Pinning:** The root system prompt and MCP tool definitions must remain bitwise identical at index 0. Modifying an early-turn prompt prefix is economically negative unless the compression slashes **>90%** of the prefix size, due to lost cache discounts.
+- **1,024-Token Cache-Aligned Prefix Horizon:** All dynamic modifications (delta diffs, token hashing) must occur strictly *after* the stable prefix horizon. Provider caches rely on strict positional prefix KV-caching matching blocks of 1,024 tokens.
+- **Invariant Placeholders:** Unchanging content should use invariant content-addressed placeholders (`<BLOCK_HASH:sha256:12char>`) to preserve cache alignment across multi-turn interactions.
 
 ## Import Rules
 

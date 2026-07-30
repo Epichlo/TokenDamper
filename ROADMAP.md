@@ -160,6 +160,22 @@ Update `TOOL_DEFINITIONS` in `src/adapters/mcp/tools.ts` — this matches the to
 | v1.3.0 | Folding & cache | Fast (zero-dep) vs Deep (AST) mode, `cache_control` (exact/best-effort) | `<1ms` Fast / `~15ms` Deep |
 | v1.4.0 | Retrieval | `rehydrate_context` with sub-query matching | Targeted line extraction |
 | v2.0.0 | Ecosystem | Streamable HTTP/SSE MCP, LiteLLM plugin, Prometheus metrics | High-throughput multi-agent proxy |
+| Milestone 8 | Caching | MCP Schema Deduplication & Cache-Aligned Knapsack | 100% Provider Cache Hit Rates |
+| Milestone 9 | Guardrails | Agent Loop Circuit Breaking & Critical Atom Recall Tracking | $S_k \le 0.40$ enforcement |
+
+---
+
+## Milestone 8: MCP Schema Deduplication & Cache Alignment
+
+**Core objective:** Ensure provider cache hit rates via strict prefix pinning.
+- **MCP Schema Deduplication:** Convert tool definitions into deterministic, sorted JSON structures at prompt position 0. Use content-addressed hashes to anchor MCP schemas without blowing up context windows or cache blocks.
+- **Cache-Aligned 0/1 Knapsack Allocation:** Evaluate item weights in 1,024-token quantizations. Ensure items selected by the knapsack solver preserve exact prefix horizon ordering.
+
+## Milestone 9: Safety & Drift Guardrails
+
+**Core objective:** Stop invisible runaway token usage and prevent semantic information loss.
+- **Agent Loop Circuit Breaking:** Integrate a circuit breaker into `DebtTracker`. If $N \ge 5$ consecutive turns show near-identical tool output signatures with high token volume, throttle or warn to prevent runaway costs.
+- **Critical Atom Recall Tracking:** Expand `DriftTracker` to verify imperative directives (`TD_PRESERVE`), file paths, line numbers, and API endpoints are never lost. Introduce composite metric $S_k = 1.0 - (w_{\text{AST}} \cdot R_{\text{AST}} + w_{\text{struct}} \cdot R_{\text{struct}} + w_{\text{atom}} \cdot R_{\text{atom}})$.
 
 ---
 
