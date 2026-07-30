@@ -36,23 +36,57 @@ describe('git-inspector', () => {
   });
 
   describe('cache behavior', () => {
-    it('caches subsequent calls to inspectGitWorkspace', () => {
+    it('caches subsequent calls to inspectGitWorkspace without exposing mutable cache state', () => {
       clearGitWorkspaceCache();
       const root = path.resolve(__dirname, '../..');
       
       const result1 = inspectGitWorkspace(root);
+      (result1.allDirtyFiles as Set<string>).add('__cache-poison__');
 
       const start2 = performance.now();
       const result2 = inspectGitWorkspace(root);
       const time2 = performance.now() - start2;
 
-      expect(result2).toBe(result1); // Reference equality means cache hit
-      expect(time2).toBeLessThan(5); // Fast return (< 1ms usually, 5ms upper bound)
+      expect(result2).not.toBe(result1);
+      expect(result2.allDirtyFiles.has('__cache-poison__')).toBe(false);
+      expect(time2).toBeLessThan(5);
 
       // Cache clear works
       clearGitWorkspaceCache();
       const result3 = inspectGitWorkspace(root);
-      expect(result3).not.toBe(result1); // Different object
+      expect(result3).not.toBe(result1);
+    });
+
+    it('shares git status cache between repo root and subdirectories', () => {
+      clearGitWorkspaceCache();
+      const root = path.resolve(__dirname, '../..');
+      const subDir = path.resolve(root, 'src');
+
+      const resultRoot = inspectGitWorkspace(root);
+      expect(resultRoot.isGitRepo).toBe(true);
+
+      const startSub = performance.now();
+      const resultSub = inspectGitWorkspace(subDir);
+      const timeSub = performance.now() - startSub;
+
+      expect(resultSub.isGitRepo).toBe(true);
+      expect(resultSub.repoRoot).toBe(resultRoot.repoRoot);
+      expect(timeSub).toBeLessThan(5);
+    });
+
+    it('properly caches non-git fallback results to avoid repeated shelling out', () => {
+      clearGitWorkspaceCache();
+      const nonExistentPath = path.resolve(__dirname, '../../non-existent-dir-12345');
+
+      const result1 = inspectGitWorkspace(nonExistentPath);
+      expect(result1.isGitRepo).toBe(false);
+
+      const start2 = performance.now();
+      const result2 = inspectGitWorkspace(nonExistentPath);
+      const time2 = performance.now() - start2;
+
+      expect(result2.isGitRepo).toBe(false);
+      expect(time2).toBeLessThan(5);
     });
   });
 });

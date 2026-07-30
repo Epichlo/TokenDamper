@@ -14,16 +14,17 @@ export class EnhancedHeuristicTokenizer implements TokenizerAdapter {
       return 0;
     }
 
-    const c = text.length;
-    let w = 0;
-    let p = 0;
+    let asciiWord = 0;
+    let whitespace = 0;
+    let punctuation = 0;
+    let nonAscii = 0;
 
-    for (let i = 0; i < c; i++) {
+    for (let i = 0; i < text.length; i++) {
       const charCode = text.charCodeAt(i);
       
       // Whitespace: space (32), tab (9), newline (10), carriage return (13)
       if (charCode === 32 || charCode === 9 || charCode === 10 || charCode === 13) {
-        w++;
+        whitespace++;
       } 
       // Punctuation and symbols (ASCII 33-47, 58-64, 91-96, 123-126)
       else if (
@@ -32,11 +33,21 @@ export class EnhancedHeuristicTokenizer implements TokenizerAdapter {
         (charCode >= 91 && charCode <= 96) ||
         (charCode >= 123 && charCode <= 126)
       ) {
-        p++;
+        punctuation++;
+      } else if (charCode < 128) {
+        asciiWord++;
+      } else {
+        nonAscii++;
+        if (charCode >= 0xd800 && charCode <= 0xdbff) {
+          const nextCharCode = text.charCodeAt(i + 1);
+          if (nextCharCode >= 0xdc00 && nextCharCode <= 0xdfff) {
+            i++;
+          }
+        }
       }
     }
 
-    const t = Math.ceil(0.22 * (c - p - w) + 0.55 * p + 0.35 * w);
+    const t = Math.ceil(0.22 * asciiWord + 0.55 * punctuation + 0.35 * whitespace + 1.1 * nonAscii);
     return Math.max(1, t);
   }
 }

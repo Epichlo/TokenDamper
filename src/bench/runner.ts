@@ -1,4 +1,5 @@
 import { optimize } from '../core/engine';
+import { TOKENDAMPER_VERSION } from '../version';
 import { BenchmarkEvaluator } from './evaluator';
 import { fixtureToOptimizationRequest } from './fixtures/loader';
 import type { BenchmarkFixtureSet } from './fixtures/types';
@@ -94,7 +95,7 @@ export class BenchmarkRunner {
       environment: Object.freeze({
         nodeVersion: process.version,
         platform: process.platform,
-        tokendamperVersion: config.baseConfig.appVersion || '0.1.0',
+        tokendamperVersion: config.baseConfig.appVersion || TOKENDAMPER_VERSION,
       }),
     });
   }

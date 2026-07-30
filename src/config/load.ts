@@ -1,8 +1,20 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createOptimizationBudget, freeze } from '../core/model/constructors';
-import { DEFAULT_CONFIG, isConfigFileShape } from './schema';
+import { CURRENT_CONFIG_SCHEMA_VERSION, DEFAULT_CONFIG, LEGACY_CONFIG_SCHEMA_VERSION, isConfigFileShape } from './schema';
 import type { ConfigFileShape, LoadConfigOptions, TokenDamperConfig } from './types';
+
+type MutableBudget = {
+  -readonly [Key in keyof TokenDamperConfig['budget']]?: TokenDamperConfig['budget'][Key];
+};
+
+type MutableConfigFileShape = Omit<ConfigFileShape, 'budget' | 'configSchemaVersion' | 'planner'> & {
+  configSchemaVersion?: string;
+  planner?: {
+    defaultMode?: TokenDamperConfig['planner']['defaultMode'];
+  };
+  budget?: MutableBudget;
+};
 
 /**
  * Loads and resolves the frozen configuration contract.
@@ -38,18 +50,15 @@ function loadConfigFile(filePath: string): ConfigFileShape | undefined {
     throw new Error(`Invalid TokenDamper config file: ${filePath}`);
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const p = parsed as any;
-  if (!p.configSchemaVersion || p.configSchemaVersion === '1.0') {
-    p.configSchemaVersion = '1.1';
+  const p = parsed as MutableConfigFileShape;
+  if (!p.configSchemaVersion || p.configSchemaVersion === LEGACY_CONFIG_SCHEMA_VERSION) {
+    p.configSchemaVersion = CURRENT_CONFIG_SCHEMA_VERSION;
     p.planner = p.planner || {};
     p.planner.defaultMode = p.planner.defaultMode ?? 'pass_through';
     p.budget = p.budget || {};
     p.budget.targetReductionRatio = p.budget.targetReductionRatio ?? 0;
     p.budget.riskTolerance = p.budget.riskTolerance ?? 'low';
     p.budget.preserveKinds = p.budget.preserveKinds ?? [];
-    
-    console.debug('[Config] Migrated configSchemaVersion from legacy to 1.1.');
   }
 
   return parsed as ConfigFileShape;

@@ -1,14 +1,16 @@
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { loadConfig } from '../../src/config';
+import { TOKENDAMPER_VERSION } from '../../src/version';
 
 describe('config loading', () => {
   it('loads defaults when no overrides exist', () => {
     const config = loadConfig({ cwd: mkdtempSync(join(tmpdir(), 'tokendamper-config-')) });
 
     expect(config.appName).toBe('TokenDamper');
+    expect(config.appVersion).toBe(TOKENDAMPER_VERSION);
     expect(config.planner.defaultMode).toBe('pass_through');
     expect(config.validation.minimumConfidence).toBe(1);
   });
@@ -127,6 +129,7 @@ describe('config loading', () => {
       'utf8',
     );
 
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
     const config = loadConfig({ cwd, configPath });
 
     expect(config.configSchemaVersion).toBe('1.1');
@@ -135,5 +138,22 @@ describe('config loading', () => {
     expect(config.planner.defaultMode).toBe('pass_through');
     expect(config.budget.targetReductionRatio).toBe(0);
     expect(config.budget.riskTolerance).toBe('low');
+    expect(debugSpy).not.toHaveBeenCalled();
+    debugSpy.mockRestore();
+  });
+
+  it('rejects unsupported future config schema versions', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'tokendamper-future-schema-'));
+    const configPath = join(cwd, 'tokendamper.config.json');
+
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        configSchemaVersion: '2.0',
+      }),
+      'utf8',
+    );
+
+    expect(() => loadConfig({ cwd, configPath })).toThrow(/Invalid TokenDamper config file/);
   });
 });

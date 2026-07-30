@@ -1,13 +1,17 @@
 import { createOptimizationBudget, freeze } from '../core/model/constructors';
 import type { ConfigFileShape, TokenDamperConfig } from './types';
+import { TOKENDAMPER_VERSION } from '../version';
+
+export const CURRENT_CONFIG_SCHEMA_VERSION = '1.1';
+export const LEGACY_CONFIG_SCHEMA_VERSION = '1.0';
 
 /**
  * The default resolved configuration used when no overrides are present.
  */
 export const DEFAULT_CONFIG: TokenDamperConfig = {
-  configSchemaVersion: '1.1',
+  configSchemaVersion: CURRENT_CONFIG_SCHEMA_VERSION,
   appName: 'TokenDamper',
-  appVersion: '0.1.0',
+  appVersion: TOKENDAMPER_VERSION,
   appMode: 'optimize',
   traceOutput: 'stderr',
   planner: {
@@ -38,7 +42,9 @@ export function isConfigFileShape(value: unknown): value is ConfigFileShape {
 
   const file = value as ConfigFileShape;
   return (
-    (file.configSchemaVersion === undefined || typeof file.configSchemaVersion === 'string') &&
+    (file.configSchemaVersion === undefined ||
+      file.configSchemaVersion === LEGACY_CONFIG_SCHEMA_VERSION ||
+      file.configSchemaVersion === CURRENT_CONFIG_SCHEMA_VERSION) &&
     (file.app === undefined ||
       (isPlainObject(file.app) &&
         (file.app.name === undefined || typeof file.app.name === 'string') &&

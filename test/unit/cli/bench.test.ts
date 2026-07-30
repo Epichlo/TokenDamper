@@ -5,6 +5,7 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { renderBenchTable } from '../../../src/cli/bench-table-renderer';
 import { runCli } from '../../../src/cli/main';
 import type { BenchmarkReport } from '../../../src/bench/types';
+import { TOKENDAMPER_VERSION } from '../../../src/version';
 
 describe('CLI Bench Subcommand & Renderer', () => {
   let tempDir: string;
@@ -141,7 +142,7 @@ describe('CLI Bench Subcommand & Renderer', () => {
       expect(jsonReport.overallSummary.totalRuns).toBeGreaterThan(0);
       expect(jsonReport.sweepResults.length).toBeGreaterThan(0);
       expect(jsonReport.environment).toBeDefined();
-      expect(jsonReport.environment.tokendamperVersion).toBe('0.1.0');
+      expect(jsonReport.environment.tokendamperVersion).toBe(TOKENDAMPER_VERSION);
     });
 
     it('suppresses table output when --quiet flag is provided', () => {

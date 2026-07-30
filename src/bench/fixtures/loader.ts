@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { createOptimizationRequest } from '../../core/model/constructors';
 import type { OptimizationBudget, OptimizationRequest, ResolvedConfig } from '../../core/model/types';
 import { loadConfig } from '../../config/load';
+import { TOKENDAMPER_VERSION } from '../../version';
 import { loadCodeXGLUEFixtures } from './codexglue';
 import { loadHumanEvalFixtures } from './humaneval';
 import type { BenchmarkFixture, BenchmarkFixtureSet } from './types';
@@ -74,7 +75,7 @@ export function fixtureToOptimizationRequest(
   const baseRequest = createOptimizationRequest(fixture.prompt, mergedConfig, {
     requestId: reqId,
     adapterName: 'bench',
-    adapterVersion: '0.1.0',
+    adapterVersion: TOKENDAMPER_VERSION,
     source: 'file',
     sourcePath: fixture.path,
   });
@@ -84,4 +85,3 @@ export function fixtureToOptimizationRequest(
     budget,
   });
 }
-

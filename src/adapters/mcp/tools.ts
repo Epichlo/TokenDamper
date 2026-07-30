@@ -5,9 +5,10 @@ import { createOptimizationRequest } from '../../core/model/constructors';
 import { optimize } from '../../core/engine';
 import { TokenHasher } from '../../core/hashing/token-hasher';
 import { loadConfig } from '../../config';
+import { TOKENDAMPER_VERSION } from '../../version';
 
 export const MCP_ADAPTER_NAME = 'mcp';
-export const MCP_ADAPTER_VERSION = '0.1.0';
+export const MCP_ADAPTER_VERSION = TOKENDAMPER_VERSION;
 
 export const TOOL_DEFINITIONS: ReadonlyArray<McpToolDefinition> = [
   {

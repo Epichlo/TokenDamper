@@ -14,10 +14,11 @@ import { GatewaySessionStore } from '../../gateway/session-store';
 import { TokenHasher } from '../../core/hashing/token-hasher';
 import type { ResolvedConfig } from '../../core/model/types';
 import { loadConfig } from '../../config';
+import { TOKENDAMPER_VERSION } from '../../version';
 
 export const MCP_PROTOCOL_VERSION = '2024-11-05';
 export const SERVER_NAME = 'tokendamper-mcp';
-export const SERVER_VERSION = '1.0.3';
+export const SERVER_VERSION = TOKENDAMPER_VERSION;
 
 export interface CreateMcpServerOptions {
   readonly input?: Readable | NodeJS.ReadableStream;

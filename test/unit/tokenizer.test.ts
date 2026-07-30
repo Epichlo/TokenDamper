@@ -25,6 +25,15 @@ describe('EnhancedHeuristicTokenizer', () => {
     const tokenizer = new EnhancedHeuristicTokenizer();
     expect(tokenizer.countTokens('')).toBe(0);
   });
+
+  it('uses conservative counts for non-ASCII text', () => {
+    const tokenizer = new EnhancedHeuristicTokenizer();
+    const cjkText = '这是一个用于测试的中文句子';
+    const emojiText = 'TokenDamper 🚀🔥✨';
+
+    expect(tokenizer.countTokens(cjkText)).toBeGreaterThanOrEqual(cjkText.length);
+    expect(tokenizer.countTokens(emojiText)).toBeGreaterThan(tokenizer.countTokens('TokenDamper'));
+  });
 });
 
 describe('createTiktokenAdapter', () => {

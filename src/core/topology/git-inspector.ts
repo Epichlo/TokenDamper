@@ -1,4 +1,6 @@
 import { execSync } from 'child_process';
+import { existsSync } from 'fs';
+import { resolve } from 'path';
 
 export interface GitStatusResult {
   readonly isGitRepo: boolean;
@@ -13,13 +15,13 @@ export interface GitStatusResult {
 interface GitCacheEntry {
   result: GitStatusResult;
   timestamp: number;
-  targetRepoRoot: string;
+  cacheKey: string;
 }
 
-let globalGitCache: GitCacheEntry | null = null;
+const globalGitCache = new Map<string, GitCacheEntry>();
 
 export function clearGitWorkspaceCache(): void {
-  globalGitCache = null;
+  globalGitCache.clear();
 }
 
 /**
@@ -46,6 +48,9 @@ export function inspectGitWorkspace(
   workspaceRoot?: string,
   options?: { forceRefresh?: boolean; ttlMs?: number }
 ): GitStatusResult {
+  const cwd = workspaceRoot || process.cwd();
+  const inputCacheKey = normalizeCacheKey(cwd);
+
   const defaultResult: GitStatusResult = {
     isGitRepo: false,
     repoRoot: null,
@@ -56,17 +61,21 @@ export function inspectGitWorkspace(
     recentCommitFiles: new Map<string, number>(),
   };
 
-  const cwd = workspaceRoot || process.cwd();
-  const targetRepoRoot = cwd.replace(/\\/g, '/');
+  if (!existsSync(cwd)) {
+    globalGitCache.set(inputCacheKey, {
+      result: cloneGitStatusResult(defaultResult),
+      timestamp: performance.now(),
+      cacheKey: inputCacheKey,
+    });
+    return defaultResult;
+  }
+
   const ttlMs = options?.ttlMs ?? 2000;
   const t_now = performance.now();
 
-  if (!options?.forceRefresh && globalGitCache) {
-    const deltaT = t_now - globalGitCache.timestamp;
-    const isCacheValid = (deltaT < ttlMs) && (globalGitCache.targetRepoRoot === targetRepoRoot);
-    if (isCacheValid) {
-      return globalGitCache.result;
-    }
+  const cachedByInput = getCachedGitStatus(inputCacheKey, ttlMs, t_now, options?.forceRefresh);
+  if (cachedByInput) {
+    return cachedByInput;
   }
 
   try {
@@ -78,7 +87,13 @@ export function inspectGitWorkspace(
       encoding: 'utf-8',
     }).trim();
 
-    const repoRoot = repoRootRaw.replace(/\\/g, '/');
+    const repoRoot = normalizeCacheKey(repoRootRaw);
+    const repoCacheKey = repoRoot;
+
+    const cachedByRepoRoot = getCachedGitStatus(repoCacheKey, ttlMs, t_now, options?.forceRefresh);
+    if (cachedByRepoRoot) {
+      return cachedByRepoRoot;
+    }
 
     // 2. Run git status --porcelain
     const statusOutput = execSync('git status --porcelain', {
@@ -112,7 +127,7 @@ export function inspectGitWorkspace(
         itemPath = itemPath.slice(1, -1);
       }
 
-      const normalized = normalizeGitPath(itemPath);
+      const normalized = normalizeGitPath(itemPath, repoRoot);
 
       if (x === '?' && y === '?') {
         untrackedFiles.add(normalized);
@@ -147,7 +162,7 @@ export function inspectGitWorkspace(
         for (const rawLine of lines) {
           const trimmed = rawLine.trim();
           if (!trimmed) continue;
-          const normalized = normalizeGitPath(trimmed);
+          const normalized = normalizeGitPath(trimmed, repoRoot);
           if (!recentCommitFiles.has(normalized)) {
             recentCommitFiles.set(normalized, commitAge);
           }
@@ -158,7 +173,7 @@ export function inspectGitWorkspace(
       // Ignore git log errors
     }
 
-    const result = {
+    const result: GitStatusResult = {
       isGitRepo: true,
       repoRoot,
       modifiedFiles,
@@ -168,14 +183,78 @@ export function inspectGitWorkspace(
       recentCommitFiles,
     };
 
-    globalGitCache = {
-      result,
+    globalGitCache.set(repoCacheKey, {
+      result: cloneGitStatusResult(result),
       timestamp: performance.now(),
-      targetRepoRoot,
-    };
+      cacheKey: repoCacheKey,
+    });
 
     return result;
   } catch {
+    globalGitCache.set(inputCacheKey, {
+      result: cloneGitStatusResult(defaultResult),
+      timestamp: performance.now(),
+      cacheKey: inputCacheKey,
+    });
+
     return defaultResult;
   }
+}
+
+function normalizeCacheKey(filePath: string): string {
+  let normalized = resolve(filePath).replace(/\\/g, '/').replace(/\/$/, '');
+  if (/^[a-z]:/i.test(normalized)) {
+    const drive = normalized.charAt(0).toUpperCase();
+    normalized = drive + normalized.slice(1);
+  }
+  return normalized;
+}
+
+function getCachedGitStatus(
+  inputCacheKey: string,
+  ttlMs: number,
+  now: number,
+  forceRefresh: boolean | undefined,
+): GitStatusResult | undefined {
+  if (forceRefresh) {
+    return undefined;
+  }
+
+  // 1. Direct match on inputCacheKey (exact match for repo root or non-git path)
+  const exactEntry = globalGitCache.get(inputCacheKey);
+  if (exactEntry) {
+    if (now - exactEntry.timestamp < ttlMs) {
+      return cloneGitStatusResult(exactEntry.result);
+    }
+    globalGitCache.delete(inputCacheKey);
+  }
+
+  // 2. Ancestor git repo match: check if inputCacheKey is a subdirectory of a cached git repo root
+  for (const [key, entry] of globalGitCache.entries()) {
+    if (now - entry.timestamp >= ttlMs) {
+      globalGitCache.delete(key);
+      continue;
+    }
+
+    if (entry.result.isGitRepo && entry.result.repoRoot) {
+      const repoRootKey = normalizeCacheKey(entry.result.repoRoot);
+      if (inputCacheKey === repoRootKey || inputCacheKey.startsWith(repoRootKey + '/')) {
+        return cloneGitStatusResult(entry.result);
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function cloneGitStatusResult(result: GitStatusResult): GitStatusResult {
+  return {
+    isGitRepo: result.isGitRepo,
+    repoRoot: result.repoRoot,
+    modifiedFiles: new Set(result.modifiedFiles),
+    stagedFiles: new Set(result.stagedFiles),
+    untrackedFiles: new Set(result.untrackedFiles),
+    allDirtyFiles: new Set(result.allDirtyFiles),
+    recentCommitFiles: new Map(result.recentCommitFiles),
+  };
 }

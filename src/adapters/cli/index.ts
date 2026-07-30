@@ -5,6 +5,7 @@ import type {
   ResolvedConfig,
 } from '../../core/model';
 import { createOptimizationRequest, type NormalizedInputSource } from '../../core/model';
+import { TOKENDAMPER_VERSION } from '../../version';
 
 /**
  * The adapter name used by the frozen Milestone 1 CLI integration.
@@ -14,7 +15,7 @@ export const CLI_ADAPTER_NAME = 'cli';
 /**
  * The adapter version used by the frozen Milestone 1 CLI integration.
  */
-export const CLI_ADAPTER_VERSION = '1.0.3';
+export const CLI_ADAPTER_VERSION = TOKENDAMPER_VERSION;
 
 /**
  * Parses raw text input into the normalized optimization request contract.
