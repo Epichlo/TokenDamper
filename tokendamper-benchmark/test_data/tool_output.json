@@ -1,0 +1,434 @@
+{
+  "apiVersion": "v2.4.0",
+  "timestamp": "2026-07-30T19:30:00Z",
+  "responseMetadata": {
+    "requestId": "req-99481204-af81-4b11-912c-0029418512fa",
+    "httpStatusCode": 200,
+    "totalRecords": 11,
+    "pageSize": 50,
+    "pageIndex": 1,
+    "hasMorePages": false
+  },
+  "data": [
+    {
+      "id": "res-srv-00001",
+      "name": "production-worker-node-1",
+      "status": "ACTIVE",
+      "region": "us-west-2",
+      "instanceType": "m6i.2xlarge",
+      "ipAddress": "10.100.14.1",
+      "tags": {
+        "environment": "production",
+        "team": "infrastructure-core",
+        "cost_center": "CC-90412",
+        "managed_by": "terraform-provider-aws-v5.12.0"
+      },
+      "metrics": {
+        "cpu_utilization_avg_5m": 22.2,
+        "memory_utilization_bytes": 16496245760,
+        "disk_io_ps": 1285,
+        "network_in_bytes_per_sec": 45120000,
+        "network_out_bytes_per_sec": 89230000
+      },
+      "health_checks": [
+        {
+          "check_name": "http_ping",
+          "status": "PASS",
+          "latency_ms": 2.2
+        },
+        {
+          "check_name": "disk_space",
+          "status": "PASS",
+          "free_percent": 68.4
+        },
+        {
+          "check_name": "systemd_services",
+          "status": "PASS",
+          "failed_units": []
+        }
+      ]
+    },
+    {
+      "id": "res-srv-00002",
+      "name": "production-worker-node-2",
+      "status": "ACTIVE",
+      "region": "us-east-1",
+      "instanceType": "m6i.2xlarge",
+      "ipAddress": "10.100.14.2",
+      "tags": {
+        "environment": "production",
+        "team": "infrastructure-core",
+        "cost_center": "CC-90412",
+        "managed_by": "terraform-provider-aws-v5.12.0"
+      },
+      "metrics": {
+        "cpu_utilization_avg_5m": 23.9,
+        "memory_utilization_bytes": 16506731520,
+        "disk_io_ps": 1320,
+        "network_in_bytes_per_sec": 45240000,
+        "network_out_bytes_per_sec": 89460000
+      },
+      "health_checks": [
+        {
+          "check_name": "http_ping",
+          "status": "PASS",
+          "latency_ms": 3.2
+        },
+        {
+          "check_name": "disk_space",
+          "status": "PASS",
+          "free_percent": 68.4
+        },
+        {
+          "check_name": "systemd_services",
+          "status": "PASS",
+          "failed_units": []
+        }
+      ]
+    },
+    {
+      "id": "res-srv-00003",
+      "name": "production-worker-node-3",
+      "status": "ACTIVE",
+      "region": "us-west-2",
+      "instanceType": "c6i.4xlarge",
+      "ipAddress": "10.100.14.3",
+      "tags": {
+        "environment": "production",
+        "team": "infrastructure-core",
+        "cost_center": "CC-90412",
+        "managed_by": "terraform-provider-aws-v5.12.0"
+      },
+      "metrics": {
+        "cpu_utilization_avg_5m": 25.6,
+        "memory_utilization_bytes": 16517217280,
+        "disk_io_ps": 1355,
+        "network_in_bytes_per_sec": 45360000,
+        "network_out_bytes_per_sec": 89690000
+      },
+      "health_checks": [
+        {
+          "check_name": "http_ping",
+          "status": "PASS",
+          "latency_ms": 1.2
+        },
+        {
+          "check_name": "disk_space",
+          "status": "PASS",
+          "free_percent": 68.4
+        },
+        {
+          "check_name": "systemd_services",
+          "status": "PASS",
+          "failed_units": []
+        }
+      ]
+    },
+    {
+      "id": "res-srv-00004",
+      "name": "production-worker-node-4",
+      "status": "ACTIVE",
+      "region": "us-east-1",
+      "instanceType": "m6i.2xlarge",
+      "ipAddress": "10.100.14.4",
+      "tags": {
+        "environment": "production",
+        "team": "infrastructure-core",
+        "cost_center": "CC-90412",
+        "managed_by": "terraform-provider-aws-v5.12.0"
+      },
+      "metrics": {
+        "cpu_utilization_avg_5m": 27.3,
+        "memory_utilization_bytes": 16527703040,
+        "disk_io_ps": 1390,
+        "network_in_bytes_per_sec": 45480000,
+        "network_out_bytes_per_sec": 89920000
+      },
+      "health_checks": [
+        {
+          "check_name": "http_ping",
+          "status": "PASS",
+          "latency_ms": 2.2
+        },
+        {
+          "check_name": "disk_space",
+          "status": "PASS",
+          "free_percent": 68.4
+        },
+        {
+          "check_name": "systemd_services",
+          "status": "PASS",
+          "failed_units": []
+        }
+      ]
+    },
+    {
+      "id": "res-srv-00005",
+      "name": "production-worker-node-5",
+      "status": "ACTIVE",
+      "region": "us-west-2",
+      "instanceType": "m6i.2xlarge",
+      "ipAddress": "10.100.14.5",
+      "tags": {
+        "environment": "production",
+        "team": "infrastructure-core",
+        "cost_center": "CC-90412",
+        "managed_by": "terraform-provider-aws-v5.12.0"
+      },
+      "metrics": {
+        "cpu_utilization_avg_5m": 29.0,
+        "memory_utilization_bytes": 16538188800,
+        "disk_io_ps": 1425,
+        "network_in_bytes_per_sec": 45600000,
+        "network_out_bytes_per_sec": 90150000
+      },
+      "health_checks": [
+        {
+          "check_name": "http_ping",
+          "status": "PASS",
+          "latency_ms": 3.2
+        },
+        {
+          "check_name": "disk_space",
+          "status": "PASS",
+          "free_percent": 68.4
+        },
+        {
+          "check_name": "systemd_services",
+          "status": "PASS",
+          "failed_units": []
+        }
+      ]
+    },
+    {
+      "id": "res-srv-00006",
+      "name": "production-worker-node-6",
+      "status": "ACTIVE",
+      "region": "us-east-1",
+      "instanceType": "c6i.4xlarge",
+      "ipAddress": "10.100.14.6",
+      "tags": {
+        "environment": "production",
+        "team": "infrastructure-core",
+        "cost_center": "CC-90412",
+        "managed_by": "terraform-provider-aws-v5.12.0"
+      },
+      "metrics": {
+        "cpu_utilization_avg_5m": 30.7,
+        "memory_utilization_bytes": 16548674560,
+        "disk_io_ps": 1460,
+        "network_in_bytes_per_sec": 45720000,
+        "network_out_bytes_per_sec": 90380000
+      },
+      "health_checks": [
+        {
+          "check_name": "http_ping",
+          "status": "PASS",
+          "latency_ms": 1.2
+        },
+        {
+          "check_name": "disk_space",
+          "status": "PASS",
+          "free_percent": 68.4
+        },
+        {
+          "check_name": "systemd_services",
+          "status": "PASS",
+          "failed_units": []
+        }
+      ]
+    },
+    {
+      "id": "res-srv-00007",
+      "name": "production-worker-node-7",
+      "status": "DEGRADED",
+      "region": "us-west-2",
+      "instanceType": "m6i.2xlarge",
+      "ipAddress": "10.100.14.7",
+      "tags": {
+        "environment": "production",
+        "team": "infrastructure-core",
+        "cost_center": "CC-90412",
+        "managed_by": "terraform-provider-aws-v5.12.0"
+      },
+      "metrics": {
+        "cpu_utilization_avg_5m": 32.4,
+        "memory_utilization_bytes": 16559160320,
+        "disk_io_ps": 1495,
+        "network_in_bytes_per_sec": 45840000,
+        "network_out_bytes_per_sec": 90610000
+      },
+      "health_checks": [
+        {
+          "check_name": "http_ping",
+          "status": "PASS",
+          "latency_ms": 2.2
+        },
+        {
+          "check_name": "disk_space",
+          "status": "PASS",
+          "free_percent": 68.4
+        },
+        {
+          "check_name": "systemd_services",
+          "status": "WARN",
+          "failed_units": [
+            "logrotate.service"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "res-srv-00008",
+      "name": "production-worker-node-8",
+      "status": "ACTIVE",
+      "region": "us-east-1",
+      "instanceType": "m6i.2xlarge",
+      "ipAddress": "10.100.14.8",
+      "tags": {
+        "environment": "production",
+        "team": "infrastructure-core",
+        "cost_center": "CC-90412",
+        "managed_by": "terraform-provider-aws-v5.12.0"
+      },
+      "metrics": {
+        "cpu_utilization_avg_5m": 34.1,
+        "memory_utilization_bytes": 16569646080,
+        "disk_io_ps": 1530,
+        "network_in_bytes_per_sec": 45960000,
+        "network_out_bytes_per_sec": 90840000
+      },
+      "health_checks": [
+        {
+          "check_name": "http_ping",
+          "status": "PASS",
+          "latency_ms": 3.2
+        },
+        {
+          "check_name": "disk_space",
+          "status": "PASS",
+          "free_percent": 68.4
+        },
+        {
+          "check_name": "systemd_services",
+          "status": "PASS",
+          "failed_units": []
+        }
+      ]
+    },
+    {
+      "id": "res-srv-00009",
+      "name": "production-worker-node-9",
+      "status": "ACTIVE",
+      "region": "us-west-2",
+      "instanceType": "c6i.4xlarge",
+      "ipAddress": "10.100.14.9",
+      "tags": {
+        "environment": "production",
+        "team": "infrastructure-core",
+        "cost_center": "CC-90412",
+        "managed_by": "terraform-provider-aws-v5.12.0"
+      },
+      "metrics": {
+        "cpu_utilization_avg_5m": 35.8,
+        "memory_utilization_bytes": 16580131840,
+        "disk_io_ps": 1565,
+        "network_in_bytes_per_sec": 46080000,
+        "network_out_bytes_per_sec": 91070000
+      },
+      "health_checks": [
+        {
+          "check_name": "http_ping",
+          "status": "PASS",
+          "latency_ms": 1.2
+        },
+        {
+          "check_name": "disk_space",
+          "status": "PASS",
+          "free_percent": 68.4
+        },
+        {
+          "check_name": "systemd_services",
+          "status": "PASS",
+          "failed_units": []
+        }
+      ]
+    },
+    {
+      "id": "res-srv-00010",
+      "name": "production-worker-node-10",
+      "status": "ACTIVE",
+      "region": "us-east-1",
+      "instanceType": "m6i.2xlarge",
+      "ipAddress": "10.100.14.10",
+      "tags": {
+        "environment": "production",
+        "team": "infrastructure-core",
+        "cost_center": "CC-90412",
+        "managed_by": "terraform-provider-aws-v5.12.0"
+      },
+      "metrics": {
+        "cpu_utilization_avg_5m": 37.5,
+        "memory_utilization_bytes": 16590617600,
+        "disk_io_ps": 1600,
+        "network_in_bytes_per_sec": 46200000,
+        "network_out_bytes_per_sec": 91300000
+      },
+      "health_checks": [
+        {
+          "check_name": "http_ping",
+          "status": "PASS",
+          "latency_ms": 2.2
+        },
+        {
+          "check_name": "disk_space",
+          "status": "PASS",
+          "free_percent": 68.4
+        },
+        {
+          "check_name": "systemd_services",
+          "status": "PASS",
+          "failed_units": []
+        }
+      ]
+    },
+    {
+      "id": "res-srv-00011",
+      "name": "production-worker-node-11",
+      "status": "ACTIVE",
+      "region": "us-west-2",
+      "instanceType": "m6i.2xlarge",
+      "ipAddress": "10.100.14.11",
+      "tags": {
+        "environment": "production",
+        "team": "infrastructure-core",
+        "cost_center": "CC-90412",
+        "managed_by": "terraform-provider-aws-v5.12.0"
+      },
+      "metrics": {
+        "cpu_utilization_avg_5m": 39.2,
+        "memory_utilization_bytes": 16601103360,
+        "disk_io_ps": 1635,
+        "network_in_bytes_per_sec": 46320000,
+        "network_out_bytes_per_sec": 91530000
+      },
+      "health_checks": [
+        {
+          "check_name": "http_ping",
+          "status": "PASS",
+          "latency_ms": 3.2
+        },
+        {
+          "check_name": "disk_space",
+          "status": "PASS",
+          "free_percent": 68.4
+        },
+        {
+          "check_name": "systemd_services",
+          "status": "PASS",
+          "failed_units": []
+        }
+      ]
+    }
+  ]
+}

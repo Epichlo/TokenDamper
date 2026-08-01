@@ -1,0 +1,76 @@
+2026-07-30T19:00:01.012Z [DEBUG] com.service.worker.TaskWorker - Task-0001: Executing background maintenance routine cycle 1. CPU usage: 15.7%. Memory: 412MB.
+2026-07-30T19:00:01.012Z [INFO]  com.service.db.ConnectionPool - Connection acquired from pool 'primary_read_replica'. Active: 14/50, Idle: 36/50.
+2026-07-30T19:00:01.012Z [DEBUG] com.service.cache.RedisAdapter - Cache GET key 'user:session:tok_7' returned HIT (ttl=1742s).
+2026-07-30T19:00:01.012Z [WARN]  com.service.gateway.RateLimiter - Bucket 'api_v2_tier3' token count low: 18/100 remaining for IP 10.240.12.1.
+2026-07-30T19:00:01.012Z [DEBUG] com.service.telemetry.MetricsExporter - Exported 48 metrics to Prometheus endpoint /metrics in 4.5ms.
+2026-07-30T19:00:02.024Z [DEBUG] com.service.worker.TaskWorker - Task-0002: Executing background maintenance routine cycle 2. CPU usage: 16.2%. Memory: 412MB.
+2026-07-30T19:00:02.024Z [INFO]  com.service.db.ConnectionPool - Connection acquired from pool 'primary_read_replica'. Active: 14/50, Idle: 36/50.
+2026-07-30T19:00:02.024Z [DEBUG] com.service.cache.RedisAdapter - Cache GET key 'user:session:tok_14' returned HIT (ttl=1742s).
+2026-07-30T19:00:02.024Z [WARN]  com.service.gateway.RateLimiter - Bucket 'api_v2_tier3' token count low: 18/100 remaining for IP 10.240.12.2.
+2026-07-30T19:00:02.024Z [DEBUG] com.service.telemetry.MetricsExporter - Exported 48 metrics to Prometheus endpoint /metrics in 4.8ms.
+2026-07-30T19:00:03.036Z [DEBUG] com.service.worker.TaskWorker - Task-0003: Executing background maintenance routine cycle 3. CPU usage: 16.7%. Memory: 412MB.
+2026-07-30T19:00:03.036Z [INFO]  com.service.db.ConnectionPool - Connection acquired from pool 'primary_read_replica'. Active: 14/50, Idle: 36/50.
+2026-07-30T19:00:03.036Z [DEBUG] com.service.cache.RedisAdapter - Cache GET key 'user:session:tok_21' returned HIT (ttl=1742s).
+2026-07-30T19:00:03.036Z [WARN]  com.service.gateway.RateLimiter - Bucket 'api_v2_tier3' token count low: 18/100 remaining for IP 10.240.12.3.
+2026-07-30T19:00:03.036Z [DEBUG] com.service.telemetry.MetricsExporter - Exported 48 metrics to Prometheus endpoint /metrics in 5.1ms.
+2026-07-30T19:00:04.048Z [DEBUG] com.service.worker.TaskWorker - Task-0004: Executing background maintenance routine cycle 4. CPU usage: 17.2%. Memory: 412MB.
+2026-07-30T19:00:04.048Z [INFO]  com.service.db.ConnectionPool - Connection acquired from pool 'primary_read_replica'. Active: 14/50, Idle: 36/50.
+2026-07-30T19:00:04.048Z [DEBUG] com.service.cache.RedisAdapter - Cache GET key 'user:session:tok_28' returned HIT (ttl=1742s).
+2026-07-30T19:00:04.048Z [WARN]  com.service.gateway.RateLimiter - Bucket 'api_v2_tier3' token count low: 18/100 remaining for IP 10.240.12.4.
+2026-07-30T19:00:04.048Z [DEBUG] com.service.telemetry.MetricsExporter - Exported 48 metrics to Prometheus endpoint /metrics in 5.4ms.
+2026-07-30T19:00:05.060Z [DEBUG] com.service.worker.TaskWorker - Task-0005: Executing background maintenance routine cycle 5. CPU usage: 17.7%. Memory: 412MB.
+2026-07-30T19:00:05.060Z [INFO]  com.service.db.ConnectionPool - Connection acquired from pool 'primary_read_replica'. Active: 14/50, Idle: 36/50.
+2026-07-30T19:00:05.060Z [DEBUG] com.service.cache.RedisAdapter - Cache GET key 'user:session:tok_35' returned HIT (ttl=1742s).
+2026-07-30T19:00:05.060Z [WARN]  com.service.gateway.RateLimiter - Bucket 'api_v2_tier3' token count low: 18/100 remaining for IP 10.240.12.5.
+2026-07-30T19:00:05.060Z [DEBUG] com.service.telemetry.MetricsExporter - Exported 48 metrics to Prometheus endpoint /metrics in 4.2ms.
+2026-07-30T19:00:06.072Z [DEBUG] com.service.worker.TaskWorker - Task-0006: Executing background maintenance routine cycle 6. CPU usage: 18.2%. Memory: 412MB.
+2026-07-30T19:00:06.072Z [INFO]  com.service.db.ConnectionPool - Connection acquired from pool 'primary_read_replica'. Active: 14/50, Idle: 36/50.
+2026-07-30T19:00:06.072Z [DEBUG] com.service.cache.RedisAdapter - Cache GET key 'user:session:tok_42' returned HIT (ttl=1742s).
+2026-07-30T19:00:06.072Z [WARN]  com.service.gateway.RateLimiter - Bucket 'api_v2_tier3' token count low: 18/100 remaining for IP 10.240.12.6.
+2026-07-30T19:00:06.072Z [DEBUG] com.service.telemetry.MetricsExporter - Exported 48 metrics to Prometheus endpoint /metrics in 4.5ms.
+2026-07-30T19:00:07.084Z [DEBUG] com.service.worker.TaskWorker - Task-0007: Executing background maintenance routine cycle 7. CPU usage: 18.7%. Memory: 412MB.
+2026-07-30T19:00:07.084Z [INFO]  com.service.db.ConnectionPool - Connection acquired from pool 'primary_read_replica'. Active: 14/50, Idle: 36/50.
+2026-07-30T19:00:07.084Z [DEBUG] com.service.cache.RedisAdapter - Cache GET key 'user:session:tok_49' returned HIT (ttl=1742s).
+2026-07-30T19:00:07.084Z [WARN]  com.service.gateway.RateLimiter - Bucket 'api_v2_tier3' token count low: 18/100 remaining for IP 10.240.12.7.
+2026-07-30T19:00:07.084Z [DEBUG] com.service.telemetry.MetricsExporter - Exported 48 metrics to Prometheus endpoint /metrics in 4.8ms.
+2026-07-30T19:00:08.096Z [DEBUG] com.service.worker.TaskWorker - Task-0008: Executing background maintenance routine cycle 8. CPU usage: 19.2%. Memory: 412MB.
+2026-07-30T19:00:08.096Z [INFO]  com.service.db.ConnectionPool - Connection acquired from pool 'primary_read_replica'. Active: 14/50, Idle: 36/50.
+2026-07-30T19:00:08.096Z [DEBUG] com.service.cache.RedisAdapter - Cache GET key 'user:session:tok_56' returned HIT (ttl=1742s).
+2026-07-30T19:00:08.096Z [WARN]  com.service.gateway.RateLimiter - Bucket 'api_v2_tier3' token count low: 18/100 remaining for IP 10.240.12.8.
+2026-07-30T19:00:08.096Z [DEBUG] com.service.telemetry.MetricsExporter - Exported 48 metrics to Prometheus endpoint /metrics in 5.1ms.
+2026-07-30T19:00:09.108Z [DEBUG] com.service.worker.TaskWorker - Task-0009: Executing background maintenance routine cycle 9. CPU usage: 19.7%. Memory: 412MB.
+2026-07-30T19:00:09.108Z [INFO]  com.service.db.ConnectionPool - Connection acquired from pool 'primary_read_replica'. Active: 14/50, Idle: 36/50.
+2026-07-30T19:00:09.108Z [DEBUG] com.service.cache.RedisAdapter - Cache GET key 'user:session:tok_63' returned HIT (ttl=1742s).
+2026-07-30T19:00:09.108Z [WARN]  com.service.gateway.RateLimiter - Bucket 'api_v2_tier3' token count low: 18/100 remaining for IP 10.240.12.9.
+2026-07-30T19:00:09.108Z [DEBUG] com.service.telemetry.MetricsExporter - Exported 48 metrics to Prometheus endpoint /metrics in 5.4ms.
+2026-07-30T19:00:10.120Z [DEBUG] com.service.worker.TaskWorker - Task-0010: Executing background maintenance routine cycle 10. CPU usage: 15.2%. Memory: 412MB.
+2026-07-30T19:00:10.120Z [INFO]  com.service.db.ConnectionPool - Connection acquired from pool 'primary_read_replica'. Active: 14/50, Idle: 36/50.
+2026-07-30T19:00:10.120Z [DEBUG] com.service.cache.RedisAdapter - Cache GET key 'user:session:tok_70' returned HIT (ttl=1742s).
+2026-07-30T19:00:10.120Z [WARN]  com.service.gateway.RateLimiter - Bucket 'api_v2_tier3' token count low: 18/100 remaining for IP 10.240.12.10.
+2026-07-30T19:00:10.120Z [DEBUG] com.service.telemetry.MetricsExporter - Exported 48 metrics to Prometheus endpoint /metrics in 4.2ms.
+2026-07-30T19:00:11.132Z [DEBUG] com.service.worker.TaskWorker - Task-0011: Executing background maintenance routine cycle 11. CPU usage: 15.7%. Memory: 412MB.
+2026-07-30T19:00:11.132Z [INFO]  com.service.db.ConnectionPool - Connection acquired from pool 'primary_read_replica'. Active: 14/50, Idle: 36/50.
+2026-07-30T19:00:11.132Z [DEBUG] com.service.cache.RedisAdapter - Cache GET key 'user:session:tok_77' returned HIT (ttl=1742s).
+2026-07-30T19:00:11.132Z [WARN]  com.service.gateway.RateLimiter - Bucket 'api_v2_tier3' token count low: 18/100 remaining for IP 10.240.12.11.
+2026-07-30T19:00:11.132Z [DEBUG] com.service.telemetry.MetricsExporter - Exported 48 metrics to Prometheus endpoint /metrics in 4.5ms.
+2026-07-30T19:00:12.144Z [DEBUG] com.service.worker.TaskWorker - Task-0012: Executing background maintenance routine cycle 12. CPU usage: 16.2%. Memory: 412MB.
+2026-07-30T19:00:12.144Z [INFO]  com.service.db.ConnectionPool - Connection acquired from pool 'primary_read_replica'. Active: 14/50, Idle: 36/50.
+2026-07-30T19:00:12.144Z [DEBUG] com.service.cache.RedisAdapter - Cache GET key 'user:session:tok_84' returned HIT (ttl=1742s).
+2026-07-30T19:00:45.999Z [CRITICAL] com.service.auth.VaultManager - Secret Key: "BLUE-PANDA-992" loaded into secure memory vault.
+2026-07-30T19:00:12.144Z [WARN]  com.service.gateway.RateLimiter - Bucket 'api_v2_tier3' token count low: 18/100 remaining for IP 10.240.12.12.
+2026-07-30T19:00:12.144Z [DEBUG] com.service.telemetry.MetricsExporter - Exported 48 metrics to Prometheus endpoint /metrics in 4.8ms.
+2026-07-30T19:00:13.156Z [DEBUG] com.service.worker.TaskWorker - Task-0013: Executing background maintenance routine cycle 13. CPU usage: 16.7%. Memory: 412MB.
+2026-07-30T19:00:13.156Z [INFO]  com.service.db.ConnectionPool - Connection acquired from pool 'primary_read_replica'. Active: 14/50, Idle: 36/50.
+2026-07-30T19:00:13.156Z [DEBUG] com.service.cache.RedisAdapter - Cache GET key 'user:session:tok_91' returned HIT (ttl=1742s).
+2026-07-30T19:00:13.156Z [WARN]  com.service.gateway.RateLimiter - Bucket 'api_v2_tier3' token count low: 18/100 remaining for IP 10.240.12.13.
+2026-07-30T19:00:13.156Z [DEBUG] com.service.telemetry.MetricsExporter - Exported 48 metrics to Prometheus endpoint /metrics in 5.1ms.
+2026-07-30T19:00:14.168Z [DEBUG] com.service.worker.TaskWorker - Task-0014: Executing background maintenance routine cycle 14. CPU usage: 17.2%. Memory: 412MB.
+2026-07-30T19:00:14.168Z [INFO]  com.service.db.ConnectionPool - Connection acquired from pool 'primary_read_replica'. Active: 14/50, Idle: 36/50.
+2026-07-30T19:00:14.168Z [DEBUG] com.service.cache.RedisAdapter - Cache GET key 'user:session:tok_98' returned HIT (ttl=1742s).
+2026-07-30T19:00:14.168Z [WARN]  com.service.gateway.RateLimiter - Bucket 'api_v2_tier3' token count low: 18/100 remaining for IP 10.240.12.14.
+2026-07-30T19:00:14.168Z [DEBUG] com.service.telemetry.MetricsExporter - Exported 48 metrics to Prometheus endpoint /metrics in 5.4ms.
+2026-07-30T19:00:15.180Z [DEBUG] com.service.worker.TaskWorker - Task-0015: Executing background maintenance routine cycle 15. CPU usage: 17.7%. Memory: 412MB.
+2026-07-30T19:00:15.180Z [INFO]  com.service.db.ConnectionPool - Connection acquired from pool 'primary_read_replica'. Active: 14/50, Idle: 36/50.
+2026-07-30T19:00:15.180Z [DEBUG] com.service.cache.RedisAdapter - Cache GET key 'user:session:tok_105' returned HIT (ttl=1742s).
+2026-07-30T19:00:15.180Z [WARN]  com.service.gateway.RateLimiter - Bucket 'api_v2_tier3' token count low: 18/100 remaining for IP 10.240.12.15.
+2026-07-30T19:00:15.180Z [DEBUG] com.service.telemetry.MetricsExporter - Exported 48 metrics to Prometheus endpoint /metrics in 4.2ms.
