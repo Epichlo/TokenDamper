@@ -206,7 +206,7 @@ function parseArguments(argv: readonly string[], cwd: string): ParsedArguments {
       datasetPath = args.shift();
     }
   } else if (command === 'optimize') {
-    if (args.length > 0 && args[0] !== undefined && !args[0].startsWith('-')) {
+    if (args.length > 0 && args[0] !== undefined && (args[0] === '-' || !args[0].startsWith('-'))) {
       inputPath = args.shift()!;
     } else {
       throw new Error('Missing input file path.');

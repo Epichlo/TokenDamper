@@ -18,7 +18,9 @@ export function plan(
 ): OptimizationPlan {
   validatePlannerInputs(bundle, budget, config);
 
-  const isKnapsackMode = typeof budget.maxInputTokens === 'number' && budget.maxInputTokens > 0;
+  const isKnapsackMode =
+    (typeof budget.maxInputTokens === 'number' && budget.maxInputTokens > 0) ||
+    (typeof budget.targetReductionRatio === 'number' && budget.targetReductionRatio > 0);
   const mode: OptimizationMode = isKnapsackMode ? 'topology_knapsack' : 'pass_through';
 
   const stageIds: string[] = [];
@@ -43,7 +45,11 @@ export function plan(
  * Determines the optimization mode based on budget.
  */
 export function planOptimizationMode(budget?: OptimizationBudget): OptimizationMode {
-  if (budget && typeof budget.maxInputTokens === 'number' && budget.maxInputTokens > 0) {
+  if (
+    budget &&
+    ((typeof budget.maxInputTokens === 'number' && budget.maxInputTokens > 0) ||
+      (typeof budget.targetReductionRatio === 'number' && budget.targetReductionRatio > 0))
+  ) {
     return 'topology_knapsack';
   }
   return 'pass_through';
