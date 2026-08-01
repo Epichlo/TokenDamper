@@ -419,7 +419,9 @@ function processOpenAiRequest(
       optimizedTokens,
       tokensSaved: stageResult.metrics.tokenEstimateSaved || 0,
       dedupRatio: rawTokens > 0 ? (stageResult.metrics.tokenEstimateSaved || 0) / rawTokens : 0,
-      fallbackUsed: false,
+      // fallbackUsed intentionally omitted: this path runs no validators or
+      // fallback resolver, so there is no evaluated value to report. Recording
+      // `false` would assert a safety property that was never checked (Phase 1.0a).
     },
     contentEntries,
   );
@@ -557,7 +559,9 @@ function processAnthropicRequest(
       optimizedTokens,
       tokensSaved: stageResult.metrics.tokenEstimateSaved || 0,
       dedupRatio: rawTokens > 0 ? (stageResult.metrics.tokenEstimateSaved || 0) / rawTokens : 0,
-      fallbackUsed: false,
+      // fallbackUsed intentionally omitted: this path runs no validators or
+      // fallback resolver, so there is no evaluated value to report. Recording
+      // `false` would assert a safety property that was never checked (Phase 1.0a).
     },
     contentEntries,
   );

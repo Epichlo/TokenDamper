@@ -10,7 +10,10 @@ export interface SessionTurn {
   readonly optimizedTokens: number;
   readonly tokensSaved: number;
   readonly dedupRatio: number;
-  readonly fallbackUsed: boolean;
+  // Optional and absent unless validation/fallback was actually evaluated for the
+  // turn. The proxy path does not run that pipeline yet (Phase 1.0), so it omits
+  // this field rather than asserting a `false` it never computed.
+  readonly fallbackUsed?: boolean;
 }
 
 /**

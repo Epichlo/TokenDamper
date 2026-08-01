@@ -253,6 +253,30 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
     expect(res2Json.messages[1].content).toBe('What does this code do?');
   });
 
+  it('does not assert fallbackUsed on the proxy path, which never runs validation (1.0a)', async () => {
+    const sessionStore = server.getSessionStore();
+
+    await handleProxyRequest(
+      'POST',
+      '/v1/messages',
+      { 'x-session-id': 'fallback-honesty-session' },
+      JSON.stringify({
+        model: 'claude-sonnet-5',
+        messages: [{ role: 'user', content: 'A single turn of context.' }],
+      }),
+      { sessionStore },
+    );
+
+    const session = sessionStore.getOrCreateSession('fallback-honesty-session');
+    const turn = session.turns[0];
+    expect(turn).toBeDefined();
+    // The proxy path invokes no validators, ledgers, or fallback resolver, so it
+    // must not assert fallbackUsed at all. A literal `false` here would claim a
+    // safety property that was never evaluated (Phase 1.0a).
+    expect('fallbackUsed' in turn!).toBe(false);
+    expect(turn!.fallbackUsed).toBeUndefined();
+  });
+
   it('forwards optimized OpenAI requests upstream with authorization headers', async () => {
     const sessionStore = server.getSessionStore();
     let forwardedBody = '';
