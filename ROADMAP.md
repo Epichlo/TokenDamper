@@ -1,28 +1,43 @@
 # TokenDamper Product Roadmap — v1.1.0 → v2.0.0
 
-**Baseline:** v1.0.3 (current). All items below were checked against the actual source
-(`repomix-output.xml`), not assumed from a prior model's summary — file/function names cited
-are real, and known-already-shipped items have been excluded (see Appendix).
+**Baseline:** v1.1.0 (current, shipped — tag `v1.1.0` @ `807f6f0`, see `CHANGELOG.md`). All
+items below were checked against the actual source (`repomix-output.xml`), not assumed from
+a prior model's summary — file/function names cited are real, and known-already-shipped items
+have been excluded (see Appendix). **Correction:** this document previously listed v1.0.3 as
+the current baseline and treated v1.1.0 as upcoming work; v1.1.0 has since shipped and is
+tagged. `HEAD` currently carries commits beyond the `v1.1.0` tag that are not yet tagged or
+released — check `git log v1.1.0..HEAD` before treating anything past the tag as shipped.
 
 ```
-v1.0.3 (Current Baseline)
- └── v1.1.0: Measurement Foundation & Performance Caching
-      └── v1.2.0: Context Selection Quality & Redundancy Elimination
-           └── v1.3.0: AST Code Folding ("Fast" vs "Deep") & Cache Alignment
-                └── v1.4.0: Granular Sub-Query Re-hydration & MCP Tool Extension
-                     └── v2.0.0: Enterprise Gateway, Remote MCP & Guardrails
+v1.1.0 (Current Baseline, shipped — tag @ 807f6f0)
+ └── v1.2.0: Context Selection Quality & Redundancy Elimination
+      └── v1.3.0: AST Code Folding ("Fast" vs "Deep") & Cache Alignment
+           └── v1.4.0: Granular Sub-Query Re-hydration & MCP Tool Extension
+                └── v2.0.0: Enterprise Gateway, Remote MCP & Guardrails
 ```
 
 ---
 
-## v1.1.0 — Measurement Foundation & Performance Caching
+## v1.1.0 — Measurement Foundation & Performance Caching — **SHIPPED**
+
+**Status:** Shipped as of the `v1.1.0` tag (`807f6f0`); this is no longer upcoming work.
+Retained below for detail. `configSchemaVersion` and the Git workspace TTL cache are
+confirmed present in source (`src/config/types.ts`, `src/core/topology/git-inspector.ts`).
+The tiktoken/`cl100k` adapter sub-item below is **partially** shipped — see the corrected
+description under "Pluggable `TokenizerAdapter` architecture."
 
 **Core objective:** accurate token counting, disambiguated config schema, fewer redundant Git calls.
 
 ### Pluggable `TokenizerAdapter` architecture
 - Replace the `content.length / 4` estimate (used across budgeting, knapsack scoring, and reporting) with a pluggable interface.
 - **Default (zero-dep):** enhanced deterministic character/word-ratio estimator. No bundled vocab, no new package.
-- **Optional adapter:** tiktoken / `cl100k` provider for exact token counts.
+- **Optional adapter — seam shipped, no bundled provider:** `src/core/hashing/tokenizer.ts`
+  exports `createTiktokenAdapter(encoderInstance)`, which builds a `TokenizerAdapter`
+  (`name: 'tiktoken_bpe'`, `isExact: true`) from a `cl100k_base`-compatible BPE encoder the
+  caller supplies. There is no `tiktoken` package in `package.json` — no bundled provider,
+  no new dependency. This is a deliberate zero-dependency design, not an omission: the
+  adapter interface is shipped, and exact token counts are available to anyone who wires up
+  their own encoder.
 - **Scope note:** the default heuristic is *not* exact. Anything downstream that needs precise token boundaries (see v1.3.0 `cache_control` placement) only gets that guarantee when the optional adapter is enabled — the roadmap should say this explicitly rather than implying the default is sufficient.
 
 ### Config schema versioning & migration
@@ -105,8 +120,13 @@ export function processOrder(order: Order): Promise<Result> {
 
 ### `cache_control` ephemeral breakpoint injection
 - Automatically inject Anthropic `cache_control: {"type": "ephemeral"}` markers at 1,024-token boundaries after prefix locking.
-- **Exact mode:** when the tiktoken adapter (v1.1.0) is enabled — precise boundary placement.
-- **Best-effort mode:** default zero-dependency heuristic tokenizer — boundaries are approximate. State this explicitly to users; don't imply the default estimator delivers exact placement.
+- **Exact mode:** requires the caller to construct `createTiktokenAdapter()` (v1.1.0) with
+  their own `cl100k_base`-compatible encoder — TokenDamper does not bundle one. Only then
+  does `isExact === true` and boundary placement become precise.
+- **Best-effort mode (default):** the zero-dependency `EnhancedHeuristicTokenizer`
+  (`isExact: false`) is what runs unless a caller has wired up their own encoder — boundaries
+  are approximate. State this explicitly to users; don't imply the default estimator
+  delivers exact placement.
 
 ### Performance verification targets
 - **Benchmark target (via `src/bench`):** Fast Mode `<1ms`/file; Deep Mode `~15ms`/file. Unvalidated until built — treat as targets, not committed numbers.
@@ -154,8 +174,8 @@ Update `TOOL_DEFINITIONS` in `src/adapters/mcp/tools.ts` — this matches the to
 
 | Release | Focus | Key Deliverable | Benchmark Target |
 |---|---|---|---|
-| v1.0.3 | Baseline | 0/1 Knapsack, AST validators, debt/drift ledgers | Current test suite |
-| v1.1.0 | Measurement | Pluggable tokenizer, `configSchemaVersion`, Git TTL cache | Sub-ms cache lookups |
+| v1.0.3 | Prior release | 0/1 Knapsack, AST validators, debt/drift ledgers | Current test suite |
+| v1.1.0 | **Baseline (shipped)** | Heuristic tokenizer, `configSchemaVersion`, Git TTL cache | Sub-ms cache lookups |
 | v1.2.0 | Selection quality | BM25 + graph hybrid scorer, dual-path MMR (DP refinement / live greedy) | `<10ms` pipeline selection |
 | v1.3.0 | Folding & cache | Fast (zero-dep) vs Deep (AST) mode, `cache_control` (exact/best-effort) | `<1ms` Fast / `~15ms` Deep |
 | v1.4.0 | Retrieval | `rehydrate_context` with sub-query matching | Targeted line extraction |
@@ -189,3 +209,4 @@ taking a prior draft at face value, and are already excluded/corrected above:
 - Config filename corrected to `tokendamper.config.json` (not `.tokendamperrc`).
 - `rehydrate_context`'s example payload corrected to match the tool's real parameters (`text`/`sessionId`), replacing an invented `blockHash` field.
 - The MMR mechanism went through three iterations: (1) "modify the knapsack value function directly" — rejected, incompatible with DP's independent-value assumption; (2) "static pre-knapsack reranking pass" — rejected, creates a circularity where items are penalized against a hypothetical selected-set that may not match the solver's actual output; (3) **adopted:** path-specific handling — post-selection refinement for DP, live marginal recomputation for greedy — with the loop-to-convergence and pinned-item exclusion requirements folded in above.
+- **Baseline correction:** this document previously stated `Baseline: v1.0.3 (current)` and listed the entire v1.1.0 section as upcoming work. A ground-truth check against `git tag`, `CHANGELOG.md`, and source confirmed `v1.1.0` is tagged (`807f6f0`) and shipped — `configSchemaVersion` (`src/config/types.ts`), the Git workspace TTL cache (`src/core/topology/git-inspector.ts`), and a heuristic tokenizer are all present in source. Baseline corrected to v1.1.0 and the v1.1.0 section marked shipped rather than removed, since its optional tiktoken/`cl100k` adapter sub-item is not independently confirmed.

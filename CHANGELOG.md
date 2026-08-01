@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or released; run
+`git log v1.1.0..HEAD` to confirm current scope before relying on this list.
+
+### Fixed
+- **Planner Budget Trigger**: `isKnapsackMode` now also triggers on
+  `budget.targetReductionRatio`, not just `maxInputTokens` — previously a budget supplying
+  only `--target-reduction-ratio` silently resolved to `pass_through` mode with zero stages
+  executed.
+- **ESLint CI Failures**: Resolved lint issues breaking CI (`src/config/load.ts`,
+  `src/core/hashing/tokenizer.ts`, related tests).
+- **Design Gaps — Git Caching, Tokenizer, Versioning, Config Schema**: Follow-up fixes
+  across `src/config/load.ts`, `src/config/schema.ts`, `src/core/hashing/tokenizer.ts`,
+  `src/core/topology/git-inspector.ts`, and adapter entry points.
+
+### Changed
+- **Documentation**: Updated `ARCHITECTURE.md`, `DECISIONS.md`, and `ROADMAP.md` for v2.0
+  planning.
+
 ## [v1.1.0] - 2026-07-29
 
 ### Added

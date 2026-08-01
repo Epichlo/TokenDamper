@@ -11,6 +11,17 @@ Because LLM providers (Anthropic Claude, OpenAI GPT-4o) employ prefix-based prom
 2. **Prompt-Cache Prefix Preservation Rules** to guarantee high cache-hit ratios on Anthropic and OpenAI APIs.
 3. **Optimization Debt & Semantic Drift Tracking** to prevent contextual degradation across long multi-turn sessions.
 
+**Execution-path caveat:** The capability this document specifies — cross-turn deduplication
+(`cleanup:session-dedup`) — currently executes only via the Gateway proxy path
+(`src/gateway/proxy.ts`), which calls `runSessionDedupStage()` directly and bypasses the
+validation and fallback pipeline entirely. It never runs via the CLI or MCP paths (both go
+through `core/engine.optimize()` and the planner, which never selects this stage). The
+telemetry, debt-tracking, and fallback guarantees described below assume the general
+TokenDamper pipeline; they are not backed by the validators, `DriftTracker`,
+`ConfidenceLedger`, or fallback resolver on the path this feature actually runs on. In
+particular, Section 5's `[x] Explicit Fallback Guarantee` does not hold in production Gateway
+traffic — see `CLAUDE.md` Known bugs.
+
 ---
 
 ## 1. Cross-Turn Token Savings & Efficiency Metrics

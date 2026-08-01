@@ -17,6 +17,17 @@ Milestone 6 introduces advanced content compression, cross-turn diffing, and sta
 3. **Elision Confidence Ledger (`src/core/ledger/confidence-ledger.ts`)**: Maintains stateful restoration safety scores ($C_{\text{elision}} \in [0.0, 1.0]$) per context item across session turns, dynamically decaying confidence over turn distance and AST risk, and triggering automated context re-hydration whenever confidence falls below `minimumConfidence`.
 4. **Registry, Planner & Engine Extensions**: Registers built-in stages (`compression:delta-compression`, `compression:token-hashing`), expands planner execution modes, and wires automated re-hydration evaluation into the execution pipeline.
 
+**Execution-path caveat:** The pipeline diagram below (Section 2) shows `cleanup:session-dedup`
+as `Stage1`, feeding into the same Confidence Ledger evaluation, AST/Structural Validator, and
+Fallback shown for the other stages. That is not what currently happens. The planner
+(`src/core/planner/index.ts`) never places `cleanup:session-dedup` in `plan.stageIds`, so it
+never runs through this pipeline via the CLI or MCP paths at all. It only runs via the Gateway
+proxy (`src/gateway/proxy.ts`), which calls `runSessionDedupStage()` directly and bypasses the
+Confidence Ledger, AST/Structural Validator, and Fallback entirely — none of the safety steps
+in the diagram below apply to it in practice. `compression:delta-compression`,
+`compression:token-hashing`, and `pruning:topology-pruner` do run through the validated
+CLI/MCP path as diagrammed. See `CLAUDE.md` Known bugs.
+
 ---
 
 ## 2. Architecture Overview & Pipeline Topology

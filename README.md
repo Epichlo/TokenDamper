@@ -2,7 +2,9 @@
 
 TokenDamper is a universal context optimization engine for AI coding assistants. 
 
-It acts as an intelligent middleware proxy that compresses and deduplicates context before it reaches an LLM, reducing token usage, speeding up responses, and lowering API costs—while guaranteeing correctness and semantics.
+It acts as an intelligent middleware proxy that compresses and deduplicates context before it reaches an LLM, reducing token usage, speeding up responses, and lowering API costs—while guaranteeing correctness and semantics in CLI and MCP modes. See the Gateway proxy limitation below.
+
+> **Gateway proxy limitation:** The local Gateway HTTP proxy mode (started via `tokendamper exec`) currently bypasses TokenDamper's validation pipeline. It does not run AST/syntax validation, semantic-drift checking, the confidence ledger, or the fail-open fallback path. The trace field `fallbackUsed` is hardcoded `false` on this path — it is not a computed result. The syntax-safety, semantic-drift, and guaranteed-fallback guarantees described in this document apply to CLI (`tokendamper optimize`) and MCP (`tokendamper mcp`) modes only. This is a known gap, tracked and being fixed. Do not route production traffic through Gateway mode expecting those guarantees today.
 
 ## Overview & Features
 
@@ -113,6 +115,8 @@ Raw Input
       -> Explicit Fallback (on constraint violation)
   -> Final Output + Explainability Trace
 ```
+
+Note: the `AST Validators` and `Explicit Fallback` steps above run in CLI and MCP modes. Gateway mode does not execute them — see the Gateway proxy limitation notice above.
 
 ## License
 TokenDamper is now licensed under the Mozilla Public License 2.0 (MPL-2.0). See [LICENSE](./LICENSE).
