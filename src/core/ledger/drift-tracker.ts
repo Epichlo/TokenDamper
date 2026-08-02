@@ -1,4 +1,21 @@
-import type { ContextBundle, ContextItem } from '../model';
+import type { ContentType, ContextBundle, ContextItem } from '../model';
+
+/**
+ * Content types for which markdown structural markers (`#` headings, ``` fences, `---`
+ * section rules) are genuine structure rather than a coincidence of syntax.
+ *
+ * Deliberately an allowlist, not a denylist of `code`/`yaml`. A new `ContentType` should
+ * default to *not* harvesting these — an absent marker costs a little discrimination, an
+ * invented one actively inflates drift, and the second failure is the one that has
+ * actually bitten (DECISIONS.md §18, `docs/phase-1d-drift-investigation.md` §7).
+ */
+const MARKDOWN_MARKER_TYPES: ReadonlySet<ContentType> = new Set<ContentType>([
+  'markdown',
+  'text',
+  'html',
+  'logs',
+  'unknown',
+]);
 
 /**
  * Substitutes the pre-optimization content back in for items elided into a
@@ -259,21 +276,31 @@ export class DriftTracker {
         markers.add(`filepath:${item.path}`);
       }
 
+      // Headings, fences and section delimiters are *markdown* syntax. Harvesting them from
+      // content where those characters mean something else invents markers that the next
+      // elision then "destroys", inflating drift for no semantic reason.
+      //
+      // Measured: `#` is a comment leader in Python, and a two-comment Python file scored
+      // `R_struct = 0.3333` and `S_k = 0.8667` — above the 0.60 ceiling that applies to code
+      // (DECISIONS.md §18), purely because two comments were read as headings. Drift on
+      // Python scaled with comment density. `---` is likewise a YAML document separator.
+      const harvestMarkdownMarkers = MARKDOWN_MARKER_TYPES.has(item.contentType);
+
       const lines = item.content.split('\n');
       for (const line of lines) {
         const trimmed = line.trim();
 
         // Markdown headings
-        if (/^#{1,6}\s+/.test(trimmed)) {
+        if (harvestMarkdownMarkers && /^#{1,6}\s+/.test(trimmed)) {
           markers.add(`heading:${trimmed}`);
         }
 
         // Code block fences
-        if (/^```/.test(trimmed)) {
+        if (harvestMarkdownMarkers && /^```/.test(trimmed)) {
           markers.add(`fence:${trimmed}`);
         }
 
-        // Preserved directives
+        // Preserved directives — content-agnostic, harvested from every content type.
         const directiveMatch = /(TD_PRESERVE:[^\s>\n]+)/g;
         let match: RegExpExecArray | null;
         while ((match = directiveMatch.exec(trimmed)) !== null) {
@@ -281,7 +308,7 @@ export class DriftTracker {
         }
 
         // Section delimiters
-        if (/^(---|===|System:|User:|Assistant:|\[Context\]|\[Instructions\])/i.test(trimmed)) {
+        if (harvestMarkdownMarkers && /^(---|===|System:|User:|Assistant:|\[Context\]|\[Instructions\])/i.test(trimmed)) {
           markers.add(`section:${trimmed}`);
         }
       }

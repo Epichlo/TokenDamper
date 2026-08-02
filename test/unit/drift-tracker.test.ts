@@ -189,4 +189,63 @@ describe('DriftTracker', () => {
     expect(symbols.has('fn:train')).toBe(true);
     expect(symbols.has('fn:evaluate')).toBe(true);
   });
+
+  describe('markdown markers are not harvested from code', () => {
+    const commented = '# Configuration section\n# Another note\nimport os\n\nclass Widget:\n    def render(self):\n        return 1\n';
+
+    it('does not read Python comments as markdown headings', () => {
+      const tracker = new DriftTracker();
+      const bundle = createContextBundle(commented, 'file', 'src/widget.py');
+      expect(bundle.items[0]!.contentType).toBe('code');
+
+      const markers = tracker.extractMarkers(bundle);
+      // `filepath:` only. Before the fix this also contained two `heading:` entries, one
+      // per `#` comment, because /^#{1,6}\s+/ cannot tell a comment from a heading.
+      expect([...markers]).toEqual(['filepath:src/widget.py']);
+    });
+
+    it('still harvests real markdown headings from markdown', () => {
+      // The complement, and unlike its two siblings this one passes with the fix reverted —
+      // verified. It is not evidence the fix works; it guards against the gate over-firing
+      // and silently disarming heading detection everywhere.
+      const tracker = new DriftTracker();
+      const bundle = createContextBundle('# Title\n\nSome prose.\n\n## Section\n', 'file', 'notes.md');
+      expect(bundle.items[0]!.contentType).toBe('markdown');
+
+      const markers = tracker.extractMarkers(bundle);
+      expect(markers.has('heading:# Title')).toBe(true);
+      expect(markers.has('heading:## Section')).toBe(true);
+    });
+
+    it('keeps drift on commented code inside the ceiling that applies to code', () => {
+      // The measured consequence. Eliding this file destroys every symbol, so R_AST = 0 and
+      // S_k must land on exactly w_AST = 0.60 — the ceiling for code established in
+      // DECISIONS.md §18, since `filepath:` survives and pins R_struct at 1.0.
+      //
+      // Before the fix the two comments were counted as markers, destroyed along with the
+      // content, and drift read R_struct = 0.3333 / S_k = 0.8667 — above a ceiling it should
+      // not have been able to exceed, scaling with comment density rather than with loss.
+      const tracker = new DriftTracker();
+      const before = createContextBundle(commented, 'file', 'src/widget.py');
+      const elided = createContextItem({
+        id: before.items[0]!.id,
+        kind: 'file',
+        contentType: 'code',
+        content: '<BLOCK_HASH:0000000000000000000000000000000000000000000000000000000000000000>',
+        origin: 'src/widget.py',
+        path: 'src/widget.py',
+        metadata: freeze({ elided: true }),
+      });
+      const after = freeze({
+        ...before,
+        items: freeze([elided]),
+        statistics: createBundleStatistics([elided]),
+      });
+
+      const report = tracker.calculateDrift(before, after);
+      expect(report.astSymbolRetentionRatio).toBe(0);
+      expect(report.structuralIntegrityRatio).toBe(1);
+      expect(report.driftScore).toBeCloseTo(0.6, 10);
+    });
+  });
 });
