@@ -1,7 +1,21 @@
 import type { IncomingHttpHeaders } from 'node:http';
 import { loadConfig } from '../config';
-import { createContextItem, createOptimizationBudget, freeze, hashContent } from '../core/model/constructors';
-import type { ContextBundle, ContextItem, ContextItemKind, OptimizationRequest, ResolvedConfig } from '../core/model/types';
+import {
+  classifyContent,
+  createBundleStatistics,
+  createContextItem,
+  createOptimizationBudget,
+  freeze,
+  hashContent,
+} from '../core/model/constructors';
+import type {
+  ContentType,
+  ContextBundle,
+  ContextItem,
+  ContextItemKind,
+  OptimizationRequest,
+  ResolvedConfig,
+} from '../core/model/types';
 import { optimize } from '../core/engine';
 import { ConfidenceLedger } from '../core/ledger/confidence-ledger';
 import { TOKENDAMPER_VERSION } from '../version';
@@ -396,6 +410,32 @@ function runGatewayOptimization(
   };
 }
 
+/**
+ * Classifies a provider message body with the canonical ingestion classifier.
+ *
+ * Every other construction site in the codebase reaches `classifyContent` through
+ * `createContextBundle`; the Gateway built its items by hand and hardcoded
+ * `contentType: 'text'` instead. That literal was not cosmetic — it silently disarmed
+ * both safety nets on JSON-shaped traffic, which is most of what a Gateway carries:
+ *
+ *  - `selectValidator` dispatches on `language` -> `path` -> `contentType`. Gateway items
+ *    have no language and no path, so a `text` tag meant it returned `null` and **no AST
+ *    validator ran at all**.
+ *  - `DriftTracker.extractSymbols` only harvests `jsonkey:` symbols when
+ *    `contentType === 'json'`. A JSON payload tagged `text` yields zero symbols, so
+ *    retention was vacuously 1.0 and drift vacuously 0.00.
+ *
+ * Both checks were reporting a pass they had never performed. See
+ * `docs/issue-2-content-type-contract-design.md` §2.2.
+ *
+ * There is deliberately no `sourcePath` argument: a provider message has no filename, so
+ * classification is by content alone. Do not invent one from `origin` — the extension
+ * branch of `classifyContent` would then trust a synthesized path over real content.
+ */
+function classifyGatewayContent(content: string): ContentType {
+  return classifyContent(content, 'text');
+}
+
 function processOpenAiRequest(
   rawBody: string,
   headers: Record<string, string>,
@@ -438,7 +478,8 @@ function processOpenAiRequest(
       createContextItem({
         id: `msg-${i}-${contentHash.slice(0, 8)}`,
         kind,
-        contentType: 'text',
+        // Classified, not hardcoded — see the note above `classifyGatewayContent`.
+        contentType: classifyGatewayContent(textContent),
         content: textContent,
         origin: `openai:messages[${i}]`,
         contentHash,
@@ -448,12 +489,10 @@ function processOpenAiRequest(
     );
   }
 
-  const statistics = {
-    itemCount: items.length,
-    contentTypeCounts: { text: items.length, markdown: 0, code: 0, html: 0, json: 0, yaml: 0, logs: 0, unknown: 0 },
-    kindCounts: { prompt: items.filter((i) => i.kind === 'prompt').length, file: 0, diff: 0, conversation: items.filter((i) => i.kind === 'conversation').length, note: 0 },
-    totalCharacters: items.reduce((acc, curr) => acc + curr.content.length, 0),
-  };
+  // Derived from the items rather than hand-rolled. The previous literal asserted
+  // `text: items.length`, which was only ever consistent with the hardcoded tag it
+  // accompanied; with items now classified it would be a second, contradicting answer.
+  const statistics = createBundleStatistics(items);
 
   const bundleHash = hashContent({ items: items.map((i) => i.contentHash) });
   const initialBundle: ContextBundle = freeze({
@@ -543,7 +582,7 @@ function processAnthropicRequest(
       createContextItem({
         id: `sys-${contentHash.slice(0, 8)}`,
         kind: 'prompt',
-        contentType: 'text',
+        contentType: classifyGatewayContent(systemText),
         content: systemText,
         origin: 'anthropic:system',
         contentHash,
@@ -565,7 +604,7 @@ function processAnthropicRequest(
       createContextItem({
         id: `msg-${i}-${contentHash.slice(0, 8)}`,
         kind: 'conversation',
-        contentType: 'text',
+        contentType: classifyGatewayContent(textContent),
         content: textContent,
         origin: `anthropic:messages[${i}]`,
         contentHash,
@@ -575,12 +614,7 @@ function processAnthropicRequest(
     );
   }
 
-  const statistics = {
-    itemCount: items.length,
-    contentTypeCounts: { text: items.length, markdown: 0, code: 0, html: 0, json: 0, yaml: 0, logs: 0, unknown: 0 },
-    kindCounts: { prompt: items.filter((i) => i.kind === 'prompt').length, file: 0, diff: 0, conversation: items.filter((i) => i.kind === 'conversation').length, note: 0 },
-    totalCharacters: items.reduce((acc, curr) => acc + curr.content.length, 0),
-  };
+  const statistics = createBundleStatistics(items);
 
   const bundleHash = hashContent({ items: items.map((i) => i.contentHash) });
   const initialBundle: ContextBundle = freeze({

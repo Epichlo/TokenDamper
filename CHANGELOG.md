@@ -10,6 +10,25 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
 `git log v1.1.0..HEAD` to confirm current scope before relying on this list.
 
 ### Fixed
+- **Gateway Hardcoded `contentType: 'text'` (Issue 2, Commit C)**: `src/gateway/proxy.ts`
+  built its context items by hand and hardcoded the content-type tag instead of calling
+  `classifyContent`, the classifier every other construction site reaches through
+  `createContextBundle`. That literal silently disarmed both safety nets on exactly the
+  traffic a Gateway carries: `selectValidator` dispatches on `language` → `path` →
+  `contentType`, and Gateway items have neither of the first two, so a `text` tag meant no
+  AST validator ran at all; `DriftTracker.extractSymbols` harvests `jsonkey:` symbols only
+  when `contentType === 'json'`, so a JSON payload tagged `text` yielded zero symbols and
+  drift was vacuously `0.00`. Both checks reported passes they had never performed. Message
+  content is now classified, and `statistics.contentTypeCounts` is derived from the items
+  rather than asserted as all-`text`.
+
+  Measured consequence, as predicted in `docs/phase-1-stabilization-summary.md` §9:
+  cross-turn deduplication of a **sole copy** of `tool_output.json` moves from
+  `13,785 / 13,982 = 98.59%` saved with no fallback to **0.00% and a fallback**. That is the
+  drift gate working for the first time on JSON, not a regression — the prior figure
+  depended on sending the model a marker it had no way to resolve. Within-payload
+  duplication, where a referent survives in the same request, still deduplicates at
+  **~66%** with no fallback.
 - **Fenced Blocks Classified As Code**: `classifyContent` treated a triple-backtick fence as
   evidence of `code`, and `selectValidator` maps `code` to the **TypeScript** validator — so
   an ordinary message quoting a snippet was parsed as TypeScript, prose and all. Whether it

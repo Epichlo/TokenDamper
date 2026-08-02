@@ -395,6 +395,122 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
     expect(turn!.tokensSaved).toBeGreaterThan(0);
   });
 
+  // A tool result of the shape the Gateway actually carries: JSON arriving as message
+  // content. Before Commit C these items were tagged `contentType: 'text'`.
+  const JSON_TOOL_RESULT = JSON.stringify({
+    status: 'ok',
+    durationMs: 42,
+    rows: [
+      { id: 1, name: 'alpha', owner: 'team-a', region: 'us-east-1' },
+      { id: 2, name: 'beta', owner: 'team-b', region: 'eu-west-2' },
+      { id: 3, name: 'gamma', owner: 'team-c', region: 'ap-south-1' },
+    ],
+    pagination: { cursor: 'eyJvZmZzZXQiOjN9', hasMore: false },
+  });
+
+  it('classifies message content, so drift can finally see JSON keys (Commit C)', async () => {
+    const sessionStore = server.getSessionStore();
+
+    const turn1 = JSON.stringify({ model: 'gpt-4o', messages: [{ role: 'user', content: JSON_TOOL_RESULT }] });
+    await handleProxyRequest(
+      'POST', '/v1/chat/completions', { 'x-session-id': 'json-relabel-session' }, turn1, { sessionStore },
+    );
+
+    const turn2 = JSON.stringify({
+      model: 'gpt-4o',
+      messages: [
+        { role: 'user', content: JSON_TOOL_RESULT },
+        { role: 'user', content: 'Summarize that result.' },
+      ],
+    });
+    const res2 = await handleProxyRequest(
+      'POST', '/v1/chat/completions', { 'x-session-id': 'json-relabel-session' }, turn2, { sessionStore },
+    );
+
+    // This is the sole copy of the content in the payload, so the elision is lossy and
+    // drift must score it — exactly as the CODE_BLOCK case above already does.
+    //
+    // Before the relabel this payload deduplicated at ~99% and reported no fallback, but
+    // only because `DriftTracker.extractSymbols` harvests `jsonkey:` symbols solely when
+    // `contentType === 'json'`. Tagged `text`, a JSON document yielded zero symbols,
+    // retention was vacuously 1.0 and drift vacuously 0.00 — a pass produced by not
+    // looking. See docs/issue-2-content-type-contract-design.md §2.2.
+    expect(res2.body).toBe(turn2);
+    expect(res2.body).not.toContain('__td_block__');
+
+    const session = sessionStore.getOrCreateSession('json-relabel-session');
+    const turn = session.turns[session.turns.length - 1];
+    expect(turn!.fallbackUsed).toBe(true);
+    expect(turn!.tokensSaved).toBe(0);
+  });
+
+  // Passes both before and after the relabel, deliberately — see the comment inside. It is
+  // a no-change guard, not evidence the relabel works. Do not cite it as the latter.
+  it('emits a JSON-valid elision marker for a message classified json (Commit C)', async () => {
+    const sessionStore = server.getSessionStore();
+
+    const turn1 = JSON.stringify({ model: 'gpt-4o', messages: [{ role: 'user', content: JSON_TOOL_RESULT }] });
+    await handleProxyRequest(
+      'POST', '/v1/chat/completions', { 'x-session-id': 'json-wrapper-session' }, turn1, { sessionStore },
+    );
+
+    // Two copies: the first is preserved as the referent, so the second is recoverable and
+    // survives the drift gate. That is what lets this test observe the emitted marker.
+    const turn2 = JSON.stringify({
+      model: 'gpt-4o',
+      messages: [
+        { role: 'user', content: JSON_TOOL_RESULT },
+        { role: 'user', content: JSON_TOOL_RESULT },
+      ],
+    });
+    const res2 = await handleProxyRequest(
+      'POST', '/v1/chat/completions', { 'x-session-id': 'json-wrapper-session' }, turn2, { sessionStore },
+    );
+
+    const body = JSON.parse(res2.body) as { messages: Array<{ content: string }> };
+    expect(body.messages[0]!.content).toBe(JSON_TOOL_RESULT);
+
+    // The relabel moves `resolveElisionSyntax` from its classifier-vacuum branch onto the
+    // `selectValidator` branch: the tag now selects JsonValidator directly, where before the
+    // item had no governing authority and fell through to `classifyContent`.
+    //
+    // Both branches must render the same bytes — that is the point of Commit A routing them
+    // through one classifier — so this assertion held before the relabel too and is not
+    // evidence that the relabel took effect. What it pins is the *identity*: if a future
+    // change makes the two branches disagree, an item's emitted syntax would depend on
+    // whether its tag happened to be computed, which is the producer/checker split this
+    // whole contract exists to prevent.
+    const elided = body.messages[1]!.content;
+    const parsed = JSON.parse(elided) as Record<string, unknown>;
+    expect(parsed.__td_block__).toContain('[TokenDamper Elided: ref=');
+    expect(sessionStore.getContent('json-wrapper-session', elided)).toBe(JSON_TOOL_RESULT);
+
+    const session = sessionStore.getOrCreateSession('json-wrapper-session');
+    expect(session.turns[session.turns.length - 1]!.fallbackUsed).toBe(false);
+  });
+
+  it('does not fall back on a fenced message that no stage transformed (Commit C1)', async () => {
+    const sessionStore = server.getSessionStore();
+
+    // Turn 1 has no previous block hashes, so `cleanup:session-dedup` cannot elide anything
+    // and the bundle reaches validation untouched. Any fallback here is a false positive.
+    //
+    // The relabel is what exposes this: with `contentType` computed, a fenced message used
+    // to classify as `code`, and `selectValidator` maps `code` to the TypeScript validator.
+    // The three apostrophes below then read as an unterminated string literal. Commit C1
+    // reclassified fenced content as `markdown`, which selects no validator. DECISIONS.md §17.
+    const message = "Here's the fix. It's the guard that's missing:\n\n```ts\nconst a = 1;\n```";
+    const body = JSON.stringify({ model: 'gpt-4o', messages: [{ role: 'user', content: message }] });
+
+    const res = await handleProxyRequest(
+      'POST', '/v1/chat/completions', { 'x-session-id': 'fenced-prose-session' }, body, { sessionStore },
+    );
+
+    expect(res.body).toBe(body);
+    const session = sessionStore.getOrCreateSession('fenced-prose-session');
+    expect(session.turns[0]!.fallbackUsed).toBe(false);
+  });
+
   it('forwards optimized OpenAI requests upstream with authorization headers', async () => {
     const sessionStore = server.getSessionStore();
     let forwardedBody = '';

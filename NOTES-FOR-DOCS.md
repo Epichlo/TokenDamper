@@ -89,3 +89,58 @@ logs drops from ~99% to 0% with a fallback; within-payload duplication still ded
 **Not changed:** MCP behavior. `cleanup:session-dedup` only runs under `session_dedup`
 planner mode, which only the Gateway sets, so the stage never executes on the CLI or MCP
 paths. The change is path-agnostic in code and Gateway-only in effect.
+
+---
+
+## `docs/phase-1-stabilization-summary.md` §9 — the predicted flip happened, plus one it missed
+
+**Date:** 2026-08-02
+**Status of the correction:** measured, implemented in Commit C of Issue 2
+
+**What the document says.** §9 records the cross-turn `tool_output.json` row still reading
+99.14% after Commit B, notes that this is the §2.2 vacuity rather than a surviving
+exemption, and predicts: *"Commit C (the relabel) is expected to flip that row to 0% and a
+fallback ... It is listed here so the change is attributable when it happens rather than
+read as a regression introduced by the relabel."*
+
+**What happened.** The prediction held. Measured through the real proxy path, two turns per
+session, same methodology as §9:
+
+| Payload (cross-turn, sole copy) | Before Commit C | After Commit C |
+|---|---|---|
+| `tool_output.json` | 13,785 / 13,982 = **98.59%**, no fallback | **0.00%**, fallback |
+| `codebase.py` | 0.00%, fallback | 0.00%, fallback |
+| `sample_logs.txt` | 0.00%, fallback | 0.00%, fallback |
+
+Within-payload duplication is unchanged at ~66% with no fallback on all three, which is the
+result that matters for the relabel being safe: it does not disturb the case where a
+referent demonstrably survives in the same request.
+
+**What §9 did not anticipate.** The relabel also introduced a **false positive**, caught by
+measurement rather than by the design:
+
+`validate()` runs `validateBundleAst` over **every item in the final bundle**, not only the
+items a stage changed. So a newly computed tag can fail an item that nothing touched. With
+`contentType` computed, a message quoting a code snippet classified as `code`, and
+`selectValidator` maps `code` to the TypeScript validator — so on **turn 1**, where
+`cleanup:session-dedup` has no previous block hashes and cannot elide anything, this fell
+back:
+
+    Here's the fix. It's the guard that's missing:
+
+    ```ts
+    const a = 1;
+    ```
+
+Three apostrophes leave an odd number of quote characters open and the message is rejected
+as an unterminated string literal. The same message with one fewer contraction passes.
+
+That is fixed in Commit C1 (`DECISIONS.md` §17) by reclassifying fenced content as
+`markdown`, which selects no validator. C1 landed **before** the relabel so the Gateway was
+never in the regressed state.
+
+**The general lesson, worth carrying into per-stage checkpointing (Phase 1c).** A
+content-type tag is not only an input to the transform; it is an input to the *check applied
+to everything in the bundle*. Any future change to classification has a blast radius over
+untouched items, and the way to see it is to measure turn 1 — where nothing is transformed,
+so every failure is a false positive by construction.

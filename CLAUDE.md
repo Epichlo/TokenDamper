@@ -129,10 +129,21 @@ Full detail in `tokendamper-headroom-known-issues.md`; proposed fixes in
   payload); and it passes a **per-request** `ConfidenceLedger`, because a session-scoped one
   decays earlier turns below `validation.minimumConfidence` (default 1) and would force a
   fallback on every turn after the first.
-- **Issue 2 (blocker):** `compression:token-hashing` writes bare `<BLOCK_HASH:...>` into
-  JSON content; the downstream JSON/AST validator then correctly rejects it and the whole
-  pipeline falls back. This 0%-fails on **any** JSON-shaped payload. The stage has no
-  content-type awareness.
+- **~~Issue 2: eliding stages corrupt JSON content~~ — FIXED (Commits 29f66b3, e9ea50d,
+  b11dcb0, 642abcb, Commit C).** All three eliding stages now route through
+  `core/elision.elideItem`, which resolves the syntax from the same `selectValidator` the
+  checker uses and renders the marker validly for it — JSON elisions become
+  `{"__td_block__":"<marker>"}`, and `TokenHasher.rehydrateText` unwraps them. The Gateway
+  no longer hardcodes `contentType: 'text'`; message content is classified, so
+  `selectValidator` and `DriftTracker.extractSymbols` finally see JSON as JSON.
+  Two things to know before building on this:
+  - The load-bearing mechanism is **correct-by-construction rendering**, not the
+    post-condition check. Only `JsonValidator` rejects a bare placeholder; the TS and
+    Python AST-lite validators accept it, so `post_condition_rejected` is unreachable
+    today. Placeholder injection into TS/Python content is caught only by drift.
+  - This did **not** make `token-hashing` safe to run on the Gateway. It is lossy, sets no
+    `recoverable` flag, and measures `S_k = 0.60` on JSON — so it now fails the drift gate
+    instead of the AST gate. Invariant 8 still stands.
 - **Issue 5:** on fallback, `session.json` emits **-1.39%** — output is *larger* than
   input. Fallback re-renders `currentBundle` instead of echoing raw input bytes.
 - **Issue 3 (probably correct behavior):** drift 0.60 > 0.40 aborts on `codebase.py`.
@@ -145,8 +156,14 @@ Full detail in `tokendamper-headroom-known-issues.md`; proposed fixes in
 Issues 2 and 5 are the same class of failure: a **round-trip invariant violation**.
 The agreed direction is three scoped changes (no rewrite):
 
-1. Content-type (`json` / `code` / `prose` / `logs`) becomes a first-class tag on
-   `ContextBundle`, set at ingestion and consulted by the planner *before* transforms run.
+1. ~~Content-type becomes a first-class tag on `ContextBundle`.~~ **Done, but not at that
+   seam.** The tag belongs on `ContextItem`, where it already existed — `selectValidator`
+   dispatches per item, so a bundle-level tag would key the transform and the check at
+   different granularities, reproducing Issue 2's shape while appearing to fix it. Bundles
+   are heterogeneous (a 12 KB JSON tool result next to a one-line question), and
+   `statistics.contentTypeCounts` is already the bundle-level view. See `NOTES-FOR-DOCS.md`.
+   The planner-level gate (§3.6 of the design doc) is still **not** implemented: nothing in
+   `src/core/planner/` reads `contentType`.
 2. Per-stage checkpointing replacing the single global validate→fallback gate — roll back
    only the failing stage, keep prior valid reductions. Requires extending the trace with
    per-stage status.
@@ -171,11 +188,22 @@ scoring, MMR, AST folding and Prometheus metrics on top of a pipeline that curre
 
 ## Gotchas
 
-- `DriftTracker` exempts elisions tagged `recoverable: true` (currently only
-  `cleanup:session-dedup`) by substituting their pre-optimization content before scoring —
-  a dedup marker is a reference to text still in the session store, not semantic loss. Do
-  not infer the exemption from `elided` or `originalContentHash`; `token-hashing` sets both
-  and must stay fully scored. See DECISIONS.md §16.
+- `DriftTracker` exempts elisions tagged `recoverable: true` by substituting their
+  pre-optimization content before scoring. `cleanup:session-dedup` sets that flag **only
+  when an intact copy of the content survives elsewhere in the same outbound payload** — it
+  preserves the first occurrence and elides the copies after it. A sole copy is still
+  elided but carries `recoverable: false` and is scored in full. The earlier rationale
+  ("the session store can restore it, so the marker is a pointer") does **not** hold on the
+  Gateway path: the consumer is a stateless provider API with no rehydration mechanism, so
+  elided content is deleted, not referenced. Do not infer the exemption from `elided` or
+  `originalContentHash`; `token-hashing` sets both and must stay fully scored.
+  See DECISIONS.md §16 and the §16 entry in `NOTES-FOR-DOCS.md`.
+- **Classification has a blast radius over items no stage touched.** `validate()` runs
+  `validateBundleAst` over *every* item in the final bundle, so changing what
+  `classifyContent` returns can fail an item nothing transformed. To see it, measure
+  **turn 1** of a Gateway session: `cleanup:session-dedup` has no previous block hashes
+  there and cannot elide anything, so any fallback is a false positive by construction.
+  That is how the fenced-prose defect in DECISIONS.md §17 was found.
 - `package.json` and `src/version.ts` say **1.1.0**, but the roadmap treats **v1.0.3** as
   the baseline. Reconcile before cutting a release; don't assume either is right.
 - `configSchemaVersion` **already exists** in `src/config/types.ts`, despite the roadmap
