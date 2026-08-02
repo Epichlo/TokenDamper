@@ -44,3 +44,48 @@ they already propagate, and that nothing binds how a stage elides to which valid
 judge the result.
 
 **Where the approved design lives:** `docs/issue-2-content-type-contract-design.md`.
+
+---
+
+## `DECISIONS.md` §16 — the recoverable-elision rationale does not hold on the Gateway path
+
+**Date:** 2026-08-02
+**Status of the correction:** approved, implemented in Commit B of Issue 2
+
+**What the document says.** §16 ("Recoverable References Are Not Semantic Drift") justifies
+exempting `cleanup:session-dedup` elisions from drift on the grounds that *"a dedup marker
+is a pointer: the full text is retained in the session store under `originalContentHash` and
+is restorable on demand. Nothing is irrecoverably lost, so nothing should be scored as
+loss."*
+
+**Where that holds.** On the MCP path, where `rehydrate_context` exists and a client can
+actually resolve the reference. §16 stands there.
+
+**Where it does not.** On the Gateway path, which is the *only* path
+`cleanup:session-dedup` currently runs on. The consumer there is a stateless provider API:
+
+- It has no rehydration mechanism and will never call `rehydrate_context`.
+- Each request is independent, so content sent in an earlier turn is not available to the
+  model in this one. Prompt caching does not help — it reuses computation for identical
+  prefix bytes, and an elision changes those bytes.
+- `rehydrateRefs` — the only input that triggers rehydration inside the stage — is never set
+  by any caller in `src/`. The rehydration branch is unreachable in the product.
+
+So content elided from an outbound payload is not pointed at, it is **deleted**. Cross-turn
+elision of a sole copy is lossy compression wearing a pointer's clothes, and `DriftTracker`
+scoring it 0.60 was correct all along. The exemption was granting a pass to precisely the
+case that deserved scoring — the same shape as the hardcoded `fallbackUsed: false` that
+Phase 1.0a removed: a safety property asserted without being evaluated.
+
+**The correction.** `recoverable: true` is now set only when an intact copy of the content
+survives elsewhere in the **same outbound payload**. The stage preserves the first
+occurrence of duplicated content so the copies after it reference something demonstrably
+present in this request. That is a verifiable precondition rather than an assumed one.
+
+**Measured cost:** `docs/phase-1-stabilization-summary.md` §9. Cross-turn dedup on code and
+logs drops from ~99% to 0% with a fallback; within-payload duplication still deduplicates at
+~66%. The Gateway's near-term dedup value is likely close to zero on realistic traffic.
+
+**Not changed:** MCP behavior. `cleanup:session-dedup` only runs under `session_dedup`
+planner mode, which only the Gateway sets, so the stage never executes on the CLI or MCP
+paths. The change is path-agnostic in code and Gateway-only in effect.

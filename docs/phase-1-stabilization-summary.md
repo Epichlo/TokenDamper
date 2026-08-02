@@ -12,6 +12,23 @@
 >
 > The load-bearing decisions from this report are duplicated into `CLAUDE.md` (invariants)
 > and into comments at the relevant call sites, because those are read and this is not.
+>
+> ### Superseded: the drift-exemption rationale in §5.3 and §2.1
+>
+> §5.3 justifies exempting dedup elisions from drift on the grounds that a marker is a
+> pointer to restorable content. **That rationale does not hold on the Gateway path**, and
+> the §2.1 measurement showing dedup at `S_k = 0.0000` was therefore reporting a pass that
+> had not been earned.
+>
+> The Gateway's consumer is a stateless provider API. It has no rehydration mechanism, never
+> calls `rehydrate_context`, and has no memory of a previous turn's request. Content elided
+> from an outbound payload is not pointed at — it is deleted, and the model cannot resolve
+> the marker by any means available to it. Cross-turn elision of a sole copy is lossy
+> compression, and drift scoring it 0.60 was correct all along.
+>
+> Corrected in Commit B: `recoverable: true` is now set only when an intact copy survives
+> elsewhere in the **same outbound payload**, which is the only version of the claim the
+> stage can verify. See §9 for the measured cost.
 
 Covers Phase **1.0a** and **1.0b** of the Gateway stabilization work, plus the supporting
 commits landed alongside them.
@@ -228,6 +245,52 @@ Carried forward deliberately, not oversights:
    valid reductions; per-stage checkpointing remains outstanding.
 5. **`npm run format` fails on 94 files** repo-wide. Pre-existing, and not part of the CI
    workflow (which runs typecheck → lint → build → test).
+
+## 9. Addendum (2026-08-02) — measured cost of correcting the drift exemption
+
+Commit B narrowed `recoverable: true` to elisions whose referent demonstrably survives in
+the same outbound payload. Measured through the real Gateway proxy path, two turns per
+session, `--mock-upstream`:
+
+**Cross-turn dedup — sole copy, no surviving referent (what the Gateway did before):**
+
+| Payload | Saved | Fallback |
+|---|---|---|
+| `tool_output.json` | 2,987 / 3,013 = **99.14%** | no |
+| `codebase.py` | 0 / 4,238 = **0.00%** | **yes** |
+| `sample_logs.txt` | 0 / 2,728 = **0.00%** | **yes** |
+
+**Within-payload duplication — a copy is preserved (what still deduplicates):**
+
+| Payload | Saved | Fallback |
+|---|---|---|
+| `tool_output.json` | 5,974 / 9,031 = **66.15%** | no |
+| `codebase.py` | 8,434 / 12,707 = **66.37%** | no |
+| `sample_logs.txt` | 5,413 / 8,176 = **66.21%** | no |
+
+**Reading these honestly.** Code and logs went from ~99% "savings" to 0% and a fallback.
+That is not a regression: the prior number depended on sending the model markers it had no
+way to resolve, and the fallback is the system correctly declining a lossy transform it
+cannot justify. The real number replaced an inflated one.
+
+The `tool_output.json` cross-turn row still shows 99.14%, and that is **not** a sign the
+exemption survives there — it is the §2.2 vacuity again. `contentType` is still hardcoded
+`text` on that path, so `extractSymbols` harvests nothing from JSON and drift is 0.00 by not
+looking. **Commit C (the relabel) is expected to flip that row to 0% and a fallback**, for
+the same reason the Python row already does. It is listed here so the change is attributable
+when it happens rather than read as a regression introduced by the relabel.
+
+**What this means for the Gateway.** After Commit C, cross-turn deduplication will
+effectively stop contributing on any symbol-bearing content, which is most realistic agent
+traffic. Within-payload exact duplication does occur — repeated tool schemas, a file pasted
+into several messages — but it is not the common shape of a conversation, where each message
+appears once.
+
+Said plainly: **the Gateway's near-term dedup value is likely close to zero.** That does not
+make the Gateway pointless; it relocates its value to cache-aware prefix stability and to
+the knapsack stages, which Issue 2 is the gate on. It does mean cross-turn deduplication
+should not be cited as a headline capability until there is a mechanism that lets the model
+resolve a marker — which, on a stateless provider API, there currently is not.
 
 ## 8. Suggested next step
 

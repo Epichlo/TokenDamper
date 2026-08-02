@@ -46,11 +46,23 @@ export function runSessionDedupStage(
   let itemsDeduped = 0;
   let itemsRehydrated = 0;
   let itemsSkipped = 0;
+  let itemsElidedRecoverable = 0;
+  let itemsElidedLossy = 0;
+  let itemsPreservedAsReferent = 0;
   let bytesSaved = 0;
   const skipReasons: Record<ElisionSkipReason, number> = {
     no_savings: 0,
     post_condition_rejected: 0,
   };
+
+  // How many times each content hash appears in this payload. Used to decide whether an
+  // elision can be verified as recoverable — see the `recoverable` comment below.
+  const totalOccurrences = new Map<string, number>();
+  for (const item of bundle.items) {
+    totalOccurrences.set(item.contentHash, (totalOccurrences.get(item.contentHash) ?? 0) + 1);
+  }
+  // Content hashes for which an intact copy has already been kept earlier in this payload.
+  const survivingHashes = new Set<string>();
 
   const newItems: ContextItem[] = bundle.items.map((item) => {
     const rehydratedItem = maybeRehydrateItem(item, sessionContext);
@@ -58,21 +70,33 @@ export function runSessionDedupStage(
       changed = true;
       itemsRehydrated += 1;
       bytesSaved -= Math.max(0, rehydratedItem.content.length - item.content.length);
+      survivingHashes.add(rehydratedItem.contentHash);
       return rehydratedItem;
     }
 
     // Rule 1: Never elide items matching preserveKinds in OptimizationBudget
     if (preserveKinds.has(item.kind)) {
+      survivingHashes.add(item.contentHash);
       return item;
     }
 
     // Rule 2: Never elide system prompt items to maintain prompt-cache stability
     if (item.role === 'system') {
+      survivingHashes.add(item.contentHash);
       return item;
     }
 
     // Check if this item content hash was seen in previous turns
     if (shouldAttemptDedup && sessionContext.previousBlockHashes.has(item.contentHash)) {
+      // Rule 3: preserve the first copy of duplicated content, so the elisions that follow
+      // it reference something demonstrably present in this same outbound payload.
+      if (!survivingHashes.has(item.contentHash) && (totalOccurrences.get(item.contentHash) ?? 1) > 1) {
+        survivingHashes.add(item.contentHash);
+        itemsPreservedAsReferent += 1;
+        return item;
+      }
+
+      const isRecoverable = survivingHashes.has(item.contentHash);
       const originalLength = item.content.length;
       const refId = item.contentHash.slice(0, 12);
       const elidedContent = `[TokenDamper Elided: ref=${refId} bytes=${originalLength} kind=${item.kind}]`;
@@ -88,11 +112,19 @@ export function runSessionDedupStage(
         metadata: {
           ...item.metadata,
           elided: true,
-          // The full content is held in the session store under `originalContentHash`
-          // and can be restored on demand, so this marker is a reference rather than
-          // a lossy transform. DriftTracker consults this flag to avoid scoring
-          // recoverable references as semantic drift.
-          recoverable: true,
+          // Set only when an intact copy of this content survives elsewhere in the SAME
+          // outbound payload. That is the only form of the claim this stage can verify.
+          //
+          // The original rationale — "the session store can restore it, so the marker is a
+          // pointer" — does not hold on the Gateway path. The consumer there is a stateless
+          // provider API with no rehydration mechanism; content elided from the outbound
+          // payload is not pointed at, it is deleted, and the model cannot resolve the
+          // marker by any means available to it. Cross-turn elision of a sole copy is
+          // therefore lossy compression, not a reference, and DriftTracker must score it.
+          //
+          // When a copy does survive in this payload the claim is true and checkable: the
+          // model has seen the content, in this request, so the marker resolves.
+          recoverable: isRecoverable,
           originalContentHash: item.contentHash,
           originalBytes: originalLength,
         },
@@ -106,12 +138,18 @@ export function runSessionDedupStage(
 
       changed = true;
       itemsDeduped += 1;
+      if (isRecoverable) {
+        itemsElidedRecoverable += 1;
+      } else {
+        itemsElidedLossy += 1;
+      }
       bytesSaved += outcome.bytesSaved;
       sessionContext.storeContent?.(item.contentHash, item.content);
 
       return outcome.item;
     }
 
+    survivingHashes.add(item.contentHash);
     return item;
   });
 
@@ -172,12 +210,15 @@ export function runSessionDedupStage(
       itemsDeduped,
       itemsRehydrated,
       itemsSkipped,
+      itemsElidedRecoverable,
+      itemsElidedLossy,
+      itemsPreservedAsReferent,
       skippedNoSavings: skipReasons.no_savings,
       skippedPostConditionRejected: skipReasons.post_condition_rejected,
       bytesSaved,
       tokenEstimateSaved,
     },
-    notes: `Successfully elided ${itemsDeduped} context item(s), rehydrated ${itemsRehydrated}, skipped ${itemsSkipped} (${skipReasons.post_condition_rejected} rejected by post-condition, ${skipReasons.no_savings} for no savings).`,
+    notes: `Elided ${itemsDeduped} context item(s) — ${itemsElidedRecoverable} recoverable (a copy survives in this payload), ${itemsElidedLossy} lossy (sole copy, scored by drift); preserved ${itemsPreservedAsReferent} as referent; rehydrated ${itemsRehydrated}; skipped ${itemsSkipped}.`,
   });
 }
 

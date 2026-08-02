@@ -322,42 +322,74 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
     expect(turn!.tokensSaved).toBe(0);
   });
 
-  it('still deduplicates code payloads without tripping drift on recoverable refs (1.0b)', async () => {
-    const sessionStore = server.getSessionStore();
-    // Symbol-dense content: before the recoverable-elision exemption this scored ~0.60
-    // drift and forced a fallback, defeating deduplication on exactly the payloads the
-    // Gateway exists to shrink.
-    const code = 'export function computeTotal(a, b) { const sum = a + b; return sum; }\nexport class Ledger {}';
+  const CODE_BLOCK = 'export function computeTotal(a, b) { const sum = a + b; return sum; }\nexport class Ledger {}';
 
-    const turn1 = JSON.stringify({ model: 'gpt-4o', messages: [{ role: 'user', content: code }] });
+  it('scores cross-turn elision of a sole copy as lossy, and falls back (Commit B)', async () => {
+    const sessionStore = server.getSessionStore();
+
+    // This test previously asserted the opposite, on the Phase 1.0b rationale that a dedup
+    // marker is a pointer to restorable content. That rationale does not hold here: the
+    // Gateway's consumer is a stateless provider API with no rehydration mechanism, so
+    // content elided from the outbound payload is deleted, not referenced. With only one
+    // copy in the payload nothing survives for the model to resolve the marker against, so
+    // the elision is lossy and drift is right to score it.
+    const turn1 = JSON.stringify({ model: 'gpt-4o', messages: [{ role: 'user', content: CODE_BLOCK }] });
     await handleProxyRequest(
-      'POST',
-      '/v1/chat/completions',
-      { 'x-session-id': 'code-dedup-session' },
-      turn1,
-      { sessionStore },
+      'POST', '/v1/chat/completions', { 'x-session-id': 'sole-copy-session' }, turn1, { sessionStore },
     );
 
     const turn2 = JSON.stringify({
       model: 'gpt-4o',
       messages: [
-        { role: 'user', content: code },
+        { role: 'user', content: CODE_BLOCK },
         { role: 'user', content: 'Explain this.' },
       ],
     });
     const res2 = await handleProxyRequest(
-      'POST',
-      '/v1/chat/completions',
-      { 'x-session-id': 'code-dedup-session' },
-      turn2,
-      { sessionStore },
+      'POST', '/v1/chat/completions', { 'x-session-id': 'sole-copy-session' }, turn2, { sessionStore },
+    );
+
+    // Fail-open: the caller gets their payload back untouched rather than a marker the
+    // model could not resolve.
+    expect(res2.body).toBe(turn2);
+    expect(res2.body).not.toContain('[TokenDamper Elided: ref=');
+
+    const session = sessionStore.getOrCreateSession('sole-copy-session');
+    const turn = session.turns[session.turns.length - 1];
+    expect(turn!.fallbackUsed).toBe(true);
+    expect(turn!.tokensSaved).toBe(0);
+  });
+
+  it('deduplicates redundant copies while preserving one referent in the payload (Commit B)', async () => {
+    const sessionStore = server.getSessionStore();
+
+    const turn1 = JSON.stringify({ model: 'gpt-4o', messages: [{ role: 'user', content: CODE_BLOCK }] });
+    await handleProxyRequest(
+      'POST', '/v1/chat/completions', { 'x-session-id': 'redundant-copy-session' }, turn1, { sessionStore },
+    );
+
+    // Three copies in one payload. The first is preserved so the other two reference
+    // content the model demonstrably has, in this request — a checkable precondition.
+    const turn2 = JSON.stringify({
+      model: 'gpt-4o',
+      messages: [
+        { role: 'user', content: CODE_BLOCK },
+        { role: 'user', content: 'Compare these.' },
+        { role: 'user', content: CODE_BLOCK },
+        { role: 'user', content: CODE_BLOCK },
+      ],
+    });
+    const res2 = await handleProxyRequest(
+      'POST', '/v1/chat/completions', { 'x-session-id': 'redundant-copy-session' }, turn2, { sessionStore },
     );
 
     const body = JSON.parse(res2.body);
-    expect(body.messages[0].content).toContain('[TokenDamper Elided: ref=');
-    expect(body.messages[1].content).toBe('Explain this.');
+    expect(body.messages[0].content).toBe(CODE_BLOCK); // referent preserved intact
+    expect(body.messages[1].content).toBe('Compare these.');
+    expect(body.messages[2].content).toContain('[TokenDamper Elided: ref=');
+    expect(body.messages[3].content).toContain('[TokenDamper Elided: ref=');
 
-    const session = sessionStore.getOrCreateSession('code-dedup-session');
+    const session = sessionStore.getOrCreateSession('redundant-copy-session');
     const turn = session.turns[session.turns.length - 1];
     expect(turn!.fallbackUsed).toBe(false);
     expect(turn!.tokensSaved).toBeGreaterThan(0);
