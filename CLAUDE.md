@@ -109,6 +109,8 @@ MCP tools: `optimize_context`, `rehydrate_context`, `get_session_metrics`,
    Issue 2 containment, not an unfinished implementation; do not widen that stage list.
 9. **The Gateway maps `finalBundle` back onto the parsed payload, never `emittedOutput`** —
    `emittedOutput` is a newline-joined blob, and using it reintroduces Issue 5.
+10. **When a check passes, confirm it ran.** A green result from a check that never executed
+    is worse than a red one — it has happened four times in this project already.
 
 ## Known bugs — highest-priority work
 

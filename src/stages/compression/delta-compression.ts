@@ -1,6 +1,7 @@
 import type { ContextBundle, ContextItem, OptimizationBudget, StageResult } from '../../core/model/types';
-import { createBundleStatistics, createContextItem, createStageResult, freeze, hashContent } from '../../core/model/constructors';
+import { createBundleStatistics, createStageResult, freeze, hashContent } from '../../core/model/constructors';
 import { computeLineDiff } from '../../core/utils/myers-diff';
+import { elideItem, type ElisionSkipReason } from '../../core/elision';
 
 export interface DeltaCompressionOptions {
   readonly previousItems?: ReadonlyArray<ContextItem>;
@@ -145,7 +146,12 @@ export function runDeltaCompressionStage(
   const preserveKinds = new Set(budget.preserveKinds);
   let changed = false;
   let itemsCompressed = 0;
+  let itemsSkipped = 0;
   let bytesSaved = 0;
+  const skipReasons: Record<ElisionSkipReason, number> = {
+    no_savings: 0,
+    post_condition_rejected: 0,
+  };
 
   const previousItems = options.previousItems ?? options.previousBundle?.items ?? [];
 
@@ -205,39 +211,34 @@ export function runDeltaCompressionStage(
 
     const originalLength = item.content.length;
 
-    // Skip if delta diff representation is not shorter than full new content
-    if (deltaContent.length >= originalLength) {
-      return item;
-    }
-
-    changed = true;
-    itemsCompressed += 1;
-    bytesSaved += originalLength - deltaContent.length;
-
-    const newContentHash = hashContent({
-      originalHash: item.contentHash,
-      deltaContent,
-    });
-
-    return createContextItem({
-      id: item.id,
-      kind: item.kind,
-      contentType: item.contentType,
-      content: deltaContent,
-      origin: item.origin,
-      contentHash: newContentHash,
-      ...(item.role ? { role: item.role } : {}),
-      ...(item.path ? { path: item.path } : {}),
-      ...(item.language ? { language: item.language } : {}),
-      metadata: freeze({
+    // Routed through the shared chokepoint. A unified diff is multi-line and is not valid
+    // JSON, so this stage had the same latent defect as the other two (Issue 2). A refusal
+    // skips the item and the stage continues.
+    const outcome = elideItem({
+      item,
+      marker: deltaContent,
+      contentHash: hashContent({ originalHash: item.contentHash, deltaContent }),
+      metadata: {
         ...item.metadata,
         elided: true,
         deltaCompressed: true,
         baseContentHash: base.hash,
         originalBytes: originalLength,
         originalContent: item.content,
-      }),
+      },
     });
+
+    if (outcome.status === 'skipped') {
+      itemsSkipped += 1;
+      skipReasons[outcome.reason] += 1;
+      return item;
+    }
+
+    changed = true;
+    itemsCompressed += 1;
+    bytesSaved += outcome.bytesSaved;
+
+    return outcome.item;
   });
 
   if (!changed) {
@@ -248,10 +249,16 @@ export function runDeltaCompressionStage(
       changed: false,
       metrics: {
         itemsCompressed: 0,
+        itemsSkipped,
+        skippedNoSavings: skipReasons.no_savings,
+        skippedPostConditionRejected: skipReasons.post_condition_rejected,
         bytesSaved: 0,
         tokenEstimateSaved: 0,
       },
-      notes: 'No matching modified items found for delta compression.',
+      notes:
+        itemsSkipped > 0
+          ? `No items delta-compressed; skipped ${itemsSkipped} (${skipReasons.post_condition_rejected} rejected by post-condition, ${skipReasons.no_savings} for no savings).`
+          : 'No matching modified items found for delta compression.',
     });
   }
 
@@ -288,9 +295,12 @@ export function runDeltaCompressionStage(
     changed: true,
     metrics: {
       itemsCompressed,
+      itemsSkipped,
+      skippedNoSavings: skipReasons.no_savings,
+      skippedPostConditionRejected: skipReasons.post_condition_rejected,
       bytesSaved,
       tokenEstimateSaved,
     },
-    notes: `Successfully delta-compressed ${itemsCompressed} item(s).`,
+    notes: `Successfully delta-compressed ${itemsCompressed} item(s); skipped ${itemsSkipped} (${skipReasons.post_condition_rejected} rejected by post-condition, ${skipReasons.no_savings} for no savings).`,
   });
 }

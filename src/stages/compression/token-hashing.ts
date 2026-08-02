@@ -1,5 +1,6 @@
 import type { ContextBundle, ContextItem, OptimizationBudget, StageResult } from '../../core/model/types';
-import { createBundleStatistics, createContextItem, createStageResult, freeze, hashContent } from '../../core/model/constructors';
+import { createBundleStatistics, createStageResult, freeze, hashContent } from '../../core/model/constructors';
+import { elideItem, type ElisionSkipReason } from '../../core/elision';
 import { TokenHasher } from '../../core/hashing/token-hasher';
 import EnhancedHeuristicTokenizer, { type TokenizerAdapter } from '../../core/hashing/tokenizer';
 
@@ -26,7 +27,12 @@ export function runTokenHashingStage(
   const preserveKinds = new Set(budget.preserveKinds);
   let changed = false;
   let itemsHashed = 0;
+  let itemsSkipped = 0;
   let bytesSaved = 0;
+  const skipReasons: Record<ElisionSkipReason, number> = {
+    no_savings: 0,
+    post_condition_rejected: 0,
+  };
 
   const newItems: ContextItem[] = bundle.items.map((item) => {
     // Rule 1: Never hash items matching preserveKinds in OptimizationBudget
@@ -52,42 +58,38 @@ export function runTokenHashingStage(
     const placeholder = hasher.createBlockPlaceholder(item.content, { blockType: item.kind });
     const originalLength = item.content.length;
 
-    // Skip if placeholder is not shorter than raw content
-    if (placeholder.length >= originalLength) {
-      return item;
-    }
-
-    changed = true;
-    itemsHashed += 1;
-    bytesSaved += originalLength - placeholder.length;
-
     const match = /^<BLOCK_HASH:([^>]+)>$/.exec(placeholder);
     const blockHash: string = match && match[1] ? match[1] : item.contentHash;
 
-    const newContentHash = hashContent({
-      originalHash: item.contentHash,
-      placeholder,
-    });
-
-    return createContextItem({
-      id: item.id,
-      kind: item.kind,
-      contentType: item.contentType,
-      content: placeholder,
-      origin: item.origin,
-      contentHash: newContentHash,
-      ...(item.role ? { role: item.role } : {}),
-      ...(item.path ? { path: item.path } : {}),
-      ...(item.language ? { language: item.language } : {}),
-      metadata: freeze({
+    // Rule 5: content-type correctness is enforced by the chokepoint, not here. It renders
+    // the placeholder in a syntax valid for this item and refuses to return anything its
+    // own validator rejects, so a bare `<BLOCK_HASH:...>` can no longer be written into
+    // JSON content (Issue 2). A refusal skips the item and the stage continues.
+    const outcome = elideItem({
+      item,
+      marker: placeholder,
+      contentHash: hashContent({ originalHash: item.contentHash, placeholder }),
+      metadata: {
         ...item.metadata,
         elided: true,
         tokenHashed: true,
         blockHash,
         originalContentHash: item.contentHash,
         originalBytes: originalLength,
-      }),
+      },
     });
+
+    if (outcome.status === 'skipped') {
+      itemsSkipped += 1;
+      skipReasons[outcome.reason] += 1;
+      return item;
+    }
+
+    changed = true;
+    itemsHashed += 1;
+    bytesSaved += outcome.bytesSaved;
+
+    return outcome.item;
   });
 
   if (!changed) {
@@ -98,10 +100,16 @@ export function runTokenHashingStage(
       changed: false,
       metrics: {
         itemsHashed: 0,
+        itemsSkipped,
+        skippedNoSavings: skipReasons.no_savings,
+        skippedPostConditionRejected: skipReasons.post_condition_rejected,
         bytesSaved: 0,
         tokenEstimateSaved: 0,
       },
-      notes: 'No context items eligible for token hashing.',
+      notes:
+        itemsSkipped > 0
+          ? `No context items eligible for token hashing; skipped ${itemsSkipped} (${skipReasons.post_condition_rejected} rejected by post-condition, ${skipReasons.no_savings} for no savings).`
+          : 'No context items eligible for token hashing.',
     });
   }
 
@@ -138,9 +146,12 @@ export function runTokenHashingStage(
     changed: true,
     metrics: {
       itemsHashed,
+      itemsSkipped,
+      skippedNoSavings: skipReasons.no_savings,
+      skippedPostConditionRejected: skipReasons.post_condition_rejected,
       bytesSaved,
       tokenEstimateSaved,
     },
-    notes: `Successfully token-hashed ${itemsHashed} context item(s).`,
+    notes: `Successfully token-hashed ${itemsHashed} context item(s); skipped ${itemsSkipped} (${skipReasons.post_condition_rejected} rejected by post-condition, ${skipReasons.no_savings} for no savings).`,
   });
 }

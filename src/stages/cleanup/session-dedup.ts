@@ -1,5 +1,6 @@
 import type { ContextBundle, ContextItem, OptimizationBudget, StageResult } from '../../core/model/types';
 import { createBundleStatistics, createContextItem, createStageResult, freeze, hashContent } from '../../core/model/constructors';
+import { elideItem, type ElisionSkipReason } from '../../core/elision';
 
 export interface SessionDedupContext {
   readonly previousBlockHashes: ReadonlySet<string>;
@@ -44,7 +45,12 @@ export function runSessionDedupStage(
   let changed = false;
   let itemsDeduped = 0;
   let itemsRehydrated = 0;
+  let itemsSkipped = 0;
   let bytesSaved = 0;
+  const skipReasons: Record<ElisionSkipReason, number> = {
+    no_savings: 0,
+    post_condition_rejected: 0,
+  };
 
   const newItems: ContextItem[] = bundle.items.map((item) => {
     const rehydratedItem = maybeRehydrateItem(item, sessionContext);
@@ -71,32 +77,15 @@ export function runSessionDedupStage(
       const refId = item.contentHash.slice(0, 12);
       const elidedContent = `[TokenDamper Elided: ref=${refId} bytes=${originalLength} kind=${item.kind}]`;
 
-      // If elision marker is actually longer than raw content, skip
-      if (elidedContent.length >= originalLength) {
-        return item;
-      }
-
-      changed = true;
-      itemsDeduped += 1;
-      bytesSaved += originalLength - elidedContent.length;
-      sessionContext.storeContent?.(item.contentHash, item.content);
-
-      const newContentHash = hashContent({
-        originalHash: item.contentHash,
-        elidedContent,
-      });
-
-      return createContextItem({
-        id: item.id,
-        kind: item.kind,
-        contentType: item.contentType,
-        content: elidedContent,
-        origin: item.origin,
-        contentHash: newContentHash,
-        ...(item.role ? { role: item.role } : {}),
-        ...(item.path ? { path: item.path } : {}),
-        ...(item.language ? { language: item.language } : {}),
-        metadata: freeze({
+      // Routed through the shared chokepoint: this marker is no more valid JSON than
+      // `<BLOCK_HASH:...>` is. It only looked safe because the Gateway hardcoded
+      // `contentType: 'text'`, which made `selectValidator` return null so nothing checked
+      // it. A refusal skips the item and the stage continues (Issue 2).
+      const outcome = elideItem({
+        item,
+        marker: elidedContent,
+        contentHash: hashContent({ originalHash: item.contentHash, elidedContent }),
+        metadata: {
           ...item.metadata,
           elided: true,
           // The full content is held in the session store under `originalContentHash`
@@ -106,8 +95,21 @@ export function runSessionDedupStage(
           recoverable: true,
           originalContentHash: item.contentHash,
           originalBytes: originalLength,
-        }),
+        },
       });
+
+      if (outcome.status === 'skipped') {
+        itemsSkipped += 1;
+        skipReasons[outcome.reason] += 1;
+        return item;
+      }
+
+      changed = true;
+      itemsDeduped += 1;
+      bytesSaved += outcome.bytesSaved;
+      sessionContext.storeContent?.(item.contentHash, item.content);
+
+      return outcome.item;
     }
 
     return item;
@@ -122,10 +124,16 @@ export function runSessionDedupStage(
       metrics: {
         itemsDeduped: 0,
         itemsRehydrated: 0,
+        itemsSkipped,
+        skippedNoSavings: skipReasons.no_savings,
+        skippedPostConditionRejected: skipReasons.post_condition_rejected,
         bytesSaved: 0,
         tokenEstimateSaved: 0,
       },
-      notes: 'No matching context blocks found for deduplication or rehydration.',
+      notes:
+        itemsSkipped > 0
+          ? `No context blocks deduplicated; skipped ${itemsSkipped} (${skipReasons.post_condition_rejected} rejected by post-condition, ${skipReasons.no_savings} for no savings).`
+          : 'No matching context blocks found for deduplication or rehydration.',
     });
   }
 
@@ -163,10 +171,13 @@ export function runSessionDedupStage(
     metrics: {
       itemsDeduped,
       itemsRehydrated,
+      itemsSkipped,
+      skippedNoSavings: skipReasons.no_savings,
+      skippedPostConditionRejected: skipReasons.post_condition_rejected,
       bytesSaved,
       tokenEstimateSaved,
     },
-    notes: `Successfully elided ${itemsDeduped} context item(s) and rehydrated ${itemsRehydrated} context item(s).`,
+    notes: `Successfully elided ${itemsDeduped} context item(s), rehydrated ${itemsRehydrated}, skipped ${itemsSkipped} (${skipReasons.post_condition_rejected} rejected by post-condition, ${skipReasons.no_savings} for no savings).`,
   });
 }
 

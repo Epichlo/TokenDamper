@@ -1,4 +1,5 @@
 import { hashContent } from '../model/constructors';
+import { unwrapElisionContent } from '../elision';
 
 export interface BlockPlaceholderOptions {
   readonly blockType?: string;
@@ -88,6 +89,21 @@ export class TokenHasher {
    * Unknown placeholders are left as-is.
    */
   public rehydrateText(text: string): string {
+    // JSON-shaped items carry the placeholder wrapped as `{"__td_block__":"<BLOCK_HASH:...>"}`
+    // so the elided item stays parseable. Unwrap first and return the stored content
+    // directly: substituting in place would yield the original content nested inside the
+    // wrapper (or, for the quoted form, a string wrapping an object), which round-trips to
+    // something that is not byte-identical to the input. Format and reverse transform are
+    // one contract — changing either alone breaks the round trip.
+    const wrappedMarker = unwrapElisionContent(text);
+    if (wrappedMarker !== undefined) {
+      const entry = this.store.get(this.extractHash(wrappedMarker));
+      if (entry) {
+        return entry.content;
+      }
+      return text;
+    }
+
     const placeholderRegex = /<BLOCK_HASH:([a-f0-9]{64}|[a-f0-9]{12,64}|[^>]+)>/g;
     return text.replace(placeholderRegex, (match, hash) => {
       const entry = this.store.get(hash);
