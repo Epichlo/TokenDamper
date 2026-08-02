@@ -9,6 +9,56 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or released; run
 `git log v1.1.0..HEAD` to confirm current scope before relying on this list.
 
+### Changed
+- **Bench Evaluator Classifies Instead of Hardcoding (Issue 2, follow-up)**:
+  `src/bench/evaluator.ts` hardcoded `contentType: 'code'` on the two items it builds for
+  AST quality checks. Both now call `classifyContent`, completing the removal of hardcoded
+  content-type literals begun in the Gateway relabel.
+
+  **This moves no benchmark number.** `selectValidator` dispatches
+  `language` → `path` → `contentType`, and `BenchmarkFixture.language` is a required field
+  always set to `python`, `typescript` or `javascript` — all matched by the first arm — so
+  `contentType` is never consulted for these items. Measured across all ten bundled
+  fixtures at `targetReductionRatio: 0.30`, before and after are byte-identical:
+
+  | Fixture | Lang | In | Out | Reduction | Fallback | rawSyntaxValid | optSyntaxValid | Symbol | Similarity | Passed |
+  |---|---|---|---|---|---|---|---|---|---|---|
+  | `HumanEval/0` | python | 106 | 106 | 0.00% | yes | true | true | 1.0000 | 1.0000 | true |
+  | `HumanEval/1` | python | 146 | 146 | 0.00% | yes | true | true | 1.0000 | 1.0000 | true |
+  | `HumanEval/2` | python | 91 | 91 | 0.00% | yes | true | true | 1.0000 | 1.0000 | true |
+  | `HumanEval/3` | python | 126 | 126 | 0.00% | yes | true | true | 1.0000 | 1.0000 | true |
+  | `HumanEval/4` | python | 109 | 109 | 0.00% | yes | true | true | 1.0000 | 1.0000 | true |
+  | `CodeXGLUE/py/101` | python | 53 | 53 | 0.00% | yes | true | true | 1.0000 | 1.0000 | true |
+  | `CodeXGLUE/py/102` | python | 48 | 48 | 0.00% | yes | true | true | 1.0000 | 1.0000 | true |
+  | `CodeXGLUE/ts/201` | typescript | 35 | 35 | 0.00% | yes | true | true | 1.0000 | 1.0000 | true |
+  | `CodeXGLUE/ts/202` | typescript | 14 | 14 | 0.00% | yes | true | true | 1.0000 | 1.0000 | true |
+  | `CodeXGLUE/js/301` | javascript | 33 | 33 | 0.00% | yes | true | true | 1.0000 | 1.0000 | true |
+
+  Aggregates, also identical: `fallbackRate = 1`, `avgReduction = 0.0000%`,
+  `syntaxPassRate = 1`, `passAt1Rate = 1`, `totalValidationIssues = 11`, and
+  `evaluateDataset` → `rawPassRate = 1`, `optimizedPassRate = 1`, `passRateDelta = 0`,
+  `avgKeySymbolPreservation = 1.000000`, `avgTokenSimilarity = 1.000000`.
+
+  The 100% fallback rate is pre-existing and unrelated: nine fixtures exceed the drift
+  threshold (`0.60 > 0.40`) and `CodeXGLUE/ts/202` fails AST validation with an unclosed
+  bracket. Reduction figures come from the optimization pipeline via
+  `fixtureToOptimizationRequest`, which already classified correctly through
+  `createContextBundle` — the evaluator only computes post-hoc quality metrics and cannot
+  affect them.
+
+  **C1 interaction, checked explicitly:** all ten fixtures carry a `.py`/`.ts`/`.js` path,
+  so extension-only code detection (`642abcb`) still classifies every one as `code`. The
+  computed tag differs from the old literal on exactly one constructible input — a CodeXGLUE
+  item with no `path`, which the loader synthesizes as `src/item_<id>.txt` and which
+  classifies `text`. That is not a C1 regression: pre-C1 the only content signal for `code`
+  was a fence, and plain source has none.
+
+  **Not fixed, and verified rather than assumed:** with `language` absent, both the old
+  literal and the computed tag yield `code` for a `.py` path, and `contentType: 'code'`
+  selects the **TypeScript** validator — so a Python fixture would be parsed as TypeScript
+  either way. `language` being required is the only thing preventing it, and these items
+  pass the path as `origin` rather than `path`, leaving the extension arm unreachable.
+
 ### Fixed
 - **Gateway Hardcoded `contentType: 'text'` (Issue 2, Commit C)**: `src/gateway/proxy.ts`
   built its context items by hand and hardcoded the content-type tag instead of calling

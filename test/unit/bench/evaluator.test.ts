@@ -5,10 +5,12 @@ import {
   computeTokenSimilarity,
   executePythonCheck,
 } from '../../../src/bench/evaluator';
-import type { BenchmarkFixture } from '../../../src/bench/fixtures/types';
+import type { BenchmarkFixture, CodeXGLUEFixtureRaw } from '../../../src/bench/fixtures/types';
 import { optimize } from '../../../src/core/engine';
-import { fixtureToOptimizationRequest } from '../../../src/bench/fixtures/loader';
-import { createOptimizationBudget } from '../../../src/core/model/constructors';
+import { fixtureToOptimizationRequest, loadBenchmarkFixtures } from '../../../src/bench/fixtures/loader';
+import { loadCodeXGLUEFixtures } from '../../../src/bench/fixtures/codexglue';
+import { classifyContent, createContextItem, createOptimizationBudget } from '../../../src/core/model/constructors';
+import { selectValidator } from '../../../src/core/validation/ast';
 import { DEFAULT_CONFIG } from '../../../src/config/schema';
 
 describe('BenchmarkEvaluator', () => {
@@ -82,6 +84,71 @@ describe('BenchmarkEvaluator', () => {
       const evalResult = BenchmarkEvaluator.evaluateFixture(brokenFixture, optResult);
       expect(evalResult.rawSyntaxValid).toBe(false);
       expect(evalResult.rawAstIssues.length).toBeGreaterThan(0);
+    });
+  });
+
+  // Read this before adding to this block. Verified by reverting `evaluator.ts` and
+  // re-running: **none of these three tests fail with the hardcoded `contentType: 'code'`
+  // restored.** They cannot, because the relabel has no observable effect through the
+  // evaluator's public surface — `QualityEvaluationResult` does not expose the tag, and
+  // `selectValidator` never reads it while `language` is a required field.
+  //
+  // So do not read a green run here as confirmation that the relabel works. What these
+  // tests pin is the surrounding contract that makes it inert, and the conditions under
+  // which it would stop being inert. The evidence that the relabel itself is correct is the
+  // before/after benchmark table in CHANGELOG.md, which is byte-identical.
+  describe('content-type classification of evaluator items', () => {
+    it('classifies every bundled bench fixture as code via its path extension', () => {
+      // Pins the C1 interaction (642abcb made code detection extension-only): if a fixture
+      // is ever added whose path lacks a code extension, its tag silently stops being
+      // `code`. Fails for a real reason; the ten bundled fixtures all carry .py/.ts/.js.
+      const { fixtures } = loadBenchmarkFixtures();
+      expect(fixtures.length).toBeGreaterThan(0);
+
+      for (const fixture of fixtures) {
+        const content = `${fixture.prompt}\n${fixture.referenceCompletion}`;
+        expect(classifyContent(content, 'file', fixture.path)).toBe('code');
+      }
+    });
+
+    it('classifies a pathless CodeXGLUE fixture as text, not code', () => {
+      // The one constructible input where the computed tag differs from the old hardcoded
+      // 'code' literal. The loader synthesizes `src/item_<id>.txt` when a raw item has no
+      // path, and .txt is not a code extension.
+      //
+      // This is not a C1 regression: pre-C1 the only content signal for `code` was a
+      // triple-backtick fence, and plain source has none, so this input classified as
+      // non-code before that commit too.
+      const { fixtures } = loadCodeXGLUEFixtures([
+        { id: 'nopath/1', repo: 'r', path: '', language: 'python', prompt: 'def add(a, b):\n    return a + b\n', completion: '\n' },
+      ] as unknown as ReadonlyArray<CodeXGLUEFixtureRaw>);
+
+      const fixture = fixtures[0]!;
+      expect(fixture.path).toBe('src/item_nopath/1.txt');
+      expect(classifyContent(`${fixture.prompt}\n${fixture.referenceCompletion}`, 'file', fixture.path)).toBe('text');
+    });
+
+    it('dispatches on language, which is why the tag change moves no benchmark number', () => {
+      // A no-change guard, and it passes both before and after the relabel — deliberately.
+      // It is not evidence the relabel took effect; it records *why* the relabel is inert,
+      // so that a future change making `language` optional fails here with the reason
+      // attached rather than showing up as unexplained benchmark movement.
+      const content = 'def add(a, b):\n    return a + b\n';
+      const withLanguage = createContextItem({
+        id: 'x', kind: 'file', contentType: classifyContent(content, 'file', 'src/x.py'),
+        content, origin: 'src/x.py', language: 'python',
+      });
+      expect(selectValidator(withLanguage)?.language).toBe('python');
+
+      // And the standing hazard this change does NOT fix: strip `language` and the same
+      // computed tag routes Python to the TypeScript validator, exactly as the old literal
+      // did. These items pass the path as `origin`, not `path`, so the extension arm that
+      // would otherwise rescue them never runs.
+      const withoutLanguage = createContextItem({
+        id: 'x', kind: 'file', contentType: classifyContent(content, 'file', 'src/x.py'),
+        content, origin: 'src/x.py',
+      });
+      expect(selectValidator(withoutLanguage)?.language).toBe('typescript');
     });
   });
 

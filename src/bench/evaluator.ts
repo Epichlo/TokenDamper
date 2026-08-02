@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { createContextItem } from '../core/model/constructors';
+import { classifyContent, createContextItem } from '../core/model/constructors';
 import type { OptimizationResult } from '../core/model/types';
 import { validateItemAst } from '../core/validation/ast';
 import type { BenchmarkFixture } from './fixtures/types';
@@ -39,10 +39,33 @@ export class BenchmarkEvaluator {
     const rawFullCode = `${fixture.prompt}\n${fixture.referenceCompletion}`;
     const optimizedFullCode = `${result.emittedOutput}\n${fixture.referenceCompletion}`;
 
+    // Classified rather than hardcoded, for consistency with every other construction site
+    // (the Gateway was corrected in `ac16cec`). Be precise about what this buys, because it
+    // is less than it looks and the measurement says so:
+    //
+    // `selectValidator` dispatches `language` -> `path` -> `contentType`, and
+    // `BenchmarkFixture.language` is a required field always set to `python`, `typescript`
+    // or `javascript` — all three matched by the first arm. `contentType` is therefore never
+    // consulted for these items. Measured across all ten bundled fixtures, the relabel moves
+    // no benchmark number: reduction, fallback, AST validity, symbol preservation and
+    // similarity are byte-identical before and after.
+    //
+    // The computed tag differs from the old literal on exactly one constructible input: a
+    // CodeXGLUE item with no `path`, which the loader synthesizes as `src/item_<id>.txt`.
+    // That classifies `text`, where the literal claimed `code`. Even there the behavior is
+    // unchanged, because `language` still shadows it.
+    //
+    // NOT fixed by this change, and verified rather than assumed: with no `language`, both
+    // the old literal and the computed tag yield `code` for a `.py` path, and
+    // `contentType: 'code'` selects the **TypeScript** validator — so a Python fixture would
+    // be parsed as TypeScript either way. `language` being required is the only thing
+    // preventing that, and these items pass the file path as `origin`, not `path`, so the
+    // extension arm that would otherwise catch it is unreachable. See DECISIONS.md §17 for
+    // why `code` is a family rather than a language.
     const rawItem = createContextItem({
       id: `raw-${fixture.id}`,
       kind: 'file',
-      contentType: 'code',
+      contentType: classifyContent(rawFullCode, 'file', fixture.path),
       content: rawFullCode,
       origin: fixture.path,
       language: fixture.language,
@@ -51,7 +74,7 @@ export class BenchmarkEvaluator {
     const optimizedItem = createContextItem({
       id: `opt-${fixture.id}`,
       kind: 'file',
-      contentType: 'code',
+      contentType: classifyContent(optimizedFullCode, 'file', fixture.path),
       content: optimizedFullCode,
       origin: fixture.path,
       language: fixture.language,
