@@ -253,7 +253,7 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
     expect(res2Json.messages[1].content).toBe('What does this code do?');
   });
 
-  it('does not assert fallbackUsed on the proxy path, which never runs validation (1.0a)', async () => {
+  it('reports a computed fallbackUsed now that the proxy runs the engine (1.0b)', async () => {
     const sessionStore = server.getSessionStore();
 
     await handleProxyRequest(
@@ -270,11 +270,97 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
     const session = sessionStore.getOrCreateSession('fallback-honesty-session');
     const turn = session.turns[0];
     expect(turn).toBeDefined();
-    // The proxy path invokes no validators, ledgers, or fallback resolver, so it
-    // must not assert fallbackUsed at all. A literal `false` here would claim a
-    // safety property that was never evaluated (Phase 1.0a).
-    expect('fallbackUsed' in turn!).toBe(false);
-    expect(turn!.fallbackUsed).toBeUndefined();
+    // The proxy now routes through core/engine.optimize(), so validators, ledgers and
+    // the fallback resolver all run and the field carries a real evaluated result
+    // rather than the hardcoded literal removed in Phase 1.0a.
+    expect('fallbackUsed' in turn!).toBe(true);
+    expect(turn!.fallbackUsed).toBe(false);
+  });
+
+  it('falls back to a byte-identical body when validation rejects the transform (1.0b)', async () => {
+    const sessionStore = server.getSessionStore();
+    // An imperative constraint directive. Deduplicating it away drops the directive, the
+    // validators catch that, and the engine must fail open rather than ship the elision.
+    const directive = 'You MUST never delete the production database under any circumstances.';
+
+    const turn1 = JSON.stringify({
+      model: 'gpt-4o',
+      messages: [{ role: 'user', content: directive }],
+    });
+    await handleProxyRequest(
+      'POST',
+      '/v1/chat/completions',
+      { 'x-session-id': 'fail-open-session' },
+      turn1,
+      { sessionStore },
+    );
+
+    const turn2 = JSON.stringify({
+      model: 'gpt-4o',
+      messages: [
+        { role: 'user', content: directive },
+        { role: 'user', content: 'What should I do next?' },
+      ],
+    });
+    const res2 = await handleProxyRequest(
+      'POST',
+      '/v1/chat/completions',
+      { 'x-session-id': 'fail-open-session' },
+      turn2,
+      { sessionStore },
+    );
+
+    expect(res2.statusCode).toBe(200);
+    // Fail-open (invariant 3): the caller gets their original payload back, byte for byte,
+    // and the directive survives rather than being replaced by an elision marker.
+    expect(res2.body).toBe(turn2);
+    expect(res2.body).not.toContain('[TokenDamper Elided: ref=');
+
+    const session = sessionStore.getOrCreateSession('fail-open-session');
+    const turn = session.turns[session.turns.length - 1];
+    expect(turn!.fallbackUsed).toBe(true);
+    expect(turn!.tokensSaved).toBe(0);
+  });
+
+  it('still deduplicates code payloads without tripping drift on recoverable refs (1.0b)', async () => {
+    const sessionStore = server.getSessionStore();
+    // Symbol-dense content: before the recoverable-elision exemption this scored ~0.60
+    // drift and forced a fallback, defeating deduplication on exactly the payloads the
+    // Gateway exists to shrink.
+    const code = 'export function computeTotal(a, b) { const sum = a + b; return sum; }\nexport class Ledger {}';
+
+    const turn1 = JSON.stringify({ model: 'gpt-4o', messages: [{ role: 'user', content: code }] });
+    await handleProxyRequest(
+      'POST',
+      '/v1/chat/completions',
+      { 'x-session-id': 'code-dedup-session' },
+      turn1,
+      { sessionStore },
+    );
+
+    const turn2 = JSON.stringify({
+      model: 'gpt-4o',
+      messages: [
+        { role: 'user', content: code },
+        { role: 'user', content: 'Explain this.' },
+      ],
+    });
+    const res2 = await handleProxyRequest(
+      'POST',
+      '/v1/chat/completions',
+      { 'x-session-id': 'code-dedup-session' },
+      turn2,
+      { sessionStore },
+    );
+
+    const body = JSON.parse(res2.body);
+    expect(body.messages[0].content).toContain('[TokenDamper Elided: ref=');
+    expect(body.messages[1].content).toBe('Explain this.');
+
+    const session = sessionStore.getOrCreateSession('code-dedup-session');
+    const turn = session.turns[session.turns.length - 1];
+    expect(turn!.fallbackUsed).toBe(false);
+    expect(turn!.tokensSaved).toBeGreaterThan(0);
   });
 
   it('forwards optimized OpenAI requests upstream with authorization headers', async () => {

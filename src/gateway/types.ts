@@ -11,8 +11,9 @@ export interface SessionTurn {
   readonly tokensSaved: number;
   readonly dedupRatio: number;
   // Optional and absent unless validation/fallback was actually evaluated for the
-  // turn. The proxy path does not run that pipeline yet (Phase 1.0), so it omits
-  // this field rather than asserting a `false` it never computed.
+  // turn. The proxy path now runs the full engine (Phase 1.0b) and records a computed
+  // value; the field stays optional so any producer that skips validation can omit it
+  // rather than assert a `false` it never computed.
   readonly fallbackUsed?: boolean;
 }
 

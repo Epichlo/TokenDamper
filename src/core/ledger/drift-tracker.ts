@@ -1,4 +1,44 @@
-import type { ContextBundle } from '../model';
+import type { ContextBundle, ContextItem } from '../model';
+
+/**
+ * Substitutes the pre-optimization content back in for items elided into a
+ * recoverable reference (currently `cleanup:session-dedup`, which stores the full
+ * text in the session store keyed by `originalContentHash`).
+ *
+ * Drift measures irreversible semantic loss. A recoverable reference still resolves
+ * to its referent on demand, so scoring its dropped symbols as drift would make the
+ * metric fire hardest exactly when deduplication is working best. Lossy elisions
+ * (`compression:token-hashing`, `compression:delta-compression`) do not set
+ * `recoverable` and are therefore still scored in full.
+ */
+function resolveRecoverableElisions(
+  beforeBundle: ContextBundle,
+  afterBundle: ContextBundle,
+): ContextBundle {
+  const beforeById = new Map<string, ContextItem>();
+  for (const item of beforeBundle.items) {
+    beforeById.set(item.id, item);
+  }
+
+  let substituted = false;
+  const effectiveItems = afterBundle.items.map((item) => {
+    if (item.metadata.elided !== true || item.metadata.recoverable !== true) {
+      return item;
+    }
+    const original = beforeById.get(item.id);
+    if (!original) {
+      return item;
+    }
+    substituted = true;
+    return original;
+  });
+
+  if (!substituted) {
+    return afterBundle;
+  }
+
+  return { ...afterBundle, items: Object.freeze(effectiveItems) };
+}
 
 export interface DriftMetricParams {
   readonly beforeBundle: ContextBundle;
@@ -60,8 +100,10 @@ export class DriftTracker {
     const normAst = totalWeight > 0 ? wAst / totalWeight : 0.60;
     const normStruct = totalWeight > 0 ? wStruct / totalWeight : 0.40;
 
+    const effectiveAfter = resolveRecoverableElisions(beforeBundle, afterBundle);
+
     const symbolsBefore = this.extractSymbols(beforeBundle);
-    const symbolsAfter = this.extractSymbols(afterBundle);
+    const symbolsAfter = this.extractSymbols(effectiveAfter);
 
     let astSymbolRetentionRatio = 1.0;
     if (symbolsBefore.size > 0) {
@@ -75,7 +117,7 @@ export class DriftTracker {
     }
 
     const markersBefore = this.extractMarkers(beforeBundle);
-    const markersAfter = this.extractMarkers(afterBundle);
+    const markersAfter = this.extractMarkers(effectiveAfter);
 
     let structuralIntegrityRatio = 1.0;
     if (markersBefore.size > 0) {

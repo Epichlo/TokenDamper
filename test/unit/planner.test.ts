@@ -58,6 +58,27 @@ describe('planner', () => {
     expect(planOptimizationMode(budget)).toBe('topology_knapsack');
   });
 
+  it('plans only session-dedup when the config pins session_dedup mode (1.0b)', () => {
+    const bundle = createContextBundle('sample text', 'text');
+    // A budget that would otherwise select knapsack mode; explicit session_dedup wins,
+    // keeping token-hashing (Issue 2) away from live Gateway payloads.
+    const budget = createOptimizationBudget({
+      maxInputTokens: 500,
+      targetReductionRatio: 0.5,
+      riskTolerance: 'low',
+    });
+    const gatewayConfig: ResolvedConfig = {
+      ...baseConfig,
+      planner: { defaultMode: 'session_dedup' },
+    };
+
+    const result = plan(bundle, budget, gatewayConfig, []);
+
+    expect(result.mode).toBe('session_dedup');
+    expect(result.stageIds).toEqual(['cleanup:session-dedup']);
+    expect(result.fallbackPolicy).toBe('original_input');
+  });
+
   it('validates planner inputs', () => {
     const bundle = createContextBundle('sample text', 'text');
     const budget = createOptimizationBudget({ riskTolerance: 'low' });

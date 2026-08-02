@@ -10,6 +10,13 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
 `git log v1.1.0..HEAD` to confirm current scope before relying on this list.
 
 ### Fixed
+- **Gateway Ran Without Any Safety Net (Phase 1.0b)**: `src/gateway/proxy.ts` called
+  `runSessionDedupStage()` directly, so the proxy path executed no validators, no
+  `DriftTracker`/`ConfidenceLedger`/`DebtTracker`, and no fallback resolver — invariants 3
+  (fail-open fallback) and 5 (drift threshold) simply did not exist for live provider
+  traffic. The proxy now routes through `core/engine.optimize()` and records a genuinely
+  computed `fallbackUsed`. A rejected transform returns the caller's original payload
+  byte-for-byte.
 - **Planner Budget Trigger**: `isKnapsackMode` now also triggers on
   `budget.targetReductionRatio`, not just `maxInputTokens` — previously a budget supplying
   only `--target-reduction-ratio` silently resolved to `pass_through` mode with zero stages
@@ -20,7 +27,21 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
   across `src/config/load.ts`, `src/config/schema.ts`, `src/core/hashing/tokenizer.ts`,
   `src/core/topology/git-inspector.ts`, and adapter entry points.
 
+### Added
+- **`session_dedup` Planner Mode**: New `OptimizationMode` planning exactly
+  `['cleanup:session-dedup']`. Selected via `config.planner.defaultMode` (previously dead
+  config) and takes precedence over budget-derived knapsack mode. The Gateway pins it so
+  `compression:token-hashing` — which corrupts JSON-shaped message content (Issue 2) —
+  cannot reach live provider payloads.
+
 ### Changed
+- **Drift Exempts Recoverable Elisions**: `cleanup:session-dedup` now tags its elisions
+  `recoverable: true`, and `DriftTracker` substitutes the pre-optimization content for
+  those items before scoring. A dedup marker is a reference to text still held in the
+  session store, not semantic loss; scoring it as drift made `S_k` fire hardest exactly
+  when deduplication worked best (measured 0.60 for a code payload that now scores 0.00).
+  Lossy elisions (`token-hashing`, `delta-compression`) set no such flag and are still
+  scored in full.
 - **Documentation**: Updated `ARCHITECTURE.md`, `DECISIONS.md`, and `ROADMAP.md` for v2.0
   planning.
 

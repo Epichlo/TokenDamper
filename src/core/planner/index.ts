@@ -18,6 +18,21 @@ export function plan(
 ): OptimizationPlan {
   validatePlannerInputs(bundle, budget, config);
 
+  // Explicit `session_dedup` selection wins over budget-derived knapsack mode.
+  // The Gateway proxy sets this so cross-turn deduplication is the only transform
+  // applied to live provider traffic: `compression:token-hashing` writes bare
+  // `<BLOCK_HASH:...>` markers that corrupt JSON-shaped message content (Issue 2),
+  // which must not reach production requests until content-type tagging lands.
+  if (config.planner?.defaultMode === 'session_dedup') {
+    return {
+      planId: `${bundle.bundleId}:session_dedup`,
+      mode: 'session_dedup',
+      stageIds: Object.freeze(['cleanup:session-dedup']),
+      revalidationPoints: Object.freeze(['end']),
+      fallbackPolicy: 'original_input',
+    };
+  }
+
   const isKnapsackMode =
     (typeof budget.maxInputTokens === 'number' && budget.maxInputTokens > 0) ||
     (typeof budget.targetReductionRatio === 'number' && budget.targetReductionRatio > 0);

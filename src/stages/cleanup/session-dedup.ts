@@ -99,6 +99,11 @@ export function runSessionDedupStage(
         metadata: freeze({
           ...item.metadata,
           elided: true,
+          // The full content is held in the session store under `originalContentHash`
+          // and can be restored on demand, so this marker is a reference rather than
+          // a lossy transform. DriftTracker consults this flag to avoid scoring
+          // recoverable references as semantic drift.
+          recoverable: true,
           originalContentHash: item.contentHash,
           originalBytes: originalLength,
         }),

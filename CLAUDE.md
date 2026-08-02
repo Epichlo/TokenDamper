@@ -85,8 +85,9 @@ Knapsack-mode stage order (from `src/core/planner/index.ts`):
 `compression:token-hashing` → `compression:delta-compression`.
 Note `cleanup:session-dedup` is in the registry catalog but **not** in this list — it never
 runs via the CLI or MCP paths (both call `core/engine.optimize()`, which only executes
-`plan.stageIds`). It only runs via `src/gateway/proxy.ts`, which calls
-`runSessionDedupStage()` directly, bypassing the planner entirely. See Known bugs below.
+`plan.stageIds`). It runs only under the `session_dedup` planner mode, which the Gateway
+pins via `config.planner.defaultMode`; that mode plans exactly `['cleanup:session-dedup']`
+and takes precedence over budget-derived knapsack selection.
 
 MCP tools: `optimize_context`, `rehydrate_context`, `get_session_metrics`,
 `get_optimization_trace`. Resources: `tokendamper://config`,
@@ -110,14 +111,18 @@ MCP tools: `optimize_context`, `rehydrate_context`, `get_session_metrics`,
 Full detail in `tokendamper-headroom-known-issues.md`; proposed fixes in
 `purposed architecture changes.md`. Summary:
 
-- **Gateway bypasses validation entirely (read this first):** `src/gateway/proxy.ts` calls
-  `runSessionDedupStage()` directly and never invokes the validators, `DriftTracker`,
-  `ConfidenceLedger`, `DebtTracker`, or the fallback resolver. `fallbackUsed: false` in the
-  Gateway trace is a hardcoded literal, not a computed result. Invariants 3 (fail-open
-  fallback) and 5 (drift threshold) in this document hold for CLI and MCP modes only — they
-  do not exist on the Gateway proxy path. `cleanup:session-dedup` is consequently the only
-  built-in stage that ever runs in production Gateway traffic, and it runs with zero
-  syntax/drift safety net. Not yet numbered as an Issue in the known-issues doc.
+- **~~Gateway bypasses validation entirely~~ — FIXED (Phase 1.0b).** `src/gateway/proxy.ts`
+  now routes through `core/engine.optimize()`, so validators, `DriftTracker`,
+  `ConfidenceLedger`, `DebtTracker` and the fallback resolver all run on proxy traffic and
+  `fallbackUsed` is a computed value. Invariants 3 and 5 now hold on all three entry modes.
+  The Gateway pins the planner to `session_dedup` mode, so `cleanup:session-dedup` is still
+  the only stage that runs on live traffic — deliberately, because `token-hashing` would hit
+  Issue 2 on JSON payloads. Two constraints to know before changing this path: the Gateway
+  maps `result.finalBundle` items back onto the parsed payload and must **not** use
+  `emittedOutput` (the fallback resolver renders a newline-joined blob, not a valid API
+  payload); and it passes a **per-request** `ConfidenceLedger`, because a session-scoped one
+  decays earlier turns below `validation.minimumConfidence` (default 1) and would force a
+  fallback on every turn after the first.
 - **Issue 2 (blocker):** `compression:token-hashing` writes bare `<BLOCK_HASH:...>` into
   JSON content; the downstream JSON/AST validator then correctly rejects it and the whole
   pipeline falls back. This 0%-fails on **any** JSON-shaped payload. The stage has no
@@ -160,9 +165,11 @@ scoring, MMR, AST folding and Prometheus metrics on top of a pipeline that curre
 
 ## Gotchas
 
-- The Gateway proxy path (`src/gateway/proxy.ts`) bypasses validation, drift/debt tracking,
-  and fallback entirely — `fallbackUsed: false` in its trace is hardcoded, not computed.
-  Only CLI and MCP modes have the safety guarantees this document describes.
+- `DriftTracker` exempts elisions tagged `recoverable: true` (currently only
+  `cleanup:session-dedup`) by substituting their pre-optimization content before scoring —
+  a dedup marker is a reference to text still in the session store, not semantic loss. Do
+  not infer the exemption from `elided` or `originalContentHash`; `token-hashing` sets both
+  and must stay fully scored. See DECISIONS.md §16.
 - `package.json` and `src/version.ts` say **1.1.0**, but the roadmap treats **v1.0.3** as
   the baseline. Reconcile before cutting a release; don't assume either is right.
 - `configSchemaVersion` **already exists** in `src/config/types.ts`, despite the roadmap

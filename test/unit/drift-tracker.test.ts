@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { createContextBundle } from '../../src/core/model/constructors';
+import {
+  createBundleStatistics,
+  createContextBundle,
+  createContextItem,
+  freeze,
+  hashContent,
+} from '../../src/core/model/constructors';
 import { DriftTracker } from '../../src/core/ledger/drift-tracker';
 
 describe('DriftTracker', () => {
@@ -108,6 +114,57 @@ describe('DriftTracker', () => {
     expect(report.driftScore).toBeGreaterThan(0.40);
     expect(report.shouldFallback).toBe(true);
     expect(report.reason).toContain('exceeds maximum threshold');
+  });
+
+  it('exempts recoverable elisions from drift but still scores lossy ones (1.0b)', () => {
+    const tracker = new DriftTracker({ maxDriftThreshold: 0.40 });
+    const code = 'export function computeTotal(a, b) { const sum = a + b; return sum; }\nexport class Ledger {}';
+    const marker = '[TokenDamper Elided: ref=abc123def456 bytes=91 kind=conversation]';
+
+    const makeBundle = (content: string, metadata: Record<string, string | number | boolean | null>) => {
+      const items = [
+        createContextItem({
+          id: 'item-1',
+          kind: 'conversation',
+          contentType: 'text',
+          content,
+          origin: 'test',
+          contentHash: hashContent(content),
+          metadata: freeze(metadata),
+        }),
+      ];
+      return freeze({
+        id: 'bundle',
+        bundleId: 'bundle',
+        source: 'text' as const,
+        items: freeze(items),
+        summary: freeze({ itemCount: 1, tokenEstimate: 1, preview: '' }),
+        statistics: createBundleStatistics(items),
+        contentHash: 'bundle',
+      });
+    };
+
+    const before = makeBundle(code, {});
+
+    // cleanup:session-dedup marks its elisions recoverable: the full text is retained in
+    // the session store and can be restored, so the reference is not semantic loss.
+    const recoverable = tracker.calculateDrift(
+      before,
+      makeBundle(marker, { elided: true, recoverable: true, originalContentHash: 'h1' }),
+    );
+
+    // compression:token-hashing elides the same bytes lossily and sets no `recoverable`
+    // flag, so invariant 5 must still fire on it.
+    const lossy = tracker.calculateDrift(
+      before,
+      makeBundle(marker, { elided: true, tokenHashed: true, originalContentHash: 'h1' }),
+    );
+
+    expect(recoverable.driftScore).toBe(0.0);
+    expect(recoverable.shouldFallback).toBe(false);
+
+    expect(lossy.driftScore).toBeGreaterThan(0.40);
+    expect(lossy.shouldFallback).toBe(true);
   });
 
   it('extracts Python symbols and structural markers correctly', () => {

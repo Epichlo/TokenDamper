@@ -1,8 +1,10 @@
 import type { IncomingHttpHeaders } from 'node:http';
 import { loadConfig } from '../config';
 import { createContextItem, createOptimizationBudget, freeze, hashContent } from '../core/model/constructors';
-import type { ContextBundle, ContextItem, ContextItemKind } from '../core/model/types';
-import { runSessionDedupStage } from '../stages/cleanup/session-dedup';
+import type { ContextBundle, ContextItem, ContextItemKind, OptimizationRequest, ResolvedConfig } from '../core/model/types';
+import { optimize } from '../core/engine';
+import { ConfidenceLedger } from '../core/ledger/confidence-ledger';
+import { TOKENDAMPER_VERSION } from '../version';
 import { GatewaySessionStore } from './session-store';
 import type { AnthropicMessagesPayload, OpenAiChatPayload, ProxyHandlerOptions, ProxyRequestResult, SessionContentEntry } from './types';
 
@@ -303,6 +305,76 @@ function getSessionIdFromHeaders(headers: IncomingHttpHeaders, body: string): st
   return 'default-session';
 }
 
+interface GatewayOptimizationOutcome {
+  readonly finalBundle: ContextBundle;
+  readonly fallbackUsed: boolean;
+  readonly rawTokens: number;
+  readonly optimizedTokens: number;
+  readonly tokensSaved: number;
+}
+
+/**
+ * Runs the proxy payload through the shared optimization engine so Gateway traffic
+ * gets the same validators, ledgers, drift/debt tracking and fail-open fallback the
+ * CLI and MCP adapters already have (Phase 1.0b).
+ *
+ * The planner is pinned to `session_dedup` mode: cross-turn deduplication is the only
+ * transform safe to apply to live provider payloads today, because `token-hashing`
+ * corrupts JSON-shaped message content (Issue 2).
+ */
+function runGatewayOptimization(
+  rawBody: string,
+  initialBundle: ContextBundle,
+  session: ReturnType<GatewaySessionStore['getOrCreateSession']>,
+  options: ProxyHandlerOptions,
+): GatewayOptimizationOutcome {
+  const baseConfig = loadConfig();
+  const config: ResolvedConfig = {
+    ...baseConfig,
+    planner: { ...baseConfig.planner, defaultMode: 'session_dedup' },
+  };
+
+  const request: OptimizationRequest = {
+    requestId: `gateway:${session.sessionId}:${session.turnCount + 1}`,
+    rawInput: rawBody,
+    bundle: initialBundle,
+    budget: createOptimizationBudget(config.budget),
+    config,
+    adapterName: 'gateway',
+    adapterVersion: TOKENDAMPER_VERSION,
+  };
+
+  const result = optimize(request, {
+    sessionContext: {
+      previousBlockHashes: session.seenBlockHashes,
+      storeContent: (hash, content) => options.sessionStore.storeContent(session.sessionId, hash, content),
+      getContent: (hashOrRef) => options.sessionStore.getContent(session.sessionId, hashOrRef),
+    },
+    // Deliberately per-request rather than session-scoped: a persistent ledger decays
+    // earlier turns' elision confidence below `validation.minimumConfidence` (default 1),
+    // which would force a fallback on every turn after the first. Cross-turn confidence
+    // decay needs its own threshold policy and is out of scope for this phase.
+    confidenceLedger: new ConfidenceLedger(),
+    currentTurn: session.turnCount + 1,
+  });
+
+  const rawTokens = initialBundle.summary.tokenEstimate;
+  const optimizedTokens = result.finalBundle.summary.tokenEstimate;
+
+  return {
+    // Note: `result.emittedOutput` is deliberately unused. The fallback resolver renders
+    // a bundle by joining item contents with newlines, which is not a valid provider API
+    // payload. Mapping `finalBundle` items back onto the parsed request preserves payload
+    // shape, and because the engine returns the original bundle whenever fallback fires,
+    // that mapping reproduces the request body unchanged on the fallback path.
+    finalBundle: result.finalBundle,
+    fallbackUsed: result.fallbackUsed,
+    rawTokens,
+    optimizedTokens,
+    tokensSaved: Math.max(0, rawTokens - optimizedTokens),
+  };
+}
+
 function processOpenAiRequest(
   rawBody: string,
   headers: Record<string, string>,
@@ -355,9 +427,6 @@ function processOpenAiRequest(
     );
   }
 
-  const config = loadConfig();
-  const budget = createOptimizationBudget(config.budget);
-
   const statistics = {
     itemCount: items.length,
     contentTypeCounts: { text: items.length, markdown: 0, code: 0, html: 0, json: 0, yaml: 0, logs: 0, unknown: 0 },
@@ -384,44 +453,35 @@ function processOpenAiRequest(
     content: item.content,
   }));
 
-  const stageResult = runSessionDedupStage(initialBundle, budget, {
-    previousBlockHashes: session.seenBlockHashes,
-    storeContent: (hash, content) => options.sessionStore.storeContent(session.sessionId, hash, content),
-    getContent: (hashOrRef) => options.sessionStore.getContent(session.sessionId, hashOrRef),
-  });
+  const outcome = runGatewayOptimization(rawBody, initialBundle, session, options);
 
   let finalBody = rawBody;
-  if (stageResult.changed) {
-    const updatedMessages = messages.map((msg, idx) => {
-      const updatedItem = stageResult.bundle.items[idx];
-      if (updatedItem && msg && updatedItem.content !== (typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content))) {
-        return {
-          ...msg,
-          content: updatedItem.content,
-        };
-      }
-      return msg;
-    });
+  const updatedMessages = messages.map((msg, idx) => {
+    const updatedItem = outcome.finalBundle.items[idx];
+    if (updatedItem && msg && updatedItem.content !== (typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content))) {
+      return {
+        ...msg,
+        content: updatedItem.content,
+      };
+    }
+    return msg;
+  });
 
+  if (updatedMessages.some((msg, idx) => msg !== messages[idx])) {
     finalBody = JSON.stringify({
       ...parsedPayload,
       messages: updatedMessages,
     });
   }
 
-  const rawTokens = initialBundle.summary.tokenEstimate;
-  const optimizedTokens = stageResult.bundle.summary.tokenEstimate;
-
   options.sessionStore.recordTurn(
     session.sessionId,
     {
-      rawTokens,
-      optimizedTokens,
-      tokensSaved: stageResult.metrics.tokenEstimateSaved || 0,
-      dedupRatio: rawTokens > 0 ? (stageResult.metrics.tokenEstimateSaved || 0) / rawTokens : 0,
-      // fallbackUsed intentionally omitted: this path runs no validators or
-      // fallback resolver, so there is no evaluated value to report. Recording
-      // `false` would assert a safety property that was never checked (Phase 1.0a).
+      rawTokens: outcome.rawTokens,
+      optimizedTokens: outcome.optimizedTokens,
+      tokensSaved: outcome.tokensSaved,
+      dedupRatio: outcome.rawTokens > 0 ? outcome.tokensSaved / outcome.rawTokens : 0,
+      fallbackUsed: outcome.fallbackUsed,
     },
     contentEntries,
   );
@@ -494,9 +554,6 @@ function processAnthropicRequest(
     );
   }
 
-  const config = loadConfig();
-  const budget = createOptimizationBudget(config.budget);
-
   const statistics = {
     itemCount: items.length,
     contentTypeCounts: { text: items.length, markdown: 0, code: 0, html: 0, json: 0, yaml: 0, logs: 0, unknown: 0 },
@@ -523,45 +580,36 @@ function processAnthropicRequest(
     content: item.content,
   }));
 
-  const stageResult = runSessionDedupStage(initialBundle, budget, {
-    previousBlockHashes: session.seenBlockHashes,
-    storeContent: (hash, content) => options.sessionStore.storeContent(session.sessionId, hash, content),
-    getContent: (hashOrRef) => options.sessionStore.getContent(session.sessionId, hashOrRef),
-  });
+  const outcome = runGatewayOptimization(rawBody, initialBundle, session, options);
 
   let finalBody = rawBody;
-  if (stageResult.changed) {
-    const itemOffset = parsedPayload.system ? 1 : 0;
-    const updatedMessages = messages.map((msg, idx) => {
-      const updatedItem = stageResult.bundle.items[idx + itemOffset];
-      if (updatedItem && msg && updatedItem.content !== (typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content))) {
-        return {
-          ...msg,
-          content: updatedItem.content,
-        };
-      }
-      return msg;
-    });
+  const itemOffset = parsedPayload.system ? 1 : 0;
+  const updatedMessages = messages.map((msg, idx) => {
+    const updatedItem = outcome.finalBundle.items[idx + itemOffset];
+    if (updatedItem && msg && updatedItem.content !== (typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content))) {
+      return {
+        ...msg,
+        content: updatedItem.content,
+      };
+    }
+    return msg;
+  });
 
+  if (updatedMessages.some((msg, idx) => msg !== messages[idx])) {
     finalBody = JSON.stringify({
       ...parsedPayload,
       messages: updatedMessages,
     });
   }
 
-  const rawTokens = initialBundle.summary.tokenEstimate;
-  const optimizedTokens = stageResult.bundle.summary.tokenEstimate;
-
   options.sessionStore.recordTurn(
     session.sessionId,
     {
-      rawTokens,
-      optimizedTokens,
-      tokensSaved: stageResult.metrics.tokenEstimateSaved || 0,
-      dedupRatio: rawTokens > 0 ? (stageResult.metrics.tokenEstimateSaved || 0) / rawTokens : 0,
-      // fallbackUsed intentionally omitted: this path runs no validators or
-      // fallback resolver, so there is no evaluated value to report. Recording
-      // `false` would assert a safety property that was never checked (Phase 1.0a).
+      rawTokens: outcome.rawTokens,
+      optimizedTokens: outcome.optimizedTokens,
+      tokensSaved: outcome.tokensSaved,
+      dedupRatio: outcome.rawTokens > 0 ? outcome.tokensSaved / outcome.rawTokens : 0,
+      fallbackUsed: outcome.fallbackUsed,
     },
     contentEntries,
   );

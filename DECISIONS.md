@@ -449,3 +449,48 @@ Developers overwhelmingly prefer transparent integration. Connecting multiple Mo
 ### Rationale
 
 A local proxy and MCP approach allows TokenDamper to deduplicate static schemas, track token usage invisibly, and implement circuit breakers without requiring users to alter their application code.
+
+## 16. Recoverable References Are Not Semantic Drift
+
+### Decision
+
+`cleanup:session-dedup` tags its elisions `recoverable: true`, and `DriftTracker` substitutes
+the pre-optimization content for those items before computing `S_k`. Lossy elisions
+(`compression:token-hashing`, `compression:delta-compression`) carry no such flag and remain
+fully scored against the `S_k <= 0.40` threshold.
+
+### Context
+
+Routing the Gateway through `core/engine.optimize()` (Phase 1.0b) subjected cross-turn
+deduplication to the drift validator for the first time. Drift is computed from AST symbol
+and structural marker retention, so replacing a message with `[TokenDamper Elided: ref=...]`
+drops every symbol that message contributed. A representative code payload scored `S_k =
+0.60`, well past the threshold, forcing a fallback.
+
+That behavior is inverted: drift rose with the *size* of the deduplicated block, so the
+validator vetoed deduplication most aggressively on precisely the payloads the Gateway
+exists to shrink.
+
+### Alternatives Considered
+
+- A higher, Gateway-specific `maxDriftThreshold` — a magic number that weakens the
+  invariant for lossy stages on the same path, rather than drawing a principled line.
+- Accepting the fallbacks — honest, but reduces Gateway savings toward zero in its best
+  cases and makes the safety net indistinguishable from an off switch.
+- Excluding elided items from both sides of the ratio — distorts the denominator and
+  silently shrinks the evidence base the metric is computed from.
+
+### Rationale
+
+A dedup marker is a *pointer*: the full text is retained in the session store under
+`originalContentHash` and is restorable on demand. Nothing is irrecoverably lost, so nothing
+should be scored as loss. Drift exists to catch irreversible semantic damage, and keeping
+recoverable references out of it preserves the invariant's meaning for the lossy stages that
+genuinely need policing.
+
+### Consequences
+
+The exemption is keyed on an explicit `recoverable` flag rather than inferred from `elided`
+or `originalContentHash`, both of which `token-hashing` also sets. Any future stage claiming
+the exemption must guarantee the same restorability contract, or the drift invariant
+silently stops protecting that path.
