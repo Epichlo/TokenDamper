@@ -144,3 +144,51 @@ content-type tag is not only an input to the transform; it is an input to the *c
 to everything in the bundle*. Any future change to classification has a blast radius over
 untouched items, and the way to see it is to measure turn 1 — where nothing is transformed,
 so every failure is a false positive by construction.
+
+---
+
+## `purposed architecture changes.md` — Change 2 assumes a validation failure is attributable to a stage
+
+**Date:** 2026-08-02
+**Status of the correction:** design input for Phase 1c, which is **not started**
+
+**What the document says.** Change 2 ("Replace the single global validate→fallback gate with
+per-stage checkpointing") proposes: *"Validate incrementally after each stage in the Linear
+Engine ... On a stage-level validation failure, roll back only that stage's transform and
+keep the output of prior stages."*
+
+**What that assumes.** That a validation failure can be attributed to the stage that caused
+it. For a class of failures it cannot, and this was demonstrated rather than theorized
+during Issue 2.
+
+**1. A failure can originate in an item no stage touched.** `src/core/validation/index.ts`
+runs `validateBundleAst(after)` over **every item in the final bundle**, not only the items
+a stage changed. The fenced-prose defect in `DECISIONS.md` §17 was found exactly this way:
+with `contentType` newly computed, a message quoting a code snippet failed the TypeScript
+validator on **turn 1** of a Gateway session, where `cleanup:session-dedup` has no previous
+block hashes and cannot elide anything. Nothing had been transformed. There was no stage to
+roll back, and rolling one back would not have helped.
+
+**2. Two of the four checks are bundle-scoped, not item-scoped.** Constraint-directive
+retention compares the `before` directives against all `after` item content joined into one
+string; `DriftTracker` computes `S_k` from whole-bundle symbol and marker *sets*. Neither
+produces a per-stage or per-item attribution as written. Drift in particular is a set
+comparison — a symbol dropped by stage 2 and a symbol dropped by stage 4 are
+indistinguishable in the result.
+
+**Consequence for the design.** "Roll back only the failing stage" needs a prior answer to
+*which stage failed*, and for these cases the honest answer is "none of them" or "not
+determinable." A checkpointing implementation that assumes attributability will roll back an
+innocent stage and report a cause that is not the cause — the same class of error as the
+hardcoded `fallbackUsed: false` that Phase 1.0a removed, and the vacuous JSON checks that
+Commit C removed: a verdict asserted without being derived.
+
+The suggested first step is to establish attribution before building rollback on it —
+validate the *delta* a stage produced rather than the whole bundle, and decide explicitly
+what happens to a failure that predates every stage. Change 2's estimate that this "would
+likely convert at least 2 of the current 0%-fallback cases into partial reductions" should
+be re-derived afterwards; both cited cases (`tool_output.json`, `session.json`) have since
+changed behavior under `b11dcb0` and `ac16cec`.
+
+**Also recorded in:** `docs/phase-1-stabilization-summary.md` §8 (1c), and `CLAUDE.md` as a
+gotcha, because those are read.

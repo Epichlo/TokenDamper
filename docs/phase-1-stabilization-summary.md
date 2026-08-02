@@ -1,10 +1,21 @@
-# Phase 1 Stabilization — Summary Report
+# Phase 1.0 and Issue 2 — Summary Report
+
+> ## ⚠️ Scope: this is **not** all of Phase 1
+>
+> This document covers **Phase 1.0** (Gateway stabilization, `1.0a` + `1.0b`) and
+> **Issue 2** (the content-type contract). Those are the parts that are done.
+>
+> The original Phase 1 brief also contains **1b** (byte-identical fallback), **1c**
+> (per-stage checkpointing) and **1d** (the drift-threshold investigation). None of those
+> are covered here, and as of `4335c31` none of them have been started. See
+> §8 "Outstanding work" for the real list — and read that section before treating anything
+> here as a statement about Phase 1 as a whole.
 
 > ## ⚠️ Point-in-time record — not a live specification
 >
-> This document records the state of Phase 1.0 **as of 2026-08-02**, at commit `61bd685`.
-> It is a historical account of what was done and why. It is **not** a description of
-> current behavior and it is **not** a spec to implement against.
+> This document records work done **2026-08-01 → 2026-08-02**, across commits
+> `4b11d7e..4335c31`. It is a historical account of what was done and why. It is **not** a
+> description of current behavior and it is **not** a spec to implement against.
 >
 > Planning docs in this repo have twice been mistaken for current state after going stale.
 > Before relying on any statement here, verify it against the source. Where this document
@@ -292,9 +303,87 @@ the knapsack stages, which Issue 2 is the gate on. It does mean cross-turn dedup
 should not be cited as a headline capability until there is a mechanism that lets the model
 resolve a marker — which, on a stateless provider API, there currently is not.
 
-## 8. Suggested next step
+## 8. Outstanding work
 
-**Issue 2 — content-type as a first-class `ContextBundle` tag**, set at ingestion and
-consulted by the planner before transforms run. It is the gate on both the Gateway's stage
-scope (limitation 1) and the roadmap feature work scheduled on top of a pipeline that
-currently 0%-fails on structured payloads.
+> Replaces the former "Suggested next step" section, which named Issue 2. Issue 2 is now
+> **done** (`29f66b3`, `e9ea50d`, `b11dcb0`, `642abcb`, `ac16cec`, `4335c31`) — though not
+> at the seam it was specified at; see `NOTES-FOR-DOCS.md`. The §9 prediction about the
+> `tool_output.json` row was confirmed on landing, also recorded there.
+
+Everything below is **not started** as of `4335c31`, verified against source rather than
+recalled. Phase 1 is not finished.
+
+### 1b — byte-identical fallback (Issue 5)
+
+`session.json` emits **−1.39%** on fallback: the output is *larger* than the input, because
+the fallback path re-renders `currentBundle` by joining item contents with newlines instead
+of echoing the original bytes.
+
+The Gateway sidesteps this structurally — `src/gateway/proxy.ts` maps `result.finalBundle`
+back onto the parsed payload and never touches `emittedOutput` — but that is a local
+workaround on one path, not a fix. **The CLI and MCP paths still re-render.** The agreed
+direction is to split fallback into raw passthrough (byte-identical echo, bypassing the
+bundle render model) and bundle rendering (success path only), so byte-identity is
+structural rather than test-enforced.
+
+### 1c — per-stage checkpointing
+
+Still a single global validate→fallback gate: one failing stage discards every prior valid
+reduction. Cited twice as the reason elision refusal must skip an item and continue rather
+than abort the stage (`docs/issue-2-content-type-contract-design.md` §3.4.1, and the
+`elideItem` doc comment) — aborting today would convert a placeholder defect into a
+whole-pipeline fallback.
+
+**Design input discovered during Issue 2, and it complicates the premise.**
+`src/core/validation/index.ts` runs `validateBundleAst(after)` over **every item in the
+final bundle**, not only the items a stage changed. Per-stage checkpointing assumes a
+validation failure can be attributed to the stage that caused it. Sometimes it cannot:
+
+- A validation failure can originate in an item **no stage touched**. This is not
+  hypothetical — it is exactly how the fenced-prose defect in `DECISIONS.md` §17 was found.
+  With `contentType` newly computed, a message quoting a code snippet failed the TypeScript
+  validator on **turn 1**, where `cleanup:session-dedup` has no previous block hashes and
+  cannot elide anything. Nothing had been transformed, so no rollback could have fixed it.
+- Two of the four checks in `validate()` are **bundle-scoped, not item-scoped**: constraint
+  directive retention compares `before` against all `after` content joined, and
+  `DriftTracker` computes `S_k` over whole-bundle symbol sets. Neither yields a per-stage or
+  per-item attribution as written.
+
+So "roll back only the failing stage" needs a prior answer to *which stage failed*, and for
+a class of failures the honest answer is "none of them." A checkpointing design that assumes
+attributability will silently roll back an innocent stage. Recommended first step is to
+establish attribution — validate the delta a stage produced, not the whole bundle — before
+building rollback on top of it. Recorded in `CLAUDE.md` as a gotcha as well, since that is
+what gets read.
+
+### 1d — drift threshold investigation
+
+The brief: `codebase.py` aborts on `S_k = 0.60 > 0.40`; investigate what drives the score
+and decide whether the threshold should be content-type-specific rather than shared across
+prose, logs and code. **Not started** — no investigation of what drives the score exists,
+and `DriftTracker` still has a single scalar `maxDriftThreshold` (default `0.40`,
+`drift-tracker.ts:83`) with no content-type branching. `--max-drift` is the only override.
+
+Three things are adjacent but are **not** 1d, and should not be counted as it:
+`tokendamper-headroom-known-issues.md` Issue 3 states the problem and then *retracts* its
+main supporting evidence (Headroom did not independently choose `router:noop`; it hit a
+20-second backend timeout); `aba84df` changed tests to tolerate the abort rather than
+investigate it; and `DECISIONS.md` §16 rejected a *path*-specific threshold for a different
+problem. `docs/issue-2-content-type-contract-design.md` §4 explicitly puts threshold changes
+out of scope.
+
+**Anything measured for 1d before now must be re-measured.** `b11dcb0` narrowed the drift
+exemption and `ac16cec` made `DriftTracker` see JSON as JSON for the first time, so drift
+does not behave as it did when 1d was written.
+
+One observation that fell out of the bench run for `4335c31`, offered as a starting point
+rather than as analysis: at `targetReductionRatio: 0.30`, **nine of the ten bundled bench
+fixtures fall back at exactly `S_k = 0.60`** — Python, TypeScript and JavaScript alike. That
+value is what `1 - (0.60 × R_AST + 0.40 × R_struct)` yields when `R_AST = 0` and
+`R_struct = 1`, i.e. total AST-symbol loss with structural markers fully intact. The
+constant recurrence across languages suggests the score is being driven by one mechanism,
+not by per-fixture content.
+
+### Phase 2 — security audit
+
+Not started.

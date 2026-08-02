@@ -146,9 +146,19 @@ Full detail in `tokendamper-headroom-known-issues.md`; proposed fixes in
     instead of the AST gate. Invariant 8 still stands.
 - **Issue 5:** on fallback, `session.json` emits **-1.39%** — output is *larger* than
   input. Fallback re-renders `currentBundle` instead of echoing raw input bytes.
-- **Issue 3 (probably correct behavior):** drift 0.60 > 0.40 aborts on `codebase.py`.
-  Headroom independently chose `router:noop` on the same file. Confirm intent before
-  "fixing"; may want a code-specific threshold rather than one shared with prose/logs.
+- **Issue 3 / Phase 1d (NOT STARTED — investigate before changing anything):** drift
+  `0.60 > 0.40` aborts on `codebase.py`. The brief is to find what *drives* the score and
+  decide whether the threshold should be content-type-specific; no such investigation
+  exists. `DriftTracker` still has one scalar `maxDriftThreshold` (default `0.40`,
+  `drift-tracker.ts:83`), overridable only by `--max-drift`.
+  - The old "Headroom independently chose `router:noop`, so this is probably correct" claim
+    is **retracted** — on re-run Headroom hit a 20-second backend timeout and failed open.
+    Same 0%, different mechanism. Do not cite it as corroboration.
+  - Not isolated to `codebase.py`: at `targetReductionRatio: 0.30`, nine of the ten bundled
+    bench fixtures fall back at **exactly** `S_k = 0.60` across Python, TypeScript and
+    JavaScript. That is `R_AST = 0`, `R_struct = 1` — total symbol loss, markers intact.
+  - Anything measured before `ac16cec` must be re-measured; drift no longer behaves as it
+    did when 1d was written.
 - **Issue 4 (not a bug):** constraint-preservation correctly refused to drop a planted
   imperative-tagged line in `sample_logs.txt`. `BLUE-PANDA-992` is a synthetic test
   string, not a credential.
@@ -164,12 +174,19 @@ The agreed direction is three scoped changes (no rewrite):
    `statistics.contentTypeCounts` is already the bundle-level view. See `NOTES-FOR-DOCS.md`.
    The planner-level gate (§3.6 of the design doc) is still **not** implemented: nothing in
    `src/core/planner/` reads `contentType`.
-2. Per-stage checkpointing replacing the single global validate→fallback gate — roll back
-   only the failing stage, keep prior valid reductions. Requires extending the trace with
-   per-stage status.
+2. Per-stage checkpointing replacing the single global validate→fallback gate (**Phase 1c,
+   not started**) — roll back only the failing stage, keep prior valid reductions. Requires
+   extending the trace with per-stage status. **Read this before designing it:** the plan
+   assumes a validation failure is attributable to a stage, and sometimes it is not.
+   `validate()` runs `validateBundleAst` over *every* item in the final bundle, so a failure
+   can originate in an item no stage touched (that is how DECISIONS.md §17 was found, on
+   turn 1 with nothing transformed). Constraint retention and drift are also bundle-scoped
+   set comparisons with no per-stage attribution. Establish attribution first. See
+   `NOTES-FOR-DOCS.md` and `docs/phase-1-stabilization-summary.md` §8.
 3. Split fallback into **raw passthrough** (byte-identical echo, bypasses the bundle
    render model) vs. **bundle rendering** (success path only). Make byte-identity
-   structural, not test-enforced.
+   structural, not test-enforced. (**Phase 1b / Issue 5, not started.** The Gateway
+   sidesteps it structurally via `finalBundle`; CLI and MCP still re-render.)
 
 Do this before roadmap feature work. `tokendamper-roadmap-v1.1-v2.0.md` schedules BM25
 scoring, MMR, AST folding and Prometheus metrics on top of a pipeline that currently
