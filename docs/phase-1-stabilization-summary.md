@@ -358,11 +358,29 @@ what gets read.
 
 ### 1d — drift threshold investigation
 
+**Investigation done 2026-08-03; recorded in `docs/phase-1d-drift-investigation.md`. The
+threshold is unchanged and the remedy is undesigned.**
+
 The brief: `codebase.py` aborts on `S_k = 0.60 > 0.40`; investigate what drives the score
-and decide whether the threshold should be content-type-specific rather than shared across
-prose, logs and code. **Not started** — no investigation of what drives the score exists,
-and `DriftTracker` still has a single scalar `maxDriftThreshold` (default `0.40`,
-`drift-tracker.ts:83`) with no content-type branching. `--max-drift` is the only override.
+and decide whether the threshold should be content-type-specific. What the measurement
+found, in short:
+
+- `extractSymbols` returns **empty** on the optimized side — correctly, because
+  `token-hashing` replaces the item's whole content with a 77-byte placeholder. Nothing to
+  extract from, not a misparse. No validator participates in extraction at all.
+- `0.60` is a **formula constant**, equal to `w_AST`, produced whenever `R_AST = 0` and
+  `R_struct = 1`. Identical to 4 dp across Python, TypeScript and JavaScript.
+- The cause is **granularity**: `token-hashing` is whole-item, and `createContextBundle`
+  makes a single-item bundle for CLI/bench, so `R_AST` is a boolean rather than a ratio and
+  a single-item code bundle can never pass. Given granularity, the metric grades fine
+  (1-of-4 hashed → `S_k = 0.34`, passes; 2-of-4 → `0.47`, fails).
+- Separately: for code, **`R_struct` is pinned at 1.0**, so 40% of the metric does no work
+  and `S_k` is capped at `0.60`. See `DECISIONS.md` §18.
+
+`DriftTracker` still has a single scalar `maxDriftThreshold` (default `0.40`,
+`drift-tracker.ts:83`) with no content-type branching; `--max-drift` remains the only
+override. On present evidence a content-type-specific *threshold* looks like the wrong
+instrument — but that is an argument against the framing, not a decision.
 
 Three things are adjacent but are **not** 1d, and should not be counted as it:
 `tokendamper-headroom-known-issues.md` Issue 3 states the problem and then *retracts* its

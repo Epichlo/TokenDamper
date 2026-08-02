@@ -146,19 +146,25 @@ Full detail in `tokendamper-headroom-known-issues.md`; proposed fixes in
     instead of the AST gate. Invariant 8 still stands.
 - **Issue 5:** on fallback, `session.json` emits **-1.39%** — output is *larger* than
   input. Fallback re-renders `currentBundle` instead of echoing raw input bytes.
-- **Issue 3 / Phase 1d (NOT STARTED — investigate before changing anything):** drift
-  `0.60 > 0.40` aborts on `codebase.py`. The brief is to find what *drives* the score and
-  decide whether the threshold should be content-type-specific; no such investigation
-  exists. `DriftTracker` still has one scalar `maxDriftThreshold` (default `0.40`,
-  `drift-tracker.ts:83`), overridable only by `--max-drift`.
+- **Issue 3 / Phase 1d — investigated 2026-08-03, threshold unchanged, remedy undesigned.**
+  Full record: `docs/phase-1d-drift-investigation.md`. **The threshold is not the defect;
+  do not tune it.**
+  - `S_k = 0.60` is a **formula constant** — `w_AST` exactly — produced whenever
+    `R_AST = 0` and `R_struct = 1`. It is not a measurement of how much was lost, and it is
+    the **ceiling** for code, not a midpoint.
+  - `extractSymbols` returns empty on the optimized side **correctly**: `token-hashing`
+    replaces the item's whole content with a 77-byte placeholder. No validator is involved
+    in extraction — it is regex over `item.content`, identical under all five contentType
+    tags. Only the `jsonkey:` branch reads the tag.
+  - Cause is **granularity**: `token-hashing` is whole-item and `createContextBundle` makes
+    a single-item bundle for CLI/bench, so `R_AST` is a boolean. A single-item code bundle
+    with ≥1 symbol can never pass. (Symbol-free files pass trivially — `R_AST` defaults to
+    1.0 when `symbolsBefore` is empty.)
+  - For code, `R_struct` is pinned at 1.0 — the only marker is `filepath:`, from
+    `item.path`, which elision never touches. 40% of the metric does no work. DECISIONS §18.
   - The old "Headroom independently chose `router:noop`, so this is probably correct" claim
     is **retracted** — on re-run Headroom hit a 20-second backend timeout and failed open.
     Same 0%, different mechanism. Do not cite it as corroboration.
-  - Not isolated to `codebase.py`: at `targetReductionRatio: 0.30`, nine of the ten bundled
-    bench fixtures fall back at **exactly** `S_k = 0.60` across Python, TypeScript and
-    JavaScript. That is `R_AST = 0`, `R_struct = 1` — total symbol loss, markers intact.
-  - Anything measured before `ac16cec` must be re-measured; drift no longer behaves as it
-    did when 1d was written.
 - **Issue 4 (not a bug):** constraint-preservation correctly refused to drop a planted
   imperative-tagged line in `sample_logs.txt`. `BLUE-PANDA-992` is a synthetic test
   string, not a credential.

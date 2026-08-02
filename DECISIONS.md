@@ -555,3 +555,76 @@ Revisit if per-language validators land for the extensions currently routed to T
 or if fenced-block-aware validation (validate each fence under its own tagged language,
 ignore the prose between them) is implemented — that, not a classifier tweak, is what would
 make content-based code detection meaningful.
+
+## 18. For Code, 40% of the Drift Metric Is a Constant
+
+### Decision
+
+Recorded as a standing finding, not yet acted on: on code content, the structural half of
+the semantic drift metric (`w_struct = 0.40`) cannot vary, so `S_k` is effectively
+`0.6 × (1 − R_AST)` and is confined to `[0.00, 0.60]`. The `0.40` threshold sits at
+two-thirds of a maximum the metric can never reach.
+
+**The threshold is not changed by this entry.** This records *why* tuning it would be the
+wrong instrument.
+
+### Context
+
+```
+S_k = 1 − (w_AST · R_AST + w_struct · R_struct)      w_AST = 0.60, w_struct = 0.40
+```
+
+`R_struct` is computed from `DriftTracker.extractMarkers`, which harvests `filepath:`
+markers, markdown headings, code fences, `TD_PRESERVE:` directives and section delimiters.
+A source file typically contains none of the latter four, so its marker set is exactly one
+entry: `filepath:<path>`.
+
+That marker is derived from `item.path` — **metadata**. Every eliding stage rewrites
+`content` and leaves `path` untouched. The marker therefore survives by construction, and
+`R_struct = 1.0` no matter how completely the content is destroyed. Measured on the bundled
+bench fixtures: markers before and after are identical in every case, and `R_struct` is
+`1.0000` across Python, TypeScript and JavaScript.
+
+Full measurements in `docs/phase-1d-drift-investigation.md` §5.
+
+### Alternatives Considered
+
+- **Lower the threshold for code.** Treats the symptom. A threshold cannot recover
+  discriminating power from a term that does not vary.
+- **Reweight — raise `w_AST` toward 1.0 for code.** Honest about `R_struct` being inert, but
+  it silently concedes that structural integrity is unmeasured on code rather than fixing
+  it, and it bakes a content-type branch into the formula to compensate for a gap in the
+  marker extractor.
+- **Drop `filepath:` from the marker set.** Would make `R_struct` default to `1.0` via the
+  `markersBefore.size === 0` guard — the same constant, arrived at more obscurely.
+
+### Rationale
+
+A metric term that cannot vary is not conservative, it is decorative. Worse, it is
+*confidently* decorative: it contributes a full 0.40 of "retention" on every code payload,
+which reads as evidence that structure was preserved when nothing about the content's
+structure was examined at all. That is the same shape as the hardcoded `fallbackUsed: false`
+(§ Phase 1.0a) and the vacuous JSON checks (Issue 2, Commit C) — a value asserted without
+being derived.
+
+The finding is separable from the granularity cause that dominates the current failures.
+Whatever fixes granularity, this stays true until `extractMarkers` learns structural markers
+that (a) live in the content and (b) are meaningful for code — nesting depth, function and
+class boundaries, import blocks, brace balance.
+
+### Consequences
+
+- Any future comparison of `S_k` across content types is comparing a two-term metric on
+  prose and markdown against a one-term metric on code. They are not the same scale.
+- The observed `S_k = 0.60` on every failing code fixture is the **ceiling**, not a
+  midpoint. Reporting it as "drift 0.60 out of 1.00" overstates the headroom by 40 points.
+- A Python file with `#` comments currently *can* exceed 0.60, but only through a defect in
+  `extractMarkers`, which reads Python comments as markdown headings. Fixed separately; it
+  is not evidence that `R_struct` does real work.
+
+### Future Revisit Conditions
+
+Revisit when `extractMarkers` gains content-derived structural markers for code, or when a
+per-language structural signal replaces the current markdown-oriented marker set. At that
+point `R_struct` becomes load-bearing and the weights are worth re-deriving from
+measurement rather than inherited from `milestone_7_architecture_spec.md`.
