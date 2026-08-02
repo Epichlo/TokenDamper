@@ -142,16 +142,22 @@ describe('TokenDamper Regression Test Suite & Performance Baseline (R5)', () => 
 
     const report = BenchmarkRunner.run(fixtures, runnerConfig);
 
-    // Known issue (Issue 3, tokendamper-headroom-known-issues.md): knapsack-mode
-    // stages now actually execute against these Python fixtures and trip the
-    // S_k <= 0.40 semantic-drift threshold, so every humaneval item falls back.
-    // The baseline.thresholds.maxFallbackRate === 0 assumption predates the
-    // planner fix (4b11d7e) that made targetReductionRatio budgets enter
-    // knapsack mode; it no longer holds for code content until Issue 3 is
-    // addressed with a content-type-aware drift threshold.
+    // Restored to the baseline assertion this test was written to make.
+    //
+    // `aba84df` inverted it to expect a 100% fallback rate, attributing that to Issue 3
+    // (the drift threshold being wrong for code). That attribution was incorrect. The
+    // fallbacks came from `BenchmarkRunner` calling `optimize(request)` with no options, so
+    // no `TokenHasher` reached the engine and `attemptAutomatedRehydration` returned
+    // immediately on `if (!hasher && !ledger)` — the recovery path never ran. With the
+    // hasher supplied, the engine rehydrates the placeholder, re-validates, and passes on
+    // every humaneval fixture.
+    //
+    // Do not re-invert this to accommodate a failure. It is the baseline threshold
+    // (`maxFallbackRate: 0`), and the drift gate is not what was tripping it.
+    // See docs/phase-1d-drift-investigation.md §10.
     const fallbacks = report.sweepResults[0]!.itemResults.filter((item) => item.fallbackUsed);
-    expect(fallbacks.length).toBe(fixtures.count);
-    expect(report.overallSummary.fallbackRate).toBe(1.0);
+    expect(fallbacks.length).toBe(0);
+    expect(report.overallSummary.fallbackRate).toBeLessThanOrEqual(baseline.thresholds.maxFallbackRate);
   });
 
   it('Test 4: Assert average execution latency <= baseline.thresholds.maxAvgLatencyMs (< 50ms)', () => {

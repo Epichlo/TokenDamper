@@ -109,10 +109,11 @@ describe('BenchmarkRunner Harness', () => {
 
       const sweep = report.sweepResults[0]!;
       expect(sweep.summary.totalRuns).toBe(fixtureSet.count);
-      // Known issue (Issue 3, tokendamper-headroom-known-issues.md): knapsack-mode
-      // stages trip the S_k <= 0.40 semantic-drift threshold on every Python
-      // fixture, so fallback is expected here, not absent.
-      expect(sweep.summary.fallbackRate).toBe(1);
+      // Restored to 0, which is what the test name asserts. `aba84df` inverted this to 1
+      // and blamed the drift threshold; the real cause was the engine's rehydration
+      // recovery path being switched off by BenchmarkRunner passing no TokenHasher.
+      // See docs/phase-1d-drift-investigation.md §10.
+      expect(sweep.summary.fallbackRate).toBe(0);
     });
   });
 

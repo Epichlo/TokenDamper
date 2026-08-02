@@ -15,10 +15,14 @@
 >
 > The benchmark fallback rate cited here (100%, 10/10 fixtures) was measured with the
 > engine's automated-rehydration recovery path **switched off** — not deliberately, but
-> because `src/bench/runner.ts:45` calls `optimize(request)` with no options, so no
-> `TokenHasher` and no `ConfidenceLedger` reach the engine and
-> `attemptAutomatedRehydration` returns immediately on `if (!hasher && !ledger)`. See §8.
-> That is being corrected separately; **re-read §8 before citing the fallback rate.**
+> because `src/bench/runner.ts:45` called `optimize(request)` with no options, so no
+> `TokenHasher` and no `ConfidenceLedger` reached the engine and
+> `attemptAutomatedRehydration` returned immediately on `if (!hasher && !ledger)`. See §8.
+>
+> **Corrected 2026-08-03 — the valve is now enabled and §10 supersedes the fallback rate:
+> it drops to 0.40.** §10 also documents what enabling it exposed: the benchmark's
+> `avgReduction` figure is fabricated by an estimator mismatch, and actual savings are zero
+> either way. **Read §10 before citing any benchmark number from this document.**
 >
 > The per-fixture drift *mechanics* in §2–§6 are unaffected by it — they are computed from
 > `DriftTracker` directly on before/after bundles, not from the benchmark's fallback
@@ -271,7 +275,87 @@ zero.
 
 ---
 
-## 10. What this record does **not** conclude
+## 10. Addendum (2026-08-03) — the recovery valve enabled, and what it exposed
+
+§8 said the 100% fallback rate was measured with `attemptAutomatedRehydration` switched
+off. It has now been enabled — `src/bench/runner.ts` passes a fresh `TokenHasher` per run,
+which is what the engine needs both to *make* the placeholders reversible and to reverse
+them. Re-measured on the same ten fixtures at `targetReductionRatio: 0.30`:
+
+| Metric | Valve off | Valve on | Real? |
+|---|---|---|---|
+| `fallbackRate` | 1.00 | **0.40** | **yes** |
+| `totalValidationIssues` | 11 | **4** | **yes** |
+| `avgReduction` | 0.0000% | **7.8217%** | **no — see below** |
+| Actual bytes saved | 0 | **0** | — |
+
+### The fallback drop is real
+
+Six of ten fixtures now recover instead of falling back. The engine detects the drift
+failure, rehydrates the `<BLOCK_HASH:…>` placeholder back to its original content,
+re-validates, and passes. That machinery works and had simply never been switched on.
+
+### The reduction figure is fabricated
+
+**Every fixture's output is byte-identical to its input** — verified directly, not inferred:
+
+| Fixture | in bytes | out bytes | identical | in tokens | out tokens | `ceil(len/4)` | reported |
+|---|---|---|---|---|---|---|---|
+| `HumanEval/0` | 348 | 348 | **yes** | 106 | 87 | **87** | 17.92% |
+| `HumanEval/1` | 504 | 504 | **yes** | 146 | 126 | **126** | 13.70% |
+| `HumanEval/2` | 328 | 328 | **yes** | 91 | 82 | **82** | 9.89% |
+| `HumanEval/3` | 446 | 446 | **yes** | 126 | 112 | **112** | 11.11% |
+| `HumanEval/4` | 386 | 386 | **yes** | 109 | 97 | **97** | 11.01% |
+| `CodeXGLUE/py/102` | 164 | 164 | **yes** | 48 | 41 | **41** | 14.58% |
+
+`out tokens` equals `ceil(len/4)` exactly in every row. The cause is that **two different
+token estimators are in use**, and a reduction ratio compares one against the other:
+
+| Estimator | Sites |
+|---|---|
+| `EnhancedHeuristicTokenizer` | `constructors.ts:108` (`createContextBundle` — the **input** side), `:131` (`createBundleFromItems`) |
+| Naive `ceil(len / 4)` | `engine/index.ts:398` (`attemptAutomatedRehydration`), `trace/index.ts:56`, `gateway/proxy.ts:505,627`, `constraint-preservation.ts:103`, `session-dedup.ts:186`, `delta-compression.ts:273` |
+
+The input bundle is measured with the tokenizer; every bundle a stage or the rehydrator
+produces is measured with `ceil(len/4)`. On this corpus the tokenizer runs 11–22% above
+`len/4`, so identical bytes register as an 11–22% saving.
+
+**This is not confined to the benchmark.** Any successful optimization on the CLI path
+reports a reduction inflated by the same gap, because `createContextBundle` uses the
+tokenizer and every stage's output bundle uses `ceil(len/4)`. It was invisible until now
+only because everything was falling back, and on fallback `finalBundle = request.bundle`,
+so both sides used the tokenizer and the ratio was a true 0%.
+
+The Gateway is *not* affected the same way: it builds its input bundle with `ceil(len/4)`
+too, so both sides use the same estimator. The Gateway figures reported earlier in this
+work (66%, 98.59%, 0%) were computed from actual HTTP body byte lengths, and stand.
+
+### What the valve does and does not buy
+
+It converts "fallback, 0% saved" into "success, 0% saved". Actual token savings on this
+corpus remain **exactly zero** with the valve on, because the engine's recovery *is* the
+undoing of the compression. That is a better outcome than a fallback — the fail-open path
+is no longer being exercised as though it were normal operation — but it is not a reduction
+win, and the `avgReduction` figure must not be cited as one.
+
+This is the sixth instance of the vacuity pattern in this project, and the first where the
+fabricated value reports **success** rather than a passed check. It is why the delta was
+reported before any design work rather than after.
+
+### Consequence for §5 and §6
+
+Unchanged. Both are computed from `DriftTracker` on before/after bundles and do not touch
+token estimates. The four remaining fallbacks are still drift at exactly `0.60`
+(`CodeXGLUE/py/101`, `ts/201`, `js/301`) plus the pre-existing unclosed-bracket AST failure
+on `CodeXGLUE/ts/202`.
+
+Note the recovery valve is, in effect, an accidental partial implementation of per-stage
+rollback for one specific stage: it undoes `token-hashing` and keeps the earlier stages'
+work. Phase 1c should account for it rather than build a second mechanism beside it.
+
+---
+
+## 11. What this record does **not** conclude
 
 - **It does not answer the brief's actual question** — whether the threshold should be
   content-type-specific. It answers the prerequisite: what drives the score. On the present

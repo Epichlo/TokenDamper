@@ -2,6 +2,7 @@ import { optimize } from '../core/engine';
 import { TOKENDAMPER_VERSION } from '../version';
 import { BenchmarkEvaluator } from './evaluator';
 import { fixtureToOptimizationRequest } from './fixtures/loader';
+import { TokenHasher } from '../core/hashing/token-hasher';
 import type { BenchmarkFixtureSet } from './fixtures/types';
 import type {
   BenchmarkMetricSummary,
@@ -41,8 +42,23 @@ export class BenchmarkRunner {
           const reqId = `bench-${sweep.sweepId}-${fixture.id.replace(/[^a-zA-Z0-9_-]/g, '_')}-r${runIdx}`;
           const request = fixtureToOptimizationRequest(fixture, sweep.budget, config.baseConfig, reqId);
 
+          // A fresh TokenHasher per run, for two reasons.
+          //
+          // It enables the engine's recovery path. `attemptAutomatedRehydration` returns
+          // immediately on `if (!hasher && !ledger)`, so calling `optimize(request)` bare —
+          // as this line did — measured the engine with its recovery machinery switched
+          // off, and reported the resulting fallbacks as if they were the engine's real
+          // behavior. It must be the *same* instance the stage used: `token-hashing` falls
+          // back to `new TokenHasher()` internally when none is supplied, and those blocks
+          // are then unreachable, so the placeholders it wrote could never be reversed.
+          //
+          // Per run rather than shared, because a hasher carried across fixtures would let
+          // one fixture's blocks resolve another's placeholders. Benchmark runs must stay
+          // independent and deterministic.
+          const tokenHasher = new TokenHasher();
+
           const startTime = performance.now();
-          const result = optimize(request);
+          const result = optimize(request, { tokenHasher });
           const endTime = performance.now();
 
           const durationMs = Math.max(0, endTime - startTime);

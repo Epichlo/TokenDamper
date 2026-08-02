@@ -25,10 +25,11 @@ describe('M1 Challenger Re-verification Suite', () => {
       expect(report.sweepResults.length).toBe(1);
       const sweep = report.sweepResults[0]!;
       expect(sweep.summary.totalRuns).toBe(humanevalFixtures.count);
-      // Known issue (Issue 3): knapsack-mode stages trip the semantic-drift
-      // threshold on every Python fixture, so fallback is expected here, not
-      // absent. See the comment in test/integration/bench.test.ts Test 3.
-      expect(sweep.summary.fallbackRate).toBe(1);
+      // Restored to 0, which is what the test name asserts. `aba84df` inverted this to
+      // 1 and blamed Issue 3 (the drift threshold). The real cause was BenchmarkRunner
+      // calling optimize() with no TokenHasher, which left the engine's rehydration
+      // recovery path switched off. See docs/phase-1d-drift-investigation.md §10.
+      expect(sweep.summary.fallbackRate).toBe(0);
     });
 
     it('handles partial baseConfig with validation object only', () => {
@@ -44,8 +45,8 @@ describe('M1 Challenger Re-verification Suite', () => {
 
       const report = BenchmarkRunner.run(humanevalFixtures, runnerConfig);
       const sweep = report.sweepResults[0]!;
-      // Known issue (Issue 3): see comment above.
-      expect(sweep.summary.fallbackRate).toBe(1);
+      // See comment above: restored to 0, the recovery valve is now enabled.
+      expect(sweep.summary.fallbackRate).toBe(0);
     });
 
     it('handles empty baseConfig object {}', () => {
@@ -62,8 +63,8 @@ describe('M1 Challenger Re-verification Suite', () => {
       const report = BenchmarkRunner.run(humanevalFixtures, runnerConfig);
       const sweep = report.sweepResults[0]!;
       expect(sweep.summary.totalRuns).toBe(humanevalFixtures.count);
-      // Known issue (Issue 3): see comment above.
-      expect(sweep.summary.fallbackRate).toBe(1);
+      // See comment above: restored to 0, the recovery valve is now enabled.
+      expect(sweep.summary.fallbackRate).toBe(0);
     });
 
     it('ensures fixtureToOptimizationRequest merges defaults for missing top-level fields', () => {
