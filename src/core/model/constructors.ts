@@ -417,7 +417,7 @@ export function classifyContent(
     return 'markdown';
   }
 
-  if (looksLikeCode(text, extension)) {
+  if (isCodeExtension(extension)) {
     return 'code';
   }
 
@@ -491,14 +491,39 @@ function looksLikeLogs(text: string): boolean {
 }
 
 function looksLikeMarkdown(text: string): boolean {
-  return /(^|\n)#{1,6}\s+\S/.test(text) || /(^|\n)(- |\* |\d+\.)\s+\S/.test(text) || /\[[^\]]+\]\([^)]+\)/.test(text);
+  return (
+    // A fenced block is a markdown construct. It used to be read as evidence of `code`,
+    // which is backwards — see `isCodeExtension`.
+    /```[\s\S]*```/.test(text) ||
+    /(^|\n)#{1,6}\s+\S/.test(text) ||
+    /(^|\n)(- |\* |\d+\.)\s+\S/.test(text) ||
+    /\[[^\]]+\]\([^)]+\)/.test(text)
+  );
 }
 
-function looksLikeCode(text: string, extension: string): boolean {
-  if (/```[\s\S]*```/.test(text)) {
-    return true;
-  }
-
+/**
+ * Code is detected by file extension only. There is deliberately no content signal.
+ *
+ * The one this function used to have was a triple-backtick fence, and a fence is markdown
+ * syntax, not code: a code file does not contain fences, a document that quotes code does.
+ * That rule classified every "here's the fix: ```ts ... ```" message as `code`, and because
+ * `selectValidator` maps `contentType: 'code'` to the **TypeScript** validator, ordinary
+ * prose was then parsed as TypeScript.
+ *
+ * Measured, the outcome was decided by apostrophe parity in the surrounding prose:
+ * "Here's ... it's ... that's" leaves an odd number of quote characters open and the
+ * message is rejected with `AST_UNTERMINATED_STRING`, while the same message with an even
+ * count passes. A check whose verdict flips on whether the author wrote one more
+ * contraction is not validating anything — and since a whole-document language validator
+ * cannot know what a mixed prose/code document *should* parse as, a false positive is its
+ * only possible finding. It is removed rather than tuned.
+ *
+ * This costs no detection of real code: every path that carries actual source files (CLI
+ * `optimize <file>`, bench fixtures) supplies an extension, which is what the list below
+ * matches. Content-only code arriving without an extension classified as `text` before this
+ * change too — the fence rule never covered it. See DECISIONS.md §17.
+ */
+function isCodeExtension(extension: string): boolean {
   return ['ts', 'tsx', 'js', 'jsx', 'cjs', 'mjs', 'py', 'go', 'rs', 'java', 'c', 'cpp', 'h', 'hpp', 'sh', 'ps1', 'css', 'scss', 'sql'].includes(extension);
 }
 

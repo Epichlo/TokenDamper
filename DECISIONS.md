@@ -494,3 +494,64 @@ The exemption is keyed on an explicit `recoverable` flag rather than inferred fr
 or `originalContentHash`, both of which `token-hashing` also sets. Any future stage claiming
 the exemption must guarantee the same restorability contract, or the drift invariant
 silently stops protecting that path.
+
+## 17. A Fenced Block Is Markdown, Not Code
+
+### Decision
+
+`classifyContent` detects `code` by **file extension only**. The triple-backtick fence, its
+only content-based signal, now counts toward `markdown` instead.
+
+### Context
+
+`selectValidator` dispatches `contentType: 'code'` to the **TypeScript** validator. The
+fence rule therefore meant that any document quoting a snippet — "here's the fix:
+```ts ... ```", the single most common shape of an assistant message — was parsed as
+TypeScript in full, prose included.
+
+Measured on the Gateway path, turn 1, with no stage having transformed anything:
+
+| Message | Classified | Validator | Result |
+|---|---|---|---|
+| `Here's the fix. It's the guard that's missing:` + ```` ```ts ```` block | `code` | typescript | **fallback** — `AST_UNTERMINATED_STRING` |
+| `Here's the fix, it's ready:` + ```` ```ts ```` block | `code` | typescript | pass |
+
+The two differ only in how many contractions the prose contains. Three apostrophes leave an
+odd number of quote characters open; two do not.
+
+### Alternatives Considered
+
+- **Stop mapping `contentType: 'code'` to the TypeScript validator.** Larger blast radius —
+  several call sites legitimately rely on it — and it treats the symptom. `code` is a family
+  (`go`, `rs`, `sh`, `sql` all classify as `code`), so validating any of it as TypeScript is
+  unsound for reasons that have nothing to do with fences.
+- **Keep the fence rule, classify as `code` only when the fence spans the whole document.**
+  A heuristic on top of a heuristic, and it still parses a Python fence as TypeScript.
+- **Accept the fallbacks.** Fail-open means output stays byte-correct, so this is safe — but
+  it is silent, and it fires on ordinary traffic.
+
+### Rationale
+
+A code file does not contain fences; a document that quotes code does. The rule had the
+relationship inverted, so its only reachable outcome was a false positive: a whole-document
+language validator cannot know what a mixed prose/code document *should* parse as, and it
+therefore cannot catch a real defect in one. A check decided by apostrophe parity is not
+validating anything, so it is removed rather than tuned.
+
+### Consequences
+
+Detection of real code is unchanged: every path carrying actual source files supplies an
+extension, which is what `isCodeExtension` matches. Content-only code arriving without an
+extension already classified as `text` — the fence rule never covered that case either.
+
+The remaining unsoundness is recorded but out of scope: `contentType: 'code'` still selects
+the TypeScript validator for extensions with no validator of their own (`go`, `rs`, `sh`,
+`sql`), where a Rust lifetime (`&'a str`) or an unbalanced shell quote produces the same
+class of false positive. That reaches the CLI path only, and predates this decision.
+
+### Future Revisit Conditions
+
+Revisit if per-language validators land for the extensions currently routed to TypeScript,
+or if fenced-block-aware validation (validate each fence under its own tagged language,
+ignore the prose between them) is implemented — that, not a classifier tweak, is what would
+make content-based code detection meaningful.

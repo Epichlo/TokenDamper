@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { createContextItem, freeze } from '../../src/core/model/constructors';
+import { classifyContent, createContextItem, freeze } from '../../src/core/model/constructors';
 import type { ContextBundle } from '../../src/core/model/types';
 import {
   JsonValidator,
   PythonValidator,
   TypeScriptValidator,
+  selectValidator,
   validateBundleAst,
   validateItemAst,
 } from '../../src/core/validation/ast';
@@ -213,6 +214,38 @@ describe('Orchestrator: validateItemAst & validateBundleAst', () => {
     expect(bundleResult.itemResults['item-2']?.valid).toBe(false);
     expect(bundleResult.issues.length).toBeGreaterThan(0);
     expect(bundleResult.issues[0]?.itemId).toBe('item-2');
+  });
+
+  it('does not judge a fenced prose message as TypeScript', () => {
+    // The defect this pins: `looksLikeCode` treated a ``` fence as evidence of code, so an
+    // ordinary assistant message quoting a snippet classified as `code`, and
+    // `selectValidator` maps `code` to the TypeScript validator. The verdict then hung on
+    // apostrophe parity in the prose — three contractions leave a quote open and the whole
+    // message is rejected as an unterminated string literal.
+    //
+    // Both messages below are the same shape; only the number of contractions differs. If a
+    // future change reintroduces a content signal for `code`, the first assertion fails
+    // while the second still passes, which is the signature of a parity coin-flip rather
+    // than a check. DECISIONS.md §17.
+    const oddApostrophes = "Here's the fix. It's the guard that's missing:\n\n```ts\nconst a = 1;\n```";
+    const evenApostrophes = "Here's the fix, it's ready:\n\n```ts\nconst a = 1;\n```";
+
+    for (const content of [oddApostrophes, evenApostrophes]) {
+      const item = createContextItem({
+        id: 'msg-fenced',
+        kind: 'conversation',
+        contentType: classifyContent(content, 'text'),
+        content,
+        origin: 'anthropic:messages[0]',
+        contentHash: 'hm',
+        role: 'assistant',
+        metadata: {},
+      });
+
+      expect(item.contentType).toBe('markdown');
+      expect(selectValidator(item)).toBeNull();
+      expect(validateItemAst(item).valid).toBe(true);
+    }
   });
 
   it('enforces maxTimeMs SLA', () => {

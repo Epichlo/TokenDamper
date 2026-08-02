@@ -136,7 +136,22 @@ describe('core model', () => {
 
     it('classifies code content accurately', () => {
       expect(classifyContent('function add(a: number, b: number): number { return a + b; }', 'file', 'math.ts')).toBe('code');
-      expect(classifyContent('```python\ndef foo():\n    pass\n```', 'text')).toBe('code');
+      expect(classifyContent('def solve(n):\n    return n * 2\n', 'file', 'solver.py')).toBe('code');
+      expect(classifyContent('package main\n\nfunc main() {}\n', 'file', 'main.go')).toBe('code');
+    });
+
+    it('classifies a fenced block as markdown, not code', () => {
+      // A fence is markdown syntax: code files do not contain fences, documents quoting
+      // code do. Classifying it `code` routed it to the TypeScript validator via
+      // `selectValidator`, which is the false positive this pins against. DECISIONS.md §17.
+      expect(classifyContent('```python\ndef foo():\n    pass\n```', 'text')).toBe('markdown');
+      expect(classifyContent("Here's the fix:\n\n```ts\nconst a = 1;\n```\n", 'text')).toBe('markdown');
+    });
+
+    it('keeps extension-based code detection independent of content', () => {
+      // The fence rule was the only content signal for `code`, and removing it must not
+      // weaken detection on the paths that carry real source files — they pass a path.
+      expect(classifyContent('```ts\nconst a = 1;\n```', 'file', 'notes.ts')).toBe('code');
     });
 
     it('classifies general text accurately', () => {

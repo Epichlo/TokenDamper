@@ -10,6 +10,14 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
 `git log v1.1.0..HEAD` to confirm current scope before relying on this list.
 
 ### Fixed
+- **Fenced Blocks Classified As Code**: `classifyContent` treated a triple-backtick fence as
+  evidence of `code`, and `selectValidator` maps `code` to the **TypeScript** validator — so
+  an ordinary message quoting a snippet was parsed as TypeScript, prose and all. Whether it
+  passed was decided by apostrophe parity in the surrounding text: `Here's ... it's ...
+  that's` leaves a quote open and the message is rejected with `AST_UNTERMINATED_STRING`,
+  while the same message with one fewer contraction passes. Code is now detected by file
+  extension only, and a fence counts toward `markdown`. Real code detection is unaffected —
+  every path carrying source files supplies an extension. See `DECISIONS.md` §17.
 - **Gateway Ran Without Any Safety Net (Phase 1.0b)**: `src/gateway/proxy.ts` called
   `runSessionDedupStage()` directly, so the proxy path executed no validators, no
   `DriftTracker`/`ConfidenceLedger`/`DebtTracker`, and no fallback resolver — invariants 3
