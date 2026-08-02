@@ -105,6 +105,10 @@ MCP tools: `optimize_context`, `rehydrate_context`, `get_session_metrics`,
    boundaries. Reordering the prefix busts provider prompt caches, which usually costs
    more than the tokens saved.
 7. **Pinned items (`isPinned`) bypass the knapsack and are always included.**
+8. **The Gateway plans exactly one stage (`cleanup:session-dedup`) on purpose** — it is
+   Issue 2 containment, not an unfinished implementation; do not widen that stage list.
+9. **The Gateway maps `finalBundle` back onto the parsed payload, never `emittedOutput`** —
+   `emittedOutput` is a newline-joined blob, and using it reintroduces Issue 5.
 
 ## Known bugs — highest-priority work
 

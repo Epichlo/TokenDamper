@@ -329,6 +329,19 @@ function runGatewayOptimization(
   options: ProxyHandlerOptions,
 ): GatewayOptimizationOutcome {
   const baseConfig = loadConfig();
+  // DO NOT widen this to the knapsack stage list without first fixing Issue 2.
+  //
+  // Running exactly one stage here is deliberate containment, NOT an unfinished
+  // implementation. `session_dedup` mode plans only `cleanup:session-dedup`.
+  // `compression:token-hashing` writes bare `<BLOCK_HASH:...>` markers into item content;
+  // Gateway message content is frequently JSON (tool calls arrive as
+  // `JSON.stringify(msg.content)`), so adding that stage would emit corrupted JSON onto
+  // live upstream provider traffic. The planner has no content-type awareness to prevent
+  // it — that is Issue 2, and it gates any expansion of this list.
+  //
+  // Note the drift exemption in DriftTracker covers `recoverable` (dedup) elisions only.
+  // The lossy compression stages are still scored in full, so drift is a second, separate
+  // blocker on widening this list. See docs/phase-1-stabilization-summary.md (§5.3, §7).
   const config: ResolvedConfig = {
     ...baseConfig,
     planner: { ...baseConfig.planner, defaultMode: 'session_dedup' },
@@ -362,11 +375,19 @@ function runGatewayOptimization(
   const optimizedTokens = result.finalBundle.summary.tokenEstimate;
 
   return {
-    // Note: `result.emittedOutput` is deliberately unused. The fallback resolver renders
-    // a bundle by joining item contents with newlines, which is not a valid provider API
-    // payload. Mapping `finalBundle` items back onto the parsed request preserves payload
-    // shape, and because the engine returns the original bundle whenever fallback fires,
-    // that mapping reproduces the request body unchanged on the fallback path.
+    // DO NOT switch this to `result.emittedOutput` — doing so reintroduces Issue 5 on
+    // live provider traffic.
+    //
+    // `emittedOutput` comes from the fallback resolver, which renders a bundle by joining
+    // item contents with newlines. That is a plain text blob, not a valid provider API
+    // payload: it drops `model`, `system`, role structure and every other top-level field,
+    // and on the fallback path it is what makes output larger than input (Issue 5, the
+    // -1.39% result on session.json).
+    //
+    // Mapping `finalBundle` items positionally back onto the already-parsed payload keeps
+    // the request shape intact. Because the engine returns the ORIGINAL bundle whenever
+    // fallback fires, that mapping reproduces the request body byte-for-byte — which is
+    // how this path satisfies invariant 3 structurally rather than by test enforcement.
     finalBundle: result.finalBundle,
     fallbackUsed: result.fallbackUsed,
     rawTokens,
