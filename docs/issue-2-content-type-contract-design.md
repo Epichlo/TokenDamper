@@ -216,26 +216,39 @@ same treatment the CLI already gets.
 `ContextBundle.statistics.contentTypeCounts` remains the bundle-level view, and becomes
 accurate for the first time as a side effect.
 
-### 3.2 Tag as hint, content as ground truth
+### 3.2 The tag wins; the classifier only fills a vacuum
 
-This is the substantive addition, and it is what makes misdetection safe.
+**Superseded 2026-08-02.** This section originally proposed "tag as hint, content as ground
+truth", with an independent probe that could override the tag. That was wrong twice over,
+and both errors are worth recording because they were caught in code review rather than by
+tests.
 
-A tag-derived eligibility check inherits the classifier's mistakes: if content is
-misclassified as prose, both the transform *and* the post-condition check consult the same
-wrong tag, agree with each other, and emit corruption. Self-consistent and wrong.
+**Error 1 — it created a producer/checker split.** A probe that can override the tag means
+the encoder decides by content while the checker (`selectValidator`, `extractSymbols`)
+decides by tag. That is the same granularity mismatch this document rejects in §1.1 when
+arguing against the bundle-level seam, reintroduced one layer down. It shipped in `29f66b3`
+and was live: a TypeScript item whose content parses as JSON (an object literal) was
+JSON-wrapped while being validated as TypeScript.
 
-For JSON specifically, ground truth is **decidable and cheap**: `JSON.parse` either succeeds
-or does not. Where a decidable check exists, using a heuristic tag as the authority is the
-weaker design.
+**Error 2 — the probe was a duplicate, not a second opinion.** `classifyContent` already
+decides JSON via `looksLikeJson` (`constructors.ts:468`), which is a structural-opener check
+followed by `JSON.parse` — *precisely* the algorithm the bespoke probe implemented. There
+were never two authorities with different strengths; there were two copies of one algorithm.
+The Gateway's problem was never an unreliable tag, it was that on that path the tag is
+**never computed at all**.
 
-So eligibility resolves in this order:
+**The rule, as implemented:**
 
-1. `selectValidator(item)` — reuse the *same function the checker uses*, so producer and
-   checker cannot disagree by construction.
-2. If it returns `null`, **probe anyway**: if `item.content` parses as JSON, treat the item
-   as JSON regardless of tag. This catches the mislabelled Gateway case even before the
-   relabel lands, and means the fix is not dependent on classification being correct.
-3. Otherwise fall back to the tag.
+1. `selectValidator(item)` is authoritative. If it returns a validator, its language decides
+   the syntax — `json` for `JsonValidator`, `raw` otherwise. Full stop.
+2. Only when it returns `null` — the item has no governing authority whatsoever — consult
+   `classifyContent`, the canonical ingestion classifier. It may only tighten `raw -> json`.
+3. There is no third step and no bespoke probe. `parsesAsJsonDocument` was deleted.
+
+This still fixes the Gateway before the relabel, because the Gateway's items have no
+`language`, no `path`, and `contentType: 'text'`, so `selectValidator` returns `null` and
+step 2 applies. But it does so by calling the one classifier rather than by keeping a rival
+implementation.
 
 ### 3.3 Placeholder contract per content type
 

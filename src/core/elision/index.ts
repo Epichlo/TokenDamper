@@ -1,5 +1,5 @@
 import type { ContextItem } from '../model/types';
-import { createContextItem, freeze } from '../model/constructors';
+import { classifyContent, createContextItem, freeze } from '../model/constructors';
 import { selectValidator, validateItemAst } from '../validation/ast';
 
 /**
@@ -30,47 +30,34 @@ export interface ElideItemParams {
 }
 
 /**
- * Returns true when content is a JSON *document* (object or array).
- *
- * Deliberately narrower than `JSON.parse` succeeding: a bare `42` or `"hello"` is
- * technically valid JSON, and treating a prose item that happens to contain a number as
- * JSON would be a misdetection in the damaging direction. Requiring a structural opener
- * keeps the probe conservative.
- */
-export function parsesAsJsonDocument(content: string): boolean {
-  const trimmed = content.trim();
-  const first = trimmed[0];
-  if (first !== '{' && first !== '[') {
-    return false;
-  }
-  try {
-    JSON.parse(trimmed);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Resolves the syntax an elision must be rendered in for this item.
  *
- * Resolution order is deliberate:
- *  1. `selectValidator` — the *same* function that will later judge the emitted item, so
- *     the producer and the checker cannot disagree by construction. This is the mismatch
- *     that produced Issue 2 in the first place.
- *  2. A content probe. The tag is a hint, not the authority: content-type is inferred at
- *     ingestion and is sometimes wrong (the Gateway hardcoded `text` on JSON payloads for
- *     its entire history). Where ground truth is decidable and cheap, as it is for JSON,
- *     using the heuristic tag as the authority is the weaker design.
+ * **The tag wins unconditionally.** `selectValidator` is the same function that will later
+ * judge the emitted item, so deferring to it means the producer and the checker cannot
+ * disagree by construction. If the encoder followed a content probe while the checker
+ * followed the tag, that would recreate the producer/checker split at a different
+ * granularity — the mismatch that produced Issue 2 in the first place.
+ *
+ * The classifier is consulted **only to fill a vacuum**, when `selectValidator` returns
+ * `null` and the item therefore has no governing authority at all. It can only tighten
+ * `raw -> json`; it can never override a validator that exists. Without that ordering a
+ * TypeScript file whose content happens to parse as JSON (an object literal) or a Python
+ * file that is a dict literal would be JSON-wrapped while being validated as TypeScript.
+ *
+ * Note this calls `classifyContent`, the canonical ingestion classifier, rather than a
+ * bespoke probe. `classifyContent` already decides JSON by structural opener plus
+ * `JSON.parse` (`looksLikeJson`), which is exactly the check a local probe would perform —
+ * so a second implementation would be two copies of one algorithm that happen to agree
+ * today, not a second opinion worth having.
  */
 export function resolveElisionSyntax(item: ContextItem): ElisionSyntax {
-  if (selectValidator(item)?.language === 'json') {
-    return 'json';
+  const validator = selectValidator(item);
+  if (validator) {
+    return validator.language === 'json' ? 'json' : 'raw';
   }
-  if (parsesAsJsonDocument(item.content)) {
-    return 'json';
-  }
-  return 'raw';
+
+  const classified = classifyContent(item.content, 'text', item.path);
+  return classified === 'json' ? 'json' : 'raw';
 }
 
 /**
