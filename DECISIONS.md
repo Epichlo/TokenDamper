@@ -711,3 +711,132 @@ number that flatters them.
 - `test/unit/token-estimator-unity.test.ts` pins the property: byte-identical output must
   measure as exactly 0% reduction, on the engine path, on the fallback path, and for every
   stage in the catalog.
+
+---
+
+## 20. Elide Function Bodies, Not Whole Items
+
+### Decision
+
+`compression:token-hashing` elides **function bodies** within an item, keeping the
+declarations around them, and falls back to whole-item hashing only where no region can be
+selected. Region selection lives behind `selectElisionRegions`; replacement goes through
+`elideRegions`, a sibling chokepoint to `elideItem`.
+
+Class bodies are never selected. Comment-and-docstring-only regions are never selected.
+JSON is never selected.
+
+### Context
+
+Whole-item hashing could not succeed on a single-item code bundle, structurally: it replaces
+every byte, so every symbol dies at once, `DriftTracker`'s `R_AST` is a boolean, and `S_k`
+pins at the formula constant `0.60` — over the `0.40` gate, every time
+(`docs/phase-1d-drift-investigation.md` §6). Regions give the metric something fractional to
+grade, and measured, it grades correctly.
+
+For code, `R_struct` is pinned at `1.0` (§18), so the gate reduces exactly to
+**`R_AST ≥ 1/3`**.
+
+### Alternatives Considered
+
+- **Mark hashed placeholders `recoverable: true`.** Rejected before design. §16 established
+  that `recoverable` is a claim about *this* payload, verifiable only when an intact copy
+  survives in it. Token-hashing has no such copy. Asserting recoverability because
+  rehydration machinery exists somewhere is what produced the inflated 98.59% figure.
+- **A fixed nesting depth (`depth-2`).** This was the design's own recommendation and it was
+  wrong — derived from measuring one class-shaped file. It misses top-level function bodies
+  entirely and is arbitrary wherever nesting differs. Measured over six real sources,
+  function-body selection yields **57.38%** mean reduction against depth-2's **37.95%** on
+  the same usable set, and on `ts-validator.ts` depth-2 destroys the sole method's signature
+  set (`R_AST` 0.2667, correct fallback) where function-body selection does not.
+- **Innermost brace spans.** Safe but nearly worthless: 10.06% mean. Innermost spans are
+  `if`/`for` blocks, not bodies.
+
+### Rationale
+
+Two boundary rules govern where a region may start and end, and both were found by
+measurement rather than reasoning:
+
+1. **The region must be exactly the bytes replaced.** `TokenHasher.rehydrateText`
+   substitutes in place, so anything the caller adds around the marker survives rehydration.
+   A prototype emitting `indent + marker` scored **0/7** on byte-identical round trip;
+   removing the added indent scored **7/7**.
+2. **The marker must land in a syntactically valid position.** Rule 1 alone puts a Python
+   marker at column 0, which `PythonValidator` rejects. Applying rule 1 without rule 2 took
+   AST validity from **8/8 to 0/8**.
+
+They are only jointly satisfiable if the region excludes the leading indentation.
+
+The post-condition is **relative** — no *new* AST issues — unlike `elideItem`'s absolute
+check. An absolute check is unusable here for two measured reasons: three of the ten bundled
+bench fixtures are truncated completion prompts, invalid on input; and `TypeScriptValidator`
+has no regex-literal mode, so it rejects valid TypeScript containing `/\([^)]+/`. Under an
+absolute check both classes yield 0% forever. This follows the precedent already in
+`BenchmarkEvaluator.syntaxPreserved`.
+
+The docstring guard is the Phase 1d precondition (design §8b). `HumanEval/0` elides to
+**55.66% reduction at `S_k = 0.0000`**, AST-valid and byte-reversible — and the region
+removed is the function's docstring, which is the entire specification of the task. Drift
+cannot see it: docstrings carry no symbols and `R_struct` is inert for code. **This guard
+defends that case, not the class.** Any other high-information symbol-free content is still
+invisible to the metric. The real fix is §18.
+
+### Consequences
+
+- Measured over 52 real source files through the CLI: **22 reduce with no fallback, mean
+  52.99%**. Output is byte-identical across fresh processes (6/6). Every elision round-trips
+  exactly through the existing recovery valve.
+- The bundled bench corpus stays at **0.00%**, deliberately. Five HumanEval fixtures are
+  docstring-only prompts the guard refuses; four CodeXGLUE fixtures are truncated stubs with
+  no complete body. It is a completion benchmark, not a compression corpus, and it should
+  stop being cited as a measure of reduction.
+- The remaining fallbacks are the safety net working: 17 of 30 on constraint-directive
+  retention (an imperative comment inside an elided body), 11 on drift over `0.40` (too much
+  symbol loss), 2 on the regex-literal validator defect.
+- The recovery valve needed **no change**: `rehydrateText` already resolves N placeholders
+  per item. Regions make *partial* un-hashing possible — undo the fewest needed to clear
+  `R_AST ≥ 1/3` — which is the natural bridge to Phase 1c. Not built here.
+- On the CLI a successful optimization now emits `<BLOCK_HASH:…>` markers the consumer
+  cannot reverse; the `TokenHasher` is created inside the stage and discarded. Previously
+  this never surfaced because everything fell back. MCP has `rehydrate_context`; the CLI does
+  not. This needs a decision before the CLI is used to feed a model directly.
+
+---
+
+## 21. A Latency Budget Must Not Vote on Correctness
+
+### Decision
+
+`validateItemAst` measures its 5ms budget and reports the breach on
+`AstValidatorResult.slaExceeded`. It no longer sets `valid: false` or emits an
+`AST_SLA_EXCEEDED` issue.
+
+### Context
+
+Identical bytes produced different syntax verdicts depending on machine load and JIT warmth.
+Measured on a 16 KB Python file across six fresh Node processes:
+
+```
+valid(4.06ms)  INVALID(5.28ms)  INVALID(6.86ms)  INVALID(8.04ms)  INVALID(14.70ms)  INVALID(17.58ms)
+```
+
+It also produced false fallbacks on large valid files: `codebase.py` fell back on
+`AST validation exceeded SLA threshold (5.99ms > 5ms)` with drift at `0.00`, every other
+check passing, and 19 regions successfully elided. The engine reported a syntax error that
+did not exist.
+
+### Rationale
+
+Determinism is the product; a validator that answers differently on a busy machine is not
+one. And a slow validation says nothing about whether content is syntactically valid — this
+is the inverse of invariant 10's pattern: not a check passing without running, but a check
+*failing* for a reason it never examined.
+
+### Consequences
+
+- Large files are validated on their merits. `codebase.py` reduces 34.76% end-to-end.
+- Latency remains observable via `slaExceeded` for anyone who wants to act on it.
+- The `enforces maxTimeMs SLA` case in `ast-validator.test.ts` was re-pointed at the new
+  contract. That is a changed requirement, not a weakened assertion: the new case asserts
+  strictly more (validity unchanged **and** the breach reported **and** real syntax errors
+  still surfacing).

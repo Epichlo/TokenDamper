@@ -308,3 +308,69 @@ be re-derived from it rather than from Issue 5. **Not done here; flagged for dec
 
 **Not changed:** the `-1.39%` figure in `tokendamper-benchmark/BENCHMARK_RESULTS.md`. It is
 an accurate record of what that harness printed; the correction is to its interpretation.
+
+---
+
+## Two defects found while implementing Phase 1d granularity, neither caused by it
+
+**Date:** 2026-08-03
+**Status:** one fixed (`20ac438`), one open
+
+### 1. `TypeScriptValidator` has no regex-literal mode — **open**
+
+**What the code implies.** `src/core/validation/ast/ts-validator.ts` presents itself as a
+bracket/quote/comment scanner sufficient to judge TypeScript syntax, and `validate()` runs
+over every item in a bundle.
+
+**What is actually true.** It does not track regex literals, so bracket characters inside one
+are counted as brackets. Minimal reproduction:
+
+```
+const re = /([^)]+/;     ->  INVALID (AST_UNBALANCED_BRACKET)
+const x = (a + b) / 2;   ->  VALID
+```
+
+`src/core/model/constructors.ts`, `src/core/elision/regions.ts` and
+`src/core/topology/dependency-graph.ts` all fail their own project's validator today for
+this reason. In the 52-file CLI sweep it accounted for 2 of the 30 fallbacks.
+
+**Why it matters beyond yield.** It is a **false negative in a safety check**, so it fails
+closed rather than open — the pipeline falls back and the user gets their input. That is the
+right direction to fail, which is why this is recorded rather than rushed. But it means the
+TS validator cannot be relied on as a backstop for anything inside a regex literal, and
+`elideRegions`'s post-condition is relative (no *new* issues) partly because of it.
+
+**Consequence for the region scanner.** `scanBraceSpans` in `src/core/elision/regions.ts`
+*does* track regex literals, deliberately: the validator's blind spot means it could not
+catch a region boundary the scanner got wrong inside one.
+
+### 2. Python delivered over stdin is invisible to the whole validator layer — **open**
+
+**What `CLAUDE.md` implies.** That `tokendamper optimize <input-file|->` treats the two
+input forms equivalently.
+
+**What is actually true.** They diverge at classification, because `createContextBundle`
+derives `contentType` from content *and* `sourcePath`, and stdin has no path:
+
+```
+stdin, no path        contentType=text  language=undefined  validator=null    regions=0
+file arg, .py path    contentType=code  language=undefined  validator=python  regions=19
+```
+
+With `validator=null`, `validateItemAst` returns `valid: true` without running anything,
+`resolveElisionSyntax` falls through to the classifier, and `selectElisionRegions` returns
+nothing. A Python file piped to `optimize -` is not validated, not segmented, and cannot be
+compressed at sub-item granularity.
+
+This is why `tokendamper-benchmark/run_benchmark.py` sees no improvement from granularity:
+it invokes `[cmd, "optimize", "-"]` and pipes the text. The same file passed as an argument
+reduces 34.76%.
+
+**It is also a vacuous-check instance in the classic shape** — `validateItemAst` reporting
+`valid: true` on content it never examined — and `CLAUDE.md`'s note that
+"`classifyContent` already sets it at ingestion" is true but does not say that the answer
+depends on how the bytes arrived.
+
+**Not fixed here.** The fix is a content-based fallback when no path is available, and it has
+a blast radius over every item in every bundle (the `DECISIONS.md` §17 lesson), so it wants
+its own change and its own turn-1 measurement.

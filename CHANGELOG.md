@@ -9,7 +9,44 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or released; run
 `git log v1.1.0..HEAD` to confirm current scope before relying on this list.
 
+### Added
+- **Sub-item hashing granularity (DECISIONS §20)**: `compression:token-hashing` now elides
+  **function bodies** within an item and keeps the declarations around them, falling back to
+  whole-item hashing only where no region can be selected (prose, logs, JSON, truncated code).
+  New: `core/elision.elideRegions` (chokepoint) and `core/elision/regions.selectElisionRegions`
+  (selection + the docstring guard).
+
+  Whole-item hashing could never succeed on a single-item code bundle — it replaces every
+  byte, so `R_AST` was a boolean and `S_k` pinned at the formula constant `0.60`, over the
+  `0.40` gate every time. For code the gate reduces exactly to **`R_AST ≥ 1/3`**.
+
+  Measured over 52 real source files through the CLI: **22 reduce with no fallback, mean
+  52.99%**, byte-identical output across fresh processes (6/6), every elision reversible
+  through the existing recovery valve. `codebase.py`: 16,937 → 11,360 bytes, 5,029 → 3,281
+  tokens, **34.76%**, no fallback.
+
+  Remaining fallbacks are the safety net working, not failures: 17 on constraint-directive
+  retention (an imperative comment inside an elided body), 11 on drift over `0.40`, 2 on the
+  regex-literal validator defect noted below.
+
+  **The bundled bench corpus stays at 0.00%, deliberately.** Five HumanEval fixtures are
+  docstring-only prompts refused by the guard; four CodeXGLUE fixtures are truncated stubs
+  with no complete body. It is a completion benchmark, not a compression corpus.
+
+  The **docstring guard** is the Phase 1d precondition: `HumanEval/0` otherwise elides to
+  55.66% at `S_k = 0.0000`, AST-valid and reversible, with the function's entire
+  specification removed — drift cannot see it, because docstrings carry no symbols and
+  `R_struct` is inert for code. The guard defends that case, **not the class**.
+
 ### Fixed
+- **Latency budget no longer decides a syntax verdict (DECISIONS §21)**: `validateItemAst`
+  returned `valid: false` with `AST_SLA_EXCEEDED` when validation exceeded 5ms. Identical
+  bytes therefore produced different verdicts depending on machine load — measured on a 16 KB
+  Python file across six fresh processes: `valid(4.06ms) INVALID(5.28ms) INVALID(6.86ms)
+  INVALID(8.04ms) INVALID(14.70ms) INVALID(17.58ms)`. It also fell the engine back on large
+  valid files, reporting a syntax error that did not exist. The breach is now reported on
+  `AstValidatorResult.slaExceeded` and does not touch `valid` or `issues`.
+
 - **One Token Estimator (DECISIONS §19)**: every reduction figure the CLI, MCP and bench
   paths report was computed across a seam between two independent token estimators —
   `EnhancedHeuristicTokenizer` on a bundle's input side, inline `Math.ceil(len / 4)` on

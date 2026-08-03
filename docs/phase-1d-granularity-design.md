@@ -2,13 +2,30 @@
 
 > ## ⚠️ Status
 >
-> **Proposed. Not approved, not implemented.** Written 2026-08-03 at `7dfc4f1`.
+> **Approved and implemented** — `7abb5b6` (mechanism), `e25b457` (wiring), `20ac438` (the
+> SLA blocker). Written 2026-08-03 at `7dfc4f1`; every number below is measured against
+> `dist/` at that commit.
 >
-> Every number below is measured, against `dist/` at that commit, with the probes described
-> in §10. Where a claim could not be measured it is labelled as an assumption.
+> Precondition **(b)** was chosen (§8) and ships as the docstring guard in
+> `selectElisionRegions`. **(a) — making `R_struct` do work for code — remains open**, and
+> the guard defends the measured case, not the class.
 >
-> The recommendation is **proceed, with one precondition** (§8). The precondition is not a
-> rewrite; it is a guard that must exist before this stage is allowed to succeed.
+> **Two corrections to this document, both found during implementation. Read them before
+> citing §4 or §11.**
+>
+> 1. **§4's "depth-2 operating point" is wrong**, and it was this document's own
+>    recommendation. It was derived from measuring a single class-shaped file. Literal depth
+>    counting misses top-level function bodies entirely and is arbitrary wherever nesting
+>    differs. What shipped is **function-body selection at any depth**, which is what
+>    "depth-2" was standing in for. Measured over six real sources: 57.38% mean reduction
+>    against depth-2's 37.95% on the same usable set. DECISIONS.md §20.
+> 2. **§11's open question 2 is therefore answered differently than asked.** The choice was
+>    "fixed vs budget-driven"; fixed was chosen, but the fixed rule is structural rather than
+>    a depth number.
+>
+> Real end-to-end result, 52 source files through the CLI: **22 reduce with no fallback,
+> mean 52.99%**, byte-identical across fresh processes. The bundled bench corpus stays at
+> 0.00% on purpose — see DECISIONS.md §20.
 
 ---
 
