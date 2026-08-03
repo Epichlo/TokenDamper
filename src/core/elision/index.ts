@@ -4,6 +4,7 @@ import { selectValidator, validateItemAst } from '../validation/ast';
 import type { ElisionRegion } from './regions';
 
 export * from './regions';
+export * from './marker';
 
 /**
  * Reserved key identifying a TokenDamper elision inside JSON-shaped content.
@@ -26,7 +27,7 @@ export type ElisionOutcome =
 
 export interface ElideItemParams {
   readonly item: ContextItem;
-  /** The stage's semantic marker, e.g. `<BLOCK_HASH:...>` or `[TokenDamper Elided: ...]`. */
+  /** The stage's semantic marker, e.g. `[TokenDamper: 5 code lines elided, ...]`. */
   readonly marker: string;
   readonly contentHash: string;
   readonly metadata: Readonly<Record<string, string | number | boolean | null>>;
@@ -106,7 +107,7 @@ export function unwrapElisionContent(content: string): string | undefined {
  *     construction and return.
  *
  * Be precise about (2): as of this commit it is unreachable. Only `JsonValidator` rejects a
- * bare `<BLOCK_HASH:...>`; the TypeScript and Python AST-lite validators both *accept* it.
+ * bare marker; the TypeScript and Python AST-lite validators both *accept* one.
  * Since JSON is exactly the case (1) renders safely, nothing currently trips the check. It
  * is retained because it is the guard that catches a future renderer bug or a stricter
  * validator, but it must not be described as what makes this safe today.
@@ -163,7 +164,7 @@ export interface ElideRegionsParams {
   readonly item: ContextItem;
   /** Disjoint, ascending ranges within `item.content`. Typically from `selectElisionRegions`. */
   readonly regions: ReadonlyArray<ElisionRegion>;
-  /** Produces the stage's marker for one region's text, e.g. a `<BLOCK_HASH:...>` placeholder. */
+  /** Produces the stage's marker for one region's text. See `renderElisionMarker`. */
   readonly markerFor: (regionText: string) => string;
   /** Optional; defaults to `createContextItem`'s hash of the spliced content. */
   readonly contentHash?: string;

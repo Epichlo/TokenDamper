@@ -44,8 +44,37 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
   specification removed — drift cannot see it, because docstrings carry no symbols and
   `R_struct` is inert for code. The guard defends that case, **not the class**.
 
+### Changed
+- **Elision markers say what they replaced (DECISIONS §24)**: `compression:token-hashing`
+  emitted `<BLOCK_HASH:` + a 64-character digest + `>`, which on the CLI resolved to nothing
+  and therefore told its reader that *something* had been removed and nothing else. Both the
+  sub-item and whole-item paths now emit
+  `[TokenDamper: <N> <kind> lines elided, <B> bytes, sha256:<12 hex>]` through one shared
+  renderer. In place of a function body a reader now gets:
+
+  ```
+      def __init__(self, failure_threshold: int = 5, recovery_timeout: float = 30.0):
+          [TokenDamper: 5 function-body lines elided, 202 bytes, sha256:4af59ca48228]
+  ```
+
+  **It costs nothing in bytes** — `codebase.py` through the real CLI goes 16,937 → **11,328**
+  where it went → 11,360 before, because a 12-character digest buys back more than the words
+  cost. In tokens the two estimators disagree in *sign* on one real marker
+  (`EnhancedHeuristicTokenizer` +1, `ceil(len / 4)` −1); a controlled A/B on a frozen 80-file
+  corpus keeps the same 22 files with the same fallback causes and moves the mean over kept
+  55.50% → 55.09%. That −0.41pp is the less accurate estimator's opinion (§19).
+
+  `<BLOCK_HASH:…>` is still *read*, so text captured earlier still round-trips. `TokenHasher`
+  resolves the truncated digest through a prefix index and refuses an ambiguous prefix rather
+  than substituting the wrong content.
+
+  Whole-item elision on prose and logs was proposed for removal as "compute that can only
+  produce fallbacks". Measured, it is not: prose alone passes at `S_k = 0.00` saving 78.4%
+  and a log tail 97.5%. The 16/16 prose failures in this repository are engineering documents
+  dense with imperative directives, which is a property of the corpus. See §24.
+
 ### Fixed
-- **`compression:token-hashing` no longer fabricates the store that makes it "reversible"**:
+- **`compression:token-hashing` no longer fabricates the store that makes it "reversible" (DECISIONS §25)**:
   line 23 was `options?.tokenHasher ?? new TokenHasher()`. That default registered every
   elided block into a store that was garbage-collected when the stage returned, so on the
   CLI — which supplies no hasher — the emitted `<BLOCK_HASH:…>` markers referred to content

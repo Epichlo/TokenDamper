@@ -963,3 +963,146 @@ no AST-lite validator for prose, nor should there be (§17).
 - Pathless code is still unvalidated — it is now *reported* as unvalidated rather than passed.
   Closing that needs content-only code detection, which §17 removed on purpose. This decision
   makes the hole visible; it does not fill it.
+
+## 24. An Elision Marker Must Say What It Replaced
+
+### Decision
+
+`compression:token-hashing` emits
+`[TokenDamper: <N> <kind> lines elided, <B> bytes, sha256:<12 hex>]` on both the sub-item and
+the whole-item path, rendered by one shared `core/elision.renderElisionMarker`. The digest is
+a field in the marker, never the whole of it. `TokenHasher` resolves the truncated digest via
+a prefix index and refuses an ambiguous prefix rather than guessing.
+
+### Context
+
+The marker was `<BLOCK_HASH:` + the full digest + `>`, and on the CLI it resolved to nothing —
+see §25 for why the store never existed. So the reader of a CLI run received, in place of a
+function body:
+
+```
+        <BLOCK_HASH:4af59ca48228134eb02432340ad1aa61a7ccab427f407c0fbe22cdbf9ee33e90>
+```
+
+which says that *something* was removed and nothing else. Not what, not how much, not whether
+it mattered. The same elision now reads:
+
+```
+    def __init__(self, failure_threshold: int = 5, recovery_timeout: float = 30.0):
+        [TokenDamper: 5 function-body lines elided, 202 bytes, sha256:4af59ca48228]
+```
+
+`cleanup:session-dedup` already emitted `[TokenDamper Elided: ref=… bytes=… kind=…]`, and
+`compression:delta-compression` a labelled unified diff. `token-hashing` was the only stage
+whose output told its reader nothing, and it is the only one that runs on the CLI.
+
+### Rationale
+
+MCP and the Gateway hold session state, so a marker there can be a pointer. The CLI is a
+one-shot pipe with no session on either end, so there is nothing for a pointer to point at
+and the marker has to carry the information itself. The rule that follows: **on a one-shot
+path, every elision must carry in-band enough for a reader with no external state to know
+what was removed.**
+
+The hash stays because it is what identifies a block across turns and what a caller holding
+the content can verify against. Twelve hex characters carry that; sixty-four would be 53% of
+the marker and would defeat the readability the marker exists for. An ambiguous prefix
+resolves to nothing, which is the behaviour `rehydrateText` already had for any unknown hash.
+
+### Consequences
+
+- **Byte cost: none — it is slightly cheaper.** `codebase.py` through the real CLI:
+  16,937 → 11,360 bytes before, → **11,328** after. The marker is 75 bytes against the old
+  77 in the common case, because a truncated digest buys back more than the words cost.
+- **Token cost depends on the estimator, and the two disagree in sign.** For one real marker:
+  `EnhancedHeuristicTokenizer` scores the new form **+1** token, `ceil(len / 4)` scores it
+  **−1**. Controlled A/B over the frozen 80-file corpus: identical files kept (22), identical
+  fallback causes, mean over kept 55.50% → 55.09%. That −0.41pp is the heuristic's opinion,
+  and the heuristic is the *less* accurate of the two by measurement (§19: 24% MAE against
+  17%). Under a real BPE encoder a 64-character random hex string costs roughly 25 tokens
+  while the same span of English words costs roughly 18, so the sign would likely invert —
+  but `createTiktokenAdapter` is unwired, so that is reasoning, not a measurement, and it is
+  recorded as such.
+- One format is written; `<BLOCK_HASH:…>` is still *read*, so text captured before this
+  change still round-trips. `TokenHasher.createBlockPlaceholder` still produces the old form
+  and is still tested.
+- `BLOCK_PLACEHOLDER_BYTES` now aliases `ELISION_MARKER_BYTES` (80, derived in `marker.ts`),
+  moving the region floor from 101 to 104 bytes. It remains a pre-filter, not a correctness
+  dependency — `elideRegions` measures the real replacement against the real region.
+- `ELISION_MARKER_PATTERN` is deliberately specific rather than `\[TokenDamper[^\]]*\]`, so
+  it cannot swallow the other two stages' markers and hand them to the wrong resolver.
+
+### Rejected: gating the whole-item branch off for prose and logs
+
+The proposal was that whole-item elision on prose and logs is "compute that can only produce
+fallbacks", so it should not run. **Measured, that premise is false.** Whole-item elision
+succeeds on both when the item carries no imperative directive:
+
+```
+  prose only              prose:WHOLE   passed=true  S_k=0.00  saved=78.4%
+  logtail only            logs:WHOLE    passed=true  S_k=0.00  saved=97.5%
+  code + prose + logtail  code:region prose:WHOLE logs:WHOLE  passed=true  saved=62.6%
+```
+
+It fails on 16/16 of this repository's prose files because 15 of them are engineering
+documents dense with "must" and "do not", and on `sample_logs.txt` because that fixture has a
+planted imperative line (Issue 4). That is a property of the corpus, not of the content type.
+
+A static content-type gate is also the wrong shape independently: whether an elision survives
+depends on whether *this bundle* carries directives and symbols, which differs between a
+single-item CLI bundle and a multi-item Gateway one. Gating by content type would delete the
+78–97% case above — a log tail piped into the CLI is exactly the input this product exists
+for, and exactly the example the descriptive-marker rule was written from.
+
+## 25. Do Not Manufacture the State That Makes a Claim True
+
+### Decision
+
+`compression:token-hashing` uses a `TokenHasher` only when the caller supplies one. The
+`?? new TokenHasher()` default is gone. Reversibility is recorded on the item
+(`metadata.reversible`), in the stage metrics (`irreversibleElisions`) and in the stage notes.
+
+### Context
+
+The stage's docblock said it "converts eligible context items into reversible
+`<BLOCK_HASH:sha256>` placeholders", and line 23 read
+`options?.tokenHasher ?? new TokenHasher()`. The fabricated store registered every elided
+block and was collected when the stage returned. Measured on `codebase.py` through the real
+binary:
+
+```
+  input bytes  : 16937
+  output bytes : 11360
+  placeholders : 19
+  a fresh TokenHasher resolves: 0/19
+```
+
+Nothing noticed, twice over. `detectCorruptedPlaceholders` is written
+`if (hash && hasher && !hasher.hasHash(hash))`, so with no hasher it cannot push and reported
+a clean result on the one path where every placeholder was unresolvable — the eighth instance
+of the invariant 10 pattern. And `attemptAutomatedRehydration` opens with
+`if (!hasher && !ledger) return undefined`, while `src/cli/main.ts:125` passes neither, so the
+recovery valve returned before examining an item.
+
+### Rationale
+
+The obvious fix — thread a hasher from the CLI, or write a sidecar map beside the output —
+would make "reversible" true of the process while leaving the reader of the pipe exactly as
+badly off. That is the same shape as the retracted 98.59% figure: a number that was correct
+about something nobody was asking. Reversibility on the CLI is not unimplemented, it is
+unachievable; a one-shot pipe has nowhere for a store to live.
+
+So the state is not manufactured. The absence is recorded, and the marker is made to stand on
+its own instead (§24).
+
+### Consequences
+
+- Emitted bytes do not depend on whether a hasher was passed, and a test pins that.
+  Reversibility is a property of who holds the content, not of the transform; if the two
+  diverged, the CLI and MCP would silently produce different output for the same input.
+- `detectCorruptedPlaceholders` returns early without a hasher, and says why. It is *correctly*
+  inert there: with no store nothing claims to hold the content, so there is no broken promise
+  to detect. Reporting every CLI elision as corruption would be equally wrong.
+- The CHANGELOG's Phase 1d line "every elision reversible through the existing recovery valve"
+  is withdrawn. That measurement injected a hasher and the sentence was attached to a CLI run
+  that had none.

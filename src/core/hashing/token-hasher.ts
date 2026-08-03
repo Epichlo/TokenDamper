@@ -1,5 +1,5 @@
 import { hashContent } from '../model/constructors';
-import { unwrapElisionContent } from '../elision';
+import { ELISION_HASH_PREFIX_LENGTH, ELISION_MARKER_PATTERN, unwrapElisionContent } from '../elision';
 
 export interface BlockPlaceholderOptions {
   readonly blockType?: string;
@@ -21,6 +21,17 @@ export interface StoredBlock {
  */
 export class TokenHasher {
   private readonly store = new Map<string, StoredBlock>();
+
+  /**
+   * Maps a marker's truncated hash back to the full digest.
+   *
+   * Markers carry `ELISION_HASH_PREFIX_LENGTH` hex characters, not the whole digest, so the
+   * reverse path needs this. A `null` value records that two distinct blocks share a prefix:
+   * the entry then resolves to nothing and `rehydrateText` leaves the marker in place, which
+   * is what it already does for any hash it cannot resolve. Refusing an ambiguous lookup is
+   * the only answer that cannot silently substitute the wrong content.
+   */
+  private readonly prefixIndex = new Map<string, string | null>();
 
   constructor(initialBlocks?: ReadonlyArray<StoredBlock | { hash: string; content: string }>) {
     if (initialBlocks) {
@@ -53,6 +64,15 @@ export class TokenHasher {
       ...(metadata?.blockType ? { blockType: metadata.blockType } : {}),
     };
     this.store.set(hash, entry);
+
+    const prefix = hash.slice(0, ELISION_HASH_PREFIX_LENGTH);
+    const existing = this.prefixIndex.get(prefix);
+    if (existing === undefined) {
+      this.prefixIndex.set(prefix, hash);
+    } else if (existing !== hash) {
+      this.prefixIndex.set(prefix, null);
+    }
+
     return hash;
   }
 
@@ -78,9 +98,7 @@ export class TokenHasher {
    * Accepts either raw SHA-256 hash or `<BLOCK_HASH:hash>` placeholder string.
    */
   public expandBlockHash(hashOrPlaceholder: string): string | undefined {
-    const hash = this.extractHash(hashOrPlaceholder);
-    const entry = this.store.get(hash);
-    return entry?.content;
+    return this.resolve(this.extractHash(hashOrPlaceholder))?.content;
   }
 
   /**
@@ -97,20 +115,24 @@ export class TokenHasher {
     // one contract — changing either alone breaks the round trip.
     const wrappedMarker = unwrapElisionContent(text);
     if (wrappedMarker !== undefined) {
-      const entry = this.store.get(this.extractHash(wrappedMarker));
+      const entry = this.resolve(this.extractHash(wrappedMarker));
       if (entry) {
         return entry.content;
       }
       return text;
     }
 
-    const placeholderRegex = /<BLOCK_HASH:([a-f0-9]{64}|[a-f0-9]{12,64}|[^>]+)>/g;
-    return text.replace(placeholderRegex, (match, hash) => {
-      const entry = this.store.get(hash);
-      if (entry) {
-        return entry.content;
-      }
-      return match;
+    // Two forms are read and one is written. `[TokenDamper: … sha256:…]` is what
+    // `renderElisionMarker` produces; `<BLOCK_HASH:…>` is the previous format, still accepted
+    // so that text captured before this change round-trips. Both resolve through `resolve`,
+    // so the truncated and full digests behave identically.
+    const combined = new RegExp(
+      `${ELISION_MARKER_PATTERN.source}|<BLOCK_HASH:([a-f0-9]{12,64}|[^>]+)>`,
+      'g',
+    );
+    return text.replace(combined, (match: string, markerHash?: string, blockHash?: string) => {
+      const entry = this.resolve(markerHash ?? blockHash ?? '');
+      return entry ? entry.content : match;
     });
   }
 
@@ -118,16 +140,14 @@ export class TokenHasher {
    * Returns whether a block hash or placeholder exists in the store.
    */
   public hasHash(hashOrPlaceholder: string): boolean {
-    const hash = this.extractHash(hashOrPlaceholder);
-    return this.store.has(hash);
+    return this.resolve(this.extractHash(hashOrPlaceholder)) !== undefined;
   }
 
   /**
    * Returns metadata entry for a stored block.
    */
   public getBlock(hashOrPlaceholder: string): StoredBlock | undefined {
-    const hash = this.extractHash(hashOrPlaceholder);
-    return this.store.get(hash);
+    return this.resolve(this.extractHash(hashOrPlaceholder));
   }
 
   /**
@@ -142,10 +162,34 @@ export class TokenHasher {
    */
   public clear(): void {
     this.store.clear();
+    this.prefixIndex.clear();
+  }
+
+  /**
+   * Looks up a full digest, or the truncated one a marker carries. An ambiguous prefix
+   * resolves to nothing rather than to a guess.
+   */
+  private resolve(key: string): StoredBlock | undefined {
+    const direct = this.store.get(key);
+    if (direct) {
+      return direct;
+    }
+    if (key.length !== ELISION_HASH_PREFIX_LENGTH) {
+      return undefined;
+    }
+    const full = this.prefixIndex.get(key);
+    return full ? this.store.get(full) : undefined;
   }
 
   private extractHash(hashOrPlaceholder: string): string {
-    const match = /^<BLOCK_HASH:([^>]+)>$/.exec(hashOrPlaceholder.trim());
-    return match && match[1] ? match[1] : hashOrPlaceholder.trim();
+    const trimmed = hashOrPlaceholder.trim();
+
+    const marker = new RegExp(`^${ELISION_MARKER_PATTERN.source}$`).exec(trimmed);
+    if (marker && marker[1]) {
+      return marker[1];
+    }
+
+    const legacy = /^<BLOCK_HASH:([^>]+)>$/.exec(trimmed);
+    return legacy && legacy[1] ? legacy[1] : trimmed;
   }
 }

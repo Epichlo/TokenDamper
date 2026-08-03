@@ -26,7 +26,7 @@ function bundleOf(content: string, path?: string) {
 }
 
 function markersIn(text: string): string[] {
-  return [...text.matchAll(/<BLOCK_HASH:([a-f0-9]+)>/g)].map((m) => m[1]!);
+  return [...text.matchAll(/sha256:([a-f0-9]{12})\]/g)].map((m) => m[1]!);
 }
 
 describe('the stage does not fabricate a store it is about to discard', () => {

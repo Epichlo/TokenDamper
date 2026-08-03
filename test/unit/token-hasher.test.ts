@@ -102,7 +102,7 @@ describe('runTokenHashingStage', () => {
     expect(result.metrics.bytesSaved).toBeGreaterThan(0);
 
     const firstItem = result.bundle.items[0];
-    expect(firstItem?.content).toMatch(/^<BLOCK_HASH:[a-f0-9]{64}>$/);
+    expect(firstItem?.content).toMatch(/^\[TokenDamper: \d+ [a-z-]+ lines? elided, \d+ bytes, sha256:[a-f0-9]{12}\]$/);
     expect(firstItem?.metadata.elided).toBe(true);
     expect(firstItem?.metadata.tokenHashed).toBe(true);
   });
@@ -281,7 +281,7 @@ describe('runTokenHashingStage — sub-item granularity', () => {
 
     expect(result.changed).toBe(true);
     expect(result.metrics.regionsHashed).toBe(0);
-    expect(result.bundle.items[0]!.content).toMatch(/^<BLOCK_HASH:[a-f0-9]{64}>$/);
+    expect(result.bundle.items[0]!.content).toMatch(/^\[TokenDamper: \d+ [a-z-]+ lines? elided, \d+ bytes, sha256:[a-f0-9]{12}\]$/);
   });
 
   it('refuses a docstring-only body rather than deleting the specification', () => {
@@ -308,6 +308,6 @@ describe('runTokenHashingStage — sub-item granularity', () => {
 
     expect(result.metrics.regionsHashed).toBe(0);
     expect(result.bundle.items[0]!.content).not.toContain('""" Check if');
-    expect(result.bundle.items[0]!.content).toMatch(/^<BLOCK_HASH:[a-f0-9]{64}>$/);
+    expect(result.bundle.items[0]!.content).toMatch(/^\[TokenDamper: \d+ [a-z-]+ lines? elided, \d+ bytes, sha256:[a-f0-9]{12}\]$/);
   });
 });

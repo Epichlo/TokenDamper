@@ -9,6 +9,7 @@ import {
   hashContent,
 } from '../model';
 import { getBuiltInStageCatalog, executeBuiltInStage, type CompressionStageContext } from '../stage-registry';
+import { containsElisionMarker, ELISION_MARKER_PATTERN } from '../elision';
 import { plan } from '../planner';
 import { resolveFallback } from '../fallback';
 import { buildTrace } from '../trace';
@@ -354,7 +355,7 @@ function attemptAutomatedRehydration(
     if (item.metadata.deltaCompressed && typeof item.metadata.originalContent === 'string') {
       newContent = item.metadata.originalContent as string;
     }
-    if (hasher && newContent.includes('<BLOCK_HASH:')) {
+    if (hasher && (containsElisionMarker(newContent) || newContent.includes('<BLOCK_HASH:'))) {
       newContent = hasher.rehydrateText(newContent);
     }
 
@@ -415,17 +416,29 @@ function attemptAutomatedRehydration(
   });
 }
 
+/**
+ * Finds markers whose content the supplied store should hold but does not.
+ *
+ * **Inert without a hasher, correctly.** With no store there is nothing that claims to hold
+ * the content, so there is nothing to be missing — `compression:token-hashing` records that
+ * case as `metadata.reversible: false` and its markers say in-band what they replaced. The
+ * check is about a *broken promise*, and no promise is made on that path. It would be wrong
+ * to report every CLI elision as corruption, and equally wrong to let this read as evidence
+ * that CLI markers resolve: they do not, by design. See DECISIONS §24.
+ */
 function detectCorruptedPlaceholders(bundle: ContextBundle, hasher?: TokenHasher): string[] {
+  if (!hasher) {
+    return [];
+  }
+
   const corruptedHashes: string[] = [];
+  const regex = new RegExp(`${ELISION_MARKER_PATTERN.source}|<BLOCK_HASH:([^>]+)>`, 'g');
   for (const item of bundle.items) {
-    if (item.content.includes('<BLOCK_HASH:')) {
-      const regex = /<BLOCK_HASH:([^>]+)>/g;
-      let match: RegExpExecArray | null;
-      while ((match = regex.exec(item.content)) !== null) {
-        const hash = match[1];
-        if (hash && hasher && !hasher.hasHash(hash)) {
-          corruptedHashes.push(hash);
-        }
+    let match: RegExpExecArray | null;
+    while ((match = regex.exec(item.content)) !== null) {
+      const hash = match[1] ?? match[2];
+      if (hash && !hasher.hasHash(hash)) {
+        corruptedHashes.push(hash);
       }
     }
   }

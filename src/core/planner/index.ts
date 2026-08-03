@@ -20,9 +20,11 @@ export function plan(
 
   // Explicit `session_dedup` selection wins over budget-derived knapsack mode.
   // The Gateway proxy sets this so cross-turn deduplication is the only transform
-  // applied to live provider traffic: `compression:token-hashing` writes bare
-  // `<BLOCK_HASH:...>` markers that corrupt JSON-shaped message content (Issue 2),
-  // which must not reach production requests until content-type tagging lands.
+  // applied to live provider traffic. `compression:token-hashing` is lossy and measures
+  // `S_k = 0.60` on JSON, so it fails the drift gate on Gateway payloads. (The original
+  // reason recorded here — bare markers corrupting JSON-shaped content, Issue 2 — no longer
+  // holds: `core/elision` renders markers validly for the item's syntax. Drift is now the
+  // blocker. See CLAUDE.md invariant 8.)
   if (config.planner?.defaultMode === 'session_dedup') {
     return {
       planId: `${bundle.bundleId}:session_dedup`,

@@ -1,6 +1,14 @@
 import type { ContextBundle, ContextItem, OptimizationBudget, StageResult } from '../../core/model/types';
 import { createBundleStatistics, createStageResult, freeze, hashContent } from '../../core/model/constructors';
-import { elideItem, elideRegions, selectElisionRegions, type ElisionSkipReason } from '../../core/elision';
+import {
+  describeContentType,
+  elideItem,
+  elideRegions,
+  FUNCTION_BODY_NOUN,
+  renderElisionMarker,
+  selectElisionRegions,
+  type ElisionSkipReason,
+} from '../../core/elision';
 import { TokenHasher } from '../../core/hashing/token-hasher';
 import { DEFAULT_TOKENIZER, estimateBundleTokens, type TokenizerAdapter } from '../../core/hashing/tokenizer';
 
@@ -20,10 +28,11 @@ export interface TokenHashingStageOptions {
 /**
  * Built-in compression stage: `compression:token-hashing`.
  *
- * Replaces content with `<BLOCK_HASH:sha256>` markers — **reversibly only when the caller
- * supplies a `tokenHasher` that outlives this call.**
+ * Replaces content with `[TokenDamper: N <kind> lines elided, B bytes, sha256:…]` markers —
+ * **reversibly only when the caller supplies a `tokenHasher` that outlives this call.**
  *
- * This used to read "converts eligible context items into reversible placeholders", and
+ * This used to read "converts eligible context items into reversible `<BLOCK_HASH:sha256>`
+ * placeholders", and
  * line 23 used to be `options?.tokenHasher ?? new TokenHasher()`. That default made the
  * sentence true of the type and false of the CLI: the fabricated store registered every
  * elided block and was garbage-collected when the stage returned, so the markers in the
@@ -67,13 +76,18 @@ export function runTokenHashingStage(
    * Builds the marker for one span and hands the span to the caller's store when there is
    * one. When there is not, nothing is registered — there is no store to register with, and
    * writing to a local one would only make the absence harder to see.
+   *
+   * The marker says what it replaced. It used to be `<BLOCK_HASH:` + the digest + `>`, which
+   * on the CLI resolved to nothing and therefore told the reader nothing. Same byte budget
+   * (see `ELISION_MARKER_BYTES`), and the digest is still in there — it is now a field rather
+   * than the whole message.
    */
-  const placeholderFor = (text: string, blockType: string): string => {
+  const markerFor = (text: string, describes: string, blockType: string): string => {
     const blockHash = hashContent(text);
     if (hasher) {
       hasher.registerBlock(blockHash, text, { bytes: text.length, blockType });
     }
-    return `<BLOCK_HASH:${blockHash}>`;
+    return renderElisionMarker(text, describes, blockHash);
   };
 
   const newItems: ContextItem[] = bundle.items.map((item) => {
@@ -113,7 +127,7 @@ export function runTokenHashingStage(
       const regionOutcome = elideRegions({
         item,
         regions,
-        markerFor: (regionText) => placeholderFor(regionText, item.kind),
+        markerFor: (regionText) => markerFor(regionText, FUNCTION_BODY_NOUN, item.kind),
         contentHash: hashContent({ originalHash: item.contentHash, regions: regions.length }),
         metadata: {
           ...item.metadata,
@@ -142,7 +156,7 @@ export function runTokenHashingStage(
     }
 
     const blockHash = hashContent(item.content);
-    const placeholder = placeholderFor(item.content, item.kind);
+    const placeholder = markerFor(item.content, describeContentType(item.contentType), item.kind);
 
     // Rule 6: content-type correctness is enforced by the chokepoint, not here. It renders
     // the placeholder in a syntax valid for this item and refuses to return anything its

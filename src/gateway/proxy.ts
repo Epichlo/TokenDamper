@@ -348,11 +348,12 @@ function runGatewayOptimization(
   //
   // Running exactly one stage here is deliberate containment, NOT an unfinished
   // implementation. `session_dedup` mode plans only `cleanup:session-dedup`.
-  // `compression:token-hashing` writes bare `<BLOCK_HASH:...>` markers into item content;
-  // Gateway message content is frequently JSON (tool calls arrive as
-  // `JSON.stringify(msg.content)`), so adding that stage would emit corrupted JSON onto
-  // live upstream provider traffic. The planner has no content-type awareness to prevent
-  // it — that is Issue 2, and it gates any expansion of this list.
+  // `compression:token-hashing` elides item content; Gateway message content is frequently
+  // JSON (tool calls arrive as `JSON.stringify(msg.content)`). The original reason recorded
+  // here — that the stage wrote bare `<BLOCK_HASH:...>` markers and would emit corrupted
+  // JSON — no longer holds: `core/elision` renders every marker validly for the item's
+  // syntax. The planner still has no content-type awareness, and drift below is now the
+  // operative blocker.
   //
   // Note the drift exemption in DriftTracker covers `recoverable` (dedup) elisions only.
   // The lossy compression stages are still scored in full, so drift is a second, separate

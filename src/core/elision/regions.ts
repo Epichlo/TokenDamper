@@ -1,5 +1,6 @@
 import type { ContextItem } from '../model/types';
 import { selectValidator } from '../validation/ast';
+import { ELISION_MARKER_BYTES } from './marker';
 
 /**
  * A half-open byte range within `item.content` that may be replaced by an elision marker.
@@ -10,14 +11,19 @@ export interface ElisionRegion {
 }
 
 /**
- * `<BLOCK_HASH:` + 64 hex chars + `>`. A region smaller than this cannot save anything.
+ * The byte budget a marker occupies. A region smaller than this cannot save anything.
+ *
+ * Re-exported from `ELISION_MARKER_BYTES` under its historical name. It used to be the
+ * fixed width of `<BLOCK_HASH:` + 64 hex + `>`; markers are now variable-length and
+ * self-describing, and 80 is the derived budget for the size range where the question is
+ * close (see `marker.ts`).
  *
  * This is a pre-filter, not a correctness dependency: `elideRegions` measures the actual
  * rendered replacement against the actual region and refuses any that does not shrink. If
  * the marker format changes, this constant becomes merely a worse heuristic rather than a
  * source of growth.
  */
-export const BLOCK_PLACEHOLDER_BYTES = 77;
+export const BLOCK_PLACEHOLDER_BYTES = ELISION_MARKER_BYTES;
 
 /**
  * Default floor for an eligible region. The margin over the placeholder exists so a region
