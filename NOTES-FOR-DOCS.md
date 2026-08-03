@@ -374,3 +374,55 @@ depends on how the bytes arrived.
 **Not fixed here.** The fix is a content-based fallback when no path is available, and it has
 a blast radius over every item in every bundle (the `DECISIONS.md` §17 lesson), so it wants
 its own change and its own turn-1 measurement.
+
+## `docs/issue-2-content-type-contract-design.md` §2.2 — the remedy it specifies closes half the hole
+
+**Status: corrected in code (DECISIONS §22, §23). The design doc is left as written.**
+
+The doc's §2.2 says:
+
+> It is invisible today only because the Gateway hardcodes `contentType: 'text'`, which makes
+> `selectValidator` return `null`, so **no validator runs at all** on Gateway items.
+
+The diagnosis is right and the implemented remedy — replace the literal with
+`classifyContent` (`ac16cec`) — follows from it. But the doc treats "the tag is now real" as
+equivalent to "a validator now runs", and those are only the same thing if the classifier is
+correct. It was not:
+
+```
+--- TS with an unterminated string literal ---
+  with path (CLI file arg)    contentType=html   validator=typescript  valid=false  issues=1
+  no path (Gateway message)   contentType=html   validator=NULL        valid=true   issues=0
+```
+
+`classifyContent` returned `html` for 46 of this repository's 57 TypeScript sources
+(`looksLikeHtml`'s greedy `[\s\S]*`, plus probes running before extension checks — §22), and
+`selectValidator` has no `html` branch. So the JSON half of §2.2's claim holds and the code
+half does not. On the CLI the path-extension branch rescues it; a provider message has no
+path, so nothing does.
+
+Two things follow that the doc does not anticipate:
+
+1. Fixing the classifier is necessary but not sufficient. The mechanism — a classifier free
+   to emit a tag dispatch has never heard of, failing *silently* — survives any number of
+   regex fixes. §23 binds them with a total `Record<ContentType, …>` and records
+   `validated: false` on the result so "nothing looked" stops reading as "it passed".
+2. `CLAUDE.md`'s Issue 2 entry inherited the overstatement and has been corrected in place.
+
+## Phase 1a's closure claim needs the same qualification wherever it appears
+
+`tokendamper-headroom-known-issues.md` and `purposed architecture changes.md` both describe
+Issue 2's content-type work as closing the Gateway validation gap. Read as "JSON payloads are
+now validated and scored as JSON", that is accurate and measured. Read as "Gateway items are
+now validated", it is not, and was not at any point:
+
+- Before `ac16cec`: hardcoded `text` → `selectValidator` → `null` → nothing ran.
+- After `ac16cec`, for code: classified `html` → `selectValidator` → `null` → nothing ran.
+- After §22/§23, for code: classified `code` if a filename is present, otherwise `text` or
+  `yaml` → still `null` for pathless content, but now reported as `validated: false` and
+  counted in `trace.astCoverage`.
+
+The remaining gap is deliberate: DECISIONS §17 removed content-only code detection because
+its only signal was a markdown fence, and the resulting verdict flipped on apostrophe parity
+in the surrounding prose. Nothing here re-opens that. The change is that the gap is now
+*stated* by the engine instead of being indistinguishable from a clean bill of health.

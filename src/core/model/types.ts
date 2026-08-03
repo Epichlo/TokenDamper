@@ -183,6 +183,19 @@ export interface ValidationIssue {
 }
 
 /**
+ * How much of a bundle the AST validators actually examined.
+ *
+ * Reported so that "no syntax errors" cannot be read as "every item was checked". There is
+ * no validator for prose, markup, YAML or log output, so `unchecked > 0` is the normal case
+ * on conversational traffic — it is a statement of coverage, not a warning.
+ */
+export interface AstCoverage {
+  readonly checked: number;
+  readonly unchecked: number;
+  readonly uncheckedContentTypes: ReadonlyArray<ContentType>;
+}
+
+/**
  * The immutable validation outcome for an optimization attempt.
  */
 export interface ValidationReport {
@@ -192,6 +205,7 @@ export interface ValidationReport {
   readonly shouldFallback: boolean;
   readonly reason?: string | undefined;
   readonly driftReport?: DriftReport | undefined;
+  readonly astCoverage?: AstCoverage | undefined;
 }
 
 /**
@@ -223,6 +237,7 @@ export interface OptimizationTrace {
   readonly fallbackReason?: string | undefined;
   readonly debtScore?: number | undefined;
   readonly driftScore?: number | undefined;
+  readonly astCoverage?: AstCoverage | undefined;
 }
 
 /**

@@ -110,7 +110,9 @@ MCP tools: `optimize_context`, `rehydrate_context`, `get_session_metrics`,
 9. **The Gateway maps `finalBundle` back onto the parsed payload, never `emittedOutput`** —
    `emittedOutput` is a newline-joined blob, and using it reintroduces Issue 5.
 10. **When a check passes, confirm it ran.** A green result from a check that never executed
-    is worse than a red one — it has happened four times in this project already.
+    is worse than a red one — it has happened seven times in this project already. Read
+    `AstValidatorResult.validated` and `trace.astCoverage`, not `valid`, when the question is
+    whether anything looked (DECISIONS §23).
 
 ## Known bugs — highest-priority work
 
@@ -136,7 +138,17 @@ Full detail in `tokendamper-headroom-known-issues.md`; proposed fixes in
   `{"__td_block__":"<marker>"}`, and `TokenHasher.rehydrateText` unwraps them. The Gateway
   no longer hardcodes `contentType: 'text'`; message content is classified, so
   `selectValidator` and `DriftTracker.extractSymbols` finally see JSON as JSON.
-  Two things to know before building on this:
+  Three things to know before building on this:
+  - **The classification half of this fix was partial, and this entry used to overstate it.**
+    It closed JSON. It did not close code: `classifyContent` answered `html` for TypeScript
+    (46 of this repo's 57 sources), `selectValidator` has no `html` branch, and a pathless
+    item — the Gateway shape — therefore got **no validator at all**, returning
+    `valid: true, issues: 0` on a file with an unterminated string literal. That is the same
+    vacuity Phase 1a is recorded as having closed, arriving by a different route. Fixed in
+    Phase 1.5: DECISIONS §22 (the classifier) and §23 (an unvalidated item now reports
+    `validated: false` and shows on `trace.astCoverage` instead of reading as a pass).
+    Pathless *code* is still unchecked — §17 removed content-only code detection on purpose —
+    but it is now visible rather than silent.
   - The load-bearing mechanism is **correct-by-construction rendering**, not the
     post-condition check. Only `JsonValidator` rejects a bare placeholder; the TS and
     Python AST-lite validators accept it, so `post_condition_rejected` is unreachable

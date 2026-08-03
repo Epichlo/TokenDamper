@@ -39,6 +39,23 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
   `R_struct` is inert for code. The guard defends that case, **not the class**.
 
 ### Fixed
+- **An unvalidated item no longer reads as a passing item (DECISIONS §23)**: `valid: true`
+  meant both "a validator examined this and found no syntax errors" and "no validator covers
+  this content type, so nothing was examined". `AstValidatorResult.validated` now separates
+  them, `BundleAstValidationResult.unvalidatedItemIds` lists the uncovered items, and
+  `ValidationReport`/`OptimizationTrace` carry `astCoverage` — which is what makes this
+  visible on the CLI, whose only validation output is the stderr trace.
+
+  **This partially reopens Phase 1a.** Replacing the Gateway's hardcoded `contentType: 'text'`
+  with `classifyContent` (`ac16cec`) closed the JSON half of "no validator runs at all on
+  Gateway items" and is recorded as closing the whole thing. It did not: `classifyContent`
+  answered `html` for TypeScript, `selectValidator` has no `html` branch, and a pathless item
+  carrying a file with an unterminated string literal returned `valid: true, issues: 0`.
+  `selectValidator`'s content-type dispatch is now a total `Record<ContentType, …>`, so a tag
+  dispatch has never heard of is a compile error. Pathless code stays unchecked by design
+  (§17) — it is now reported as unchecked. `passed` is scoped to `severity: 'error'` so a
+  coverage report cannot force a fallback.
+
 - **Content classification no longer answers `html` for TypeScript (DECISIONS §22)**:
   `classifyContent` ran its content probes *before* its extension checks, and two of those
   probes were wrong. Measured on this repository: **46 of 57 TypeScript sources classified as

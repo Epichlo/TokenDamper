@@ -900,3 +900,66 @@ answer, it answered `html` with confidence.
   produces a type with no validator is now *visible* rather than silent (§23). It is still
   the loosest probe in the chain and should be tightened before anything starts trusting
   `yaml` for a decision.
+
+## 23. "No Validator Applied" Is Not "The Check Passed"
+
+### Decision
+
+`AstValidatorResult` gains `validated: boolean`. `selectValidator`'s content-type dispatch
+becomes a total `Record<ContentType, AstValidator | null>`. `ValidationReport` and
+`OptimizationTrace` carry `astCoverage`, and `validate()` scopes `passed`, `shouldFallback`
+and `reason` to `severity: 'error'` so a coverage report cannot force a fallback.
+
+### Context
+
+**This partially reopens Phase 1a.** The Gateway fix (`ac16cec`) replaced a hardcoded
+`contentType: 'text'` with `classifyContent`, and the record — `CLAUDE.md`,
+`docs/issue-2-content-type-contract-design.md` §2.2 — treats that as closing the
+"no validator runs at all on Gateway items" hole. It closed the JSON half. It did not close
+the code half, and by §22 it made that half worse: `classifyContent` answered `html` for
+TypeScript, `selectValidator` had no `html` branch, and a pathless item therefore got no
+validator at all. Measured on a TypeScript file with an unterminated string literal:
+
+```
+  with path (CLI file arg)    contentType=html   validator=typescript  valid=false  issues=1
+  no path (Gateway message)   contentType=html   validator=NULL        valid=true   issues=0
+```
+
+The CLI is rescued by `selectValidator`'s path-extension branch. A provider message has no
+path, so `contentType` is its only signal — which is the shape the Gateway carries.
+
+### Rationale
+
+§22 fixes the three regexes, but fixing them leaves the mechanism intact: `classifyContent`
+could still emit a tag that dispatch has never heard of, and the failure mode of that
+mismatch is *silence*. `valid: true` meant both "examined and clean" and "nothing looked".
+
+Two routes were available: make dispatch handle every emittable type, or bind the two so an
+unhandled type cannot exist. `Record<ContentType, …>` delivers both at once — every member
+must be assigned a validator or an explicit `null`, and adding a member to `ContentType`
+without deciding is a compile error. No runtime `assertNever` is used, deliberately: a throw
+inside `selectValidator` would sit in the fail-open path and violate invariant 3, so the
+runtime edge indexes and falls back to `null` for a forged tag.
+
+The conflation itself is fixed on the *result*, not on the selector's return. `null` from a
+lookup is a fine answer to "which validator covers this"; the defect was that
+`validateItemAst` turned that answer into `valid: true` and discarded it. `validated: false`
+is now the record that nothing ran.
+
+`valid` deliberately stays `true` for an unchecked item. Inverting it would fall the engine
+back on every prose message, which is a policy change, not a correctness fix — and there is
+no AST-lite validator for prose, nor should there be (§17).
+
+### Consequences
+
+- The CLI writes `result.trace` to stderr and emits nothing else about validation, so
+  `astCoverage` on the trace is what makes coverage visible on the one entry mode with no
+  session and no second chance to notice.
+- `passed` is now `errors.length === 0` rather than `issues.length === 0`. Equivalent today —
+  every other issue pushed is an error — but it makes `severity` load-bearing instead of
+  decorative, and stops any future informational finding from forcing a fallback.
+- `AstValidator.validate` returns the narrower `AstCheckResult`. A validator cannot claim
+  `validated`; by running, it is the validation.
+- Pathless code is still unvalidated — it is now *reported* as unvalidated rather than passed.
+  Closing that needs content-only code detection, which §17 removed on purpose. This decision
+  makes the hole visible; it does not fill it.

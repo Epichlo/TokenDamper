@@ -211,6 +211,7 @@ export function optimize(
         shouldFallback: true,
         reason,
         ...(validation.driftReport ? { driftReport: validation.driftReport } : {}),
+        ...(validation.astCoverage ? { astCoverage: validation.astCoverage } : {}),
       });
     }
 
@@ -230,6 +231,7 @@ export function optimize(
         shouldFallback: true,
         reason: failureReason ?? 'Stage execution failed',
         ...(validation.driftReport ? { driftReport: validation.driftReport } : {}),
+        ...(validation.astCoverage ? { astCoverage: validation.astCoverage } : {}),
       });
     }
 

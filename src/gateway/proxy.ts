@@ -429,6 +429,15 @@ function runGatewayOptimization(
  * Both checks were reporting a pass they had never performed. See
  * `docs/issue-2-content-type-contract-design.md` §2.2.
  *
+ * **This closed the JSON half only, and the record overstates it.** `classifyContent` does
+ * see JSON as JSON, so the drift half above holds. It did *not* start selecting a validator
+ * for code: it answered `html` for TypeScript (46 of 57 of this repository's own sources),
+ * and `selectValidator` has no `html` branch — so a pathless item carrying broken TypeScript
+ * still reached the provider with `valid: true` and nothing having examined it. DECISIONS
+ * §22 fixes the classifier; §23 makes an unvalidated item report itself as unvalidated
+ * instead of as a pass. Pathless code remains unchecked by design (§17 removed content-only
+ * code detection) — it is now visible on `trace.astCoverage` rather than silent.
+ *
  * There is deliberately no `sourcePath` argument: a provider message has no filename, so
  * classification is by content alone. Do not invent one from `origin` — the extension
  * branch of `classifyContent` would then trust a synthesized path over real content.

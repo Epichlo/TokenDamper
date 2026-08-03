@@ -51,5 +51,9 @@ export function buildTrace(
     ...(metrics?.driftScore !== undefined || validation.driftReport?.driftScore !== undefined
       ? { driftScore: metrics?.driftScore ?? validation.driftReport?.driftScore }
       : {}),
+    // The CLI writes this trace to stderr and nothing else it emits mentions validation
+    // coverage, so without this line an unchecked item is invisible on the one entry mode
+    // that has no session and no second chance to notice. DECISIONS §23.
+    ...(validation.astCoverage === undefined ? {} : { astCoverage: validation.astCoverage }),
   });
 }

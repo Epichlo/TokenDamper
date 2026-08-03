@@ -1,4 +1,5 @@
 import type {
+  AstCoverage,
   ContextBundle,
   OptimizationBudget,
   OptimizationPlan,
@@ -30,6 +31,15 @@ export function validate(
 
   // 1. Run AST Validation on optimized bundle
   const astResult = validateBundleAst(after);
+  const unchecked = new Set(astResult.unvalidatedItemIds);
+  const astCoverage: AstCoverage = {
+    checked: after.items.length - unchecked.size,
+    unchecked: unchecked.size,
+    uncheckedContentTypes: Object.freeze([
+      ...new Set(after.items.filter((item) => unchecked.has(item.id)).map((item) => item.contentType)),
+    ]),
+  };
+
   if (!astResult.valid) {
     for (const issue of astResult.issues) {
       issues.push({
@@ -80,10 +90,29 @@ export function validate(
     }
   }
 
-  const passed = issues.length === 0;
+  // 5. Report AST coverage, without voting on it.
+  //
+  // An item no validator covers is not an error — there is no AST-lite validator for prose,
+  // and there should not be one. But it must not be silently counted as a pass either, which
+  // is exactly what happened when `classifyContent` began answering `html` for TypeScript:
+  // `selectValidator` returned null, `validateItemAst` returned `valid: true`, and broken
+  // source reached a provider having been examined by nothing. DECISIONS §23.
+  if (astCoverage.unchecked > 0) {
+    issues.push({
+      code: 'AST_VALIDATION_SKIPPED',
+      message: `No AST validator covers ${astCoverage.unchecked} of ${after.items.length} item(s) (content type${astCoverage.uncheckedContentTypes.length === 1 ? '' : 's'}: ${astCoverage.uncheckedContentTypes.join(', ')}); their syntax was not checked.`,
+      severity: 'info',
+    });
+  }
+
+  // Verdicts are error-scoped. `issues.length === 0` was equivalent while every issue pushed
+  // here was an error, but it makes the `severity` field decorative and turns any future
+  // informational finding into a forced fallback.
+  const errors = issues.filter((issue) => issue.severity === 'error');
+  const passed = errors.length === 0;
   const shouldFallback = !passed;
   const confidence = passed ? 1 : 0;
-  const reason = issues.length > 0 ? issues.map((i) => i.message).join('; ') : undefined;
+  const reason = errors.length > 0 ? errors.map((i) => i.message).join('; ') : undefined;
 
   return {
     passed,
@@ -91,6 +120,7 @@ export function validate(
     issues: Object.freeze(issues),
     shouldFallback,
     driftReport,
+    astCoverage,
     ...(reason ? { reason } : {}),
   };
 }

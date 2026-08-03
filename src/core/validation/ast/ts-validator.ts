@@ -1,4 +1,4 @@
-import type { AstIssue, AstValidator, AstValidatorOptions, AstValidatorResult, TargetLanguage } from './types';
+import type { AstCheckResult, AstIssue, AstValidator, AstValidatorOptions, TargetLanguage } from './types';
 
 interface BracketStackItem {
   readonly char: string;
@@ -13,7 +13,7 @@ interface BracketStackItem {
 export class TypeScriptValidator implements AstValidator {
   readonly language: TargetLanguage = 'typescript';
 
-  validate(content: string, _options?: AstValidatorOptions): AstValidatorResult {
+  validate(content: string, _options?: AstValidatorOptions): AstCheckResult {
     const startTime = performance.now();
     const issues: AstIssue[] = [];
 
