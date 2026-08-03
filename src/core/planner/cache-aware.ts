@@ -2,7 +2,7 @@ import type { ContextItem, OptimizationBudget } from '../model/types';
 import type { TopologyScoreMap } from '../topology/topology-scorer';
 import type { KnapsackItem } from './knapsack';
 import { containsImperativeDirective } from '../constraints/directives';
-import EnhancedHeuristicTokenizer, { type TokenizerAdapter } from '../hashing/tokenizer';
+import { DEFAULT_TOKENIZER, estimateTokens, type TokenizerAdapter } from '../hashing/tokenizer';
 
 export interface CacheAwareConfig {
   readonly provider: 'anthropic' | 'openai' | 'generic';
@@ -19,8 +19,8 @@ const DEFAULT_CACHE_CONFIG: CacheAwareConfig = {
 /**
  * Calculates estimated token count for a context item.
  */
-function estimateItemTokens(item: ContextItem, tokenizer: TokenizerAdapter = new EnhancedHeuristicTokenizer()): number {
-  return tokenizer.countTokens(item.content);
+function estimateItemTokens(item: ContextItem, tokenizer: TokenizerAdapter = DEFAULT_TOKENIZER): number {
+  return estimateTokens(item.content, tokenizer);
 }
 
 /**
@@ -32,7 +32,7 @@ export function applyCacheAwarePrefixLocking(
   scores: TopologyScoreMap,
   budget: OptimizationBudget,
   config?: Partial<CacheAwareConfig>,
-  tokenizer: TokenizerAdapter = new EnhancedHeuristicTokenizer(),
+  tokenizer: TokenizerAdapter = DEFAULT_TOKENIZER,
 ): ReadonlyArray<KnapsackItem> {
   const mergedConfig: CacheAwareConfig = {
     ...DEFAULT_CACHE_CONFIG,
@@ -89,7 +89,7 @@ export function getCachePinnedItemIds(
   scores: TopologyScoreMap,
   budget: OptimizationBudget,
   config?: Partial<CacheAwareConfig>,
-  tokenizer: TokenizerAdapter = new EnhancedHeuristicTokenizer(),
+  tokenizer: TokenizerAdapter = DEFAULT_TOKENIZER,
 ): ReadonlySet<string> {
   const knapsackItems = applyCacheAwarePrefixLocking(items, scores, budget, config, tokenizer);
   const pinnedIds = new Set<string>();

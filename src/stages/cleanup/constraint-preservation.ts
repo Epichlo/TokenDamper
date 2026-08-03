@@ -1,6 +1,7 @@
 import type { ContextBundle, ContextItem, OptimizationBudget, StageResult } from '../../core/model/types';
 import { createBundleStatistics, createContextItem, createStageResult, freeze, hashContent } from '../../core/model/constructors';
 import { extractImperativeDirectives } from '../../core/constraints/directives';
+import { estimateBundleTokens } from '../../core/hashing/tokenizer';
 
 /**
  * Extracts constraint directive sentences or clauses containing imperative keywords.
@@ -100,7 +101,7 @@ export function runConstraintPreservationStage(
   });
 
   const rawCombined = newItems.map((i) => i.content).join('\n');
-  const tokenEstimate = Math.max(1, Math.ceil(rawCombined.length / 4));
+  const tokenEstimate = estimateBundleTokens(newItems);
 
   const newBundle: ContextBundle = freeze({
     id: bundleHash,

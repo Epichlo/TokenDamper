@@ -2,7 +2,7 @@ import type { ContextBundle, ContextItem, OptimizationBudget, StageResult } from
 import { createBundleStatistics, createStageResult, freeze, hashContent } from '../../core/model/constructors';
 import { elideItem, type ElisionSkipReason } from '../../core/elision';
 import { TokenHasher } from '../../core/hashing/token-hasher';
-import EnhancedHeuristicTokenizer, { type TokenizerAdapter } from '../../core/hashing/tokenizer';
+import { DEFAULT_TOKENIZER, estimateBundleTokens, type TokenizerAdapter } from '../../core/hashing/tokenizer';
 
 export interface TokenHashingStageOptions {
   readonly tokenHasher?: TokenHasher;
@@ -22,7 +22,7 @@ export function runTokenHashingStage(
   const stageId = 'compression:token-hashing';
   const hasher = options?.tokenHasher ?? new TokenHasher();
   const minContentLength = options?.minContentLength ?? 40;
-  const tokenizer = options?.tokenizer ?? new EnhancedHeuristicTokenizer();
+  const tokenizer = options?.tokenizer ?? DEFAULT_TOKENIZER;
 
   const preserveKinds = new Set(budget.preserveKinds);
   let changed = false;
@@ -121,7 +121,7 @@ export function runTokenHashingStage(
   });
 
   const rawCombined = newItems.map((i) => i.content).join('\n');
-  const tokenEstimate = Math.max(1, tokenizer.countTokens(rawCombined));
+  const tokenEstimate = estimateBundleTokens(newItems, tokenizer);
 
   const newBundle: ContextBundle = freeze({
     id: bundleHash,

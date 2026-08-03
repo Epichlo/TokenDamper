@@ -2,6 +2,7 @@ import type { ContextBundle, ContextItem, OptimizationBudget, StageResult } from
 import { createBundleStatistics, createStageResult, freeze, hashContent } from '../../core/model/constructors';
 import { computeLineDiff } from '../../core/utils/myers-diff';
 import { elideItem, type ElisionSkipReason } from '../../core/elision';
+import { estimateBundleTokens } from '../../core/hashing/tokenizer';
 
 export interface DeltaCompressionOptions {
   readonly previousItems?: ReadonlyArray<ContextItem>;
@@ -270,7 +271,7 @@ export function runDeltaCompressionStage(
   });
 
   const rawCombined = newItems.map((i) => i.content).join('\n');
-  const tokenEstimate = Math.max(1, Math.ceil(rawCombined.length / 4));
+  const tokenEstimate = estimateBundleTokens(newItems);
 
   const newBundle: ContextBundle = freeze({
     id: bundleHash,
@@ -286,7 +287,10 @@ export function runDeltaCompressionStage(
     contentHash: bundleHash,
   });
 
-  const tokenEstimateSaved = Math.max(0, Math.ceil(bytesSaved / 4));
+  // Derived from the two bundle estimates rather than from `ceil(bytesSaved / 4)`, so the
+  // saving is expressed in the same unit as the numbers it is subtracted from. The byte
+  // form was a third estimator and could disagree in sign with the bundle totals.
+  const tokenEstimateSaved = Math.max(0, bundle.summary.tokenEstimate - tokenEstimate);
 
   return createStageResult({
     stageId,

@@ -628,3 +628,86 @@ Revisit when `extractMarkers` gains content-derived structural markers for code,
 per-language structural signal replaces the current markdown-oriented marker set. At that
 point `R_struct` becomes load-bearing and the weights are worth re-deriving from
 measurement rather than inherited from `milestone_7_architecture_spec.md`.
+
+---
+
+## 19. One Token Estimator, Chosen for the Seam and Not for Accuracy
+
+### Decision
+
+Every site that estimates tokens routes through `estimateTokens` /
+`estimateBundleTokens` in `src/core/hashing/tokenizer.ts`. `EnhancedHeuristicTokenizer`
+remains the default via `DEFAULT_TOKENIZER`. The inline `Math.ceil(len / 4)` form is gone
+from the codebase; `countTokens` is now called from exactly one place.
+
+The default is **not** chosen because it is the more accurate estimator. Measured, it is
+the less accurate one. It is chosen because it is the extension point.
+
+### Context
+
+Two independent estimators coexisted. `createContextBundle` measured the input side with
+`EnhancedHeuristicTokenizer`; the trace, the engine's rehydration path, the Gateway's
+bundle constructors and three of the five stages measured the output side with
+`Math.ceil(len / 4)`. Every reduction ratio in the product compared one against the other.
+
+The heuristic runs 11–22% above `len / 4` on the project's corpus, so **byte-identical
+output registered as an 11–22% saving**. The benchmark published it as
+`avgReduction: 7.82%` while every one of the ten fixtures emitted its input verbatim. The
+MCP adapter's `reductionRatio` divides `trace.tokenAfter` by `trace.tokenBefore` — opposite
+sides of the same seam — so it reported a saving on pure fallbacks too, where the emitted
+text is `request.rawInput` unmodified.
+
+Two smaller variants of the same fault were folded in: `session-dedup` and
+`delta-compression` reported `tokenEstimateSaved` as `ceil(bytesSaved / 4)`, a third unit
+that could disagree in sign with the bundle totals it sat beside; and the Gateway measured
+its input bundle as `ceil(statistics.totalCharacters / 4)`, which omits the N−1 newlines
+the bundle render inserts, so its input and output sides counted different strings.
+
+### Alternatives Considered
+
+- **Standardize on `ceil(len / 4)`.** Measured against `cl100k_base` over the ten bench
+  fixtures plus the four Gateway payloads, it is the *more* accurate of the two — mean
+  absolute error 17% against the heuristic's 24%, max 44% against 56%. Rejected anyway.
+  `TokenizerAdapter` is the declared plug point for a real BPE tokenizer, and
+  `createTiktokenAdapter` already implements it; standardizing on inline arithmetic would
+  mean the roadmap's pluggable-tokenizer work has to re-introduce a seam at nine sites.
+  It also breaks the planner: `cache-aware.ts` derives knapsack weights and 1,024-token
+  cache-block boundaries from the adapter, and `validation/index.ts` compares
+  `summary.tokenEstimate` against `budget.maxInputTokens`. Splitting those units would put
+  budget enforcement and budget selection on different scales — the same mismatch,
+  relocated.
+- **Switch the default to a naive char adapter behind the same interface.** Keeps the seam
+  and takes the accuracy win. Rejected *for this change only*: it moves every published
+  number at the same moment as the unification, and it silently redefines what a user's
+  existing `maxInputTokens` means. It is a defensible follow-up, made in one place, on its
+  own evidence.
+
+### Rationale
+
+A reduction ratio is a comparison, and a comparison is only as sound as the agreement
+between its two sides. Its correctness does not depend on either estimator being accurate —
+it depends on both being *the same*. Accuracy and unity are separable properties, and only
+one of them can produce a number that claims a saving where no bytes were saved.
+
+This was the sixth instance of the project's recurring pattern (`CLAUDE.md` invariant 10)
+and the first where the vacuous value reported **success** rather than a passed check. A
+fabricated 7.82% is worse than a fabricated green check, because nobody investigates a
+number that flatters them.
+
+### Consequences
+
+- **`avgReduction` on the bundled bench corpus is 0.00%, not 7.82%.** That is the true
+  figure: all ten fixtures emit byte-identical output. `fallbackRate` (0.40) and
+  `totalValidationIssues` (4) are unchanged — those were never computed across the seam.
+- Absolute token counts on the Gateway rise by roughly the heuristic's margin over
+  `len / 4` (measured: `rawTokens` 8,470 → 10,059 on a 36 KB payload). Its *ratio* barely
+  moves (49.79% → 49.82% on within-payload dedup) because both of its sides already used
+  the same estimator. The Gateway results recorded elsewhere in this repo were derived from
+  HTTP body byte lengths, not from these counters, and are unaffected.
+- The published accuracy gap is a real open item. `EnhancedHeuristicTokenizer` is named as
+  though it improves on `len / 4`; on this corpus it does not. Recalibrating its
+  coefficients, or landing `createTiktokenAdapter` against a real encoder, is now a
+  one-line change to `DEFAULT_TOKENIZER`.
+- `test/unit/token-estimator-unity.test.ts` pins the property: byte-identical output must
+  measure as exactly 0% reduction, on the engine path, on the fallback path, and for every
+  stage in the catalog.

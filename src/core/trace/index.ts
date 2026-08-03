@@ -7,6 +7,7 @@ import type {
 } from '../model';
 import { createOptimizationTrace } from '../model';
 import type { FallbackOutcome } from '../fallback';
+import { estimateTokens } from '../hashing/tokenizer';
 
 /**
  * Builds the lightweight execution trace for the final engine result.
@@ -34,6 +35,11 @@ export function buildTrace(
     planMode: plan.mode,
     stageCount: stageTraces.length,
     stageTraces,
+    // `tokenBefore` is the bundle's own estimate and `tokenAfter` re-measures the emitted
+    // text, so the two MUST come from the same estimator — `adapters/mcp/tools.ts` divides
+    // one by the other to report `reductionRatio`. When `tokenAfter` was an inline
+    // `ceil(len / 4)` while bundles used the tokenizer, MCP reported a saving on every
+    // request including pure fallbacks, where the emitted text is the raw input verbatim.
     inputTokenEstimate: request.bundle.summary.tokenEstimate,
     outputTokenEstimate: estimateTokens(finalOutput),
     tokenBefore: request.bundle.summary.tokenEstimate,
@@ -46,12 +52,4 @@ export function buildTrace(
       ? { driftScore: metrics?.driftScore ?? validation.driftReport?.driftScore }
       : {}),
   });
-}
-
-function estimateTokens(text: string): number {
-  if (text.length === 0) {
-    return 0;
-  }
-
-  return Math.max(1, Math.ceil(text.length / 4));
 }

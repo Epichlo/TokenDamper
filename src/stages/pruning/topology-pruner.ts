@@ -5,7 +5,7 @@ import { buildDependencyGraph } from '../../core/topology/dependency-graph';
 import { scoreBundleTopology } from '../../core/topology/topology-scorer';
 import { applyCacheAwarePrefixLocking } from '../../core/planner/cache-aware';
 import { solve01Knapsack } from '../../core/planner/knapsack';
-import EnhancedHeuristicTokenizer, { type TokenizerAdapter } from '../../core/hashing/tokenizer';
+import { DEFAULT_TOKENIZER, estimateBundleTokens, type TokenizerAdapter } from '../../core/hashing/tokenizer';
 
 /**
  * Built-in stage: `pruning:topology-pruner` (v0.1.0).
@@ -16,7 +16,7 @@ export function runTopologyPrunerStage(
   bundle: ContextBundle,
   budget: OptimizationBudget,
   workspaceRoot?: string,
-  tokenizer: TokenizerAdapter = new EnhancedHeuristicTokenizer()
+  tokenizer: TokenizerAdapter = DEFAULT_TOKENIZER
 ): StageResult {
   const stageId = 'pruning:topology-pruner';
 
@@ -97,7 +97,7 @@ export function runTopologyPrunerStage(
     });
 
     const rawCombined = selectedItems.map((i) => i.content).join('\n');
-    const tokenEstimate = Math.max(1, tokenizer.countTokens(rawCombined));
+    const tokenEstimate = estimateBundleTokens(selectedItems, tokenizer);
     const tokensSaved = Math.max(0, bundle.summary.tokenEstimate - tokenEstimate);
 
     const newBundle: ContextBundle = freeze({

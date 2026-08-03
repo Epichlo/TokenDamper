@@ -9,6 +9,56 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or released; run
 `git log v1.1.0..HEAD` to confirm current scope before relying on this list.
 
+### Fixed
+- **One Token Estimator (DECISIONS §19)**: every reduction figure the CLI, MCP and bench
+  paths report was computed across a seam between two independent token estimators —
+  `EnhancedHeuristicTokenizer` on a bundle's input side, inline `Math.ceil(len / 4)` on
+  every output side. The heuristic runs 11–22% above `len / 4` on this corpus, so
+  **byte-identical output registered as an 11–22% saving**. All measurement now routes
+  through `estimateTokens` / `estimateBundleTokens` in `src/core/hashing/tokenizer.ts`;
+  `countTokens` is called from exactly one place.
+
+  Eleven sites changed: `core/model/constructors.ts` (×2 bundle constructors),
+  `core/trace/index.ts`, `core/engine/index.ts` (`attemptAutomatedRehydration`),
+  `core/planner/cache-aware.ts`, `gateway/proxy.ts` (×2), and the four stages that build a
+  bundle. `session-dedup` and `delta-compression` also reported `tokenEstimateSaved` as
+  `ceil(bytesSaved / 4)` — a third unit — now derived from the two bundle estimates.
+
+  **The bundled bench corpus reduces by 0.00%, not 7.82%.** All ten fixtures emit
+  byte-identical output; the 7.82% was the estimator gap. Measured before → after, at
+  `targetReductionRatio: 0.30`:
+
+  | Fixture | In bytes | Out bytes | Identical | Reported before | Reported after |
+  |---|---|---|---|---|---|
+  | `HumanEval/0` | 348 | 348 | yes | 17.92% | **0.00%** |
+  | `HumanEval/1` | 504 | 504 | yes | 13.70% | **0.00%** |
+  | `HumanEval/2` | 328 | 328 | yes | 9.89% | **0.00%** |
+  | `HumanEval/3` | 446 | 446 | yes | 11.11% | **0.00%** |
+  | `HumanEval/4` | 386 | 386 | yes | 11.01% | **0.00%** |
+  | `CodeXGLUE/py/101` | 192 | 192 | yes | 0.00% | **0.00%** |
+  | `CodeXGLUE/py/102` | 164 | 164 | yes | 14.58% | **0.00%** |
+  | `CodeXGLUE/ts/201` | 130 | 130 | yes | 0.00% | **0.00%** |
+  | `CodeXGLUE/ts/202` | 49 | 49 | yes | 0.00% | **0.00%** |
+  | `CodeXGLUE/js/301` | 112 | 112 | yes | 0.00% | **0.00%** |
+
+  `avgReduction` 7.8210% → **0.0000%**. `fallbackRate` (0.40) and `totalValidationIssues`
+  (4) are unchanged — neither was computed across the seam. The four rows already reading
+  0.00% are the fallbacks, where the *bench* ratio compared two tokenizer-derived numbers;
+  their `trace.tokenAfter` was still inflated, so MCP reported a saving on them too
+  (`CodeXGLUE/py/101`: 53 → 48, a phantom 9.4% on a pure fallback). That is now 53 → 53.
+
+  **Gateway results in this repo are unaffected and should not be re-corrected.** The
+  figures recorded in `docs/phase-1-stabilization-summary.md` §9 and `NOTES-FOR-DOCS.md`
+  (66%, 98.59%, 0%) were derived from HTTP body byte lengths, not from these counters. The
+  Gateway's internal `rawTokens`/`optimizedTokens` do change unit — measured 8,470 → 10,059
+  on a 36 KB payload — but its `dedupRatio` moves only 49.79% → 49.82%, because both of its
+  sides already used the same estimator.
+
+- **Regression guard**: `test/unit/token-estimator-unity.test.ts` pins byte-identical
+  input and output to exactly 0% reduction on the engine path, on the fallback path, and
+  for every stage in the catalog. Verified to fail against the pre-fix source (`expected 87
+  to be 106` on `HumanEval/0`), not merely to pass against the fixed one.
+
 ### Changed
 - **Bench Evaluator Classifies Instead of Hardcoding (Issue 2, follow-up)**:
   `src/bench/evaluator.ts` hardcoded `contentType: 'code'` on the two items it builds for

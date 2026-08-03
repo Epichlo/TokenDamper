@@ -15,6 +15,7 @@ import { buildTrace } from '../trace';
 import { validate } from '../validation';
 import type { SessionDedupContext } from '../../stages/cleanup/session-dedup';
 import type { TokenHasher } from '../hashing/token-hasher';
+import { estimateBundleTokens } from '../hashing/tokenizer';
 import type { ConfidenceLedger } from '../ledger/confidence-ledger';
 import { DebtTracker, type DebtTrackerOptions } from '../ledger/debt-tracker';
 import type { DeltaCompressionOptions } from '../../stages/compression/delta-compression';
@@ -395,7 +396,7 @@ function attemptAutomatedRehydration(
   });
 
   const rawCombined = newItems.map((i) => i.content).join('\n');
-  const tokenEstimate = Math.max(1, Math.ceil(rawCombined.length / 4));
+  const tokenEstimate = estimateBundleTokens(newItems);
 
   return freeze({
     id: bundleHash,

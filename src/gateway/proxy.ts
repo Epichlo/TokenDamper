@@ -17,6 +17,7 @@ import type {
   ResolvedConfig,
 } from '../core/model/types';
 import { optimize } from '../core/engine';
+import { estimateBundleTokens } from '../core/hashing/tokenizer';
 import { ConfidenceLedger } from '../core/ledger/confidence-ledger';
 import { TOKENDAMPER_VERSION } from '../version';
 import { GatewaySessionStore } from './session-store';
@@ -502,7 +503,10 @@ function processOpenAiRequest(
     items: freeze(items),
     summary: freeze({
       itemCount: items.length,
-      tokenEstimate: Math.ceil(statistics.totalCharacters / 4),
+      // `estimateBundleTokens`, not `ceil(totalCharacters / 4)`. The latter omits the
+      // N-1 newlines the bundle render inserts between items, so the input side counted
+      // a different string than every stage's output side measured.
+      tokenEstimate: estimateBundleTokens(items),
       preview: rawBody.slice(0, 80),
     }),
     statistics: freeze(statistics),
@@ -624,7 +628,10 @@ function processAnthropicRequest(
     items: freeze(items),
     summary: freeze({
       itemCount: items.length,
-      tokenEstimate: Math.ceil(statistics.totalCharacters / 4),
+      // `estimateBundleTokens`, not `ceil(totalCharacters / 4)`. The latter omits the
+      // N-1 newlines the bundle render inserts between items, so the input side counted
+      // a different string than every stage's output side measured.
+      tokenEstimate: estimateBundleTokens(items),
       preview: rawBody.slice(0, 80),
     }),
     statistics: freeze(statistics),
