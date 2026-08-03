@@ -263,6 +263,14 @@ Commit B narrowed `recoverable: true` to elisions whose referent demonstrably su
 the same outbound payload. Measured through the real Gateway proxy path, two turns per
 session, `--mock-upstream`:
 
+> **These figures are unaffected by the token-estimator unification (`1b1e999`,
+> DECISIONS.md §19) and must not be re-corrected.** They are derived from HTTP body byte
+> lengths on the Gateway path, not from `summary.tokenEstimate`. The Gateway's internal
+> counters do change unit — `rawTokens` 8,470 → 10,059 on a 36 KB payload — but its
+> `dedupRatio` moves only 49.79% → 49.82%, because both of its sides already used the same
+> estimator. The figures corrected by that commit are the CLI, MCP and bench ones; see
+> `NOTES-FOR-DOCS.md` for the full inventory of which records are valid and which are not.
+
 **Cross-turn dedup — sole copy, no surviving referent (what the Gateway did before):**
 
 | Payload | Saved | Fallback |

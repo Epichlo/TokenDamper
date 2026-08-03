@@ -22,7 +22,10 @@
 > **Corrected 2026-08-03 — the valve is now enabled and §10 supersedes the fallback rate:
 > it drops to 0.40.** §10 also documents what enabling it exposed: the benchmark's
 > `avgReduction` figure is fabricated by an estimator mismatch, and actual savings are zero
-> either way. **Read §10 before citing any benchmark number from this document.**
+> either way. **Corrected again 2026-08-03 — the estimator is now unified (`1b1e999`,
+> DECISIONS.md §19) and §12 supersedes every reduction figure in §10: they are all 0.00%,
+> which is what the tooling now reports. Read §10 and §12 before citing any benchmark
+> number from this document.**
 >
 > The per-fixture drift *mechanics* in §2–§6 are unaffected by it — they are computed from
 > `DriftTracker` directly on before/after bundles, not from the benchmark's fallback
@@ -366,3 +369,67 @@ work. Phase 1c should account for it rather than build a second mechanism beside
 - **It does not propose the granularity fix.** Sub-item hashing granularity is the
   indicated direction, but the design is separate and unwritten.
 - **It does not re-validate the benchmark fallback rate.** See §8.
+
+---
+
+## 12. Addendum (2026-08-03) — the estimator unified; the real reduction on this corpus is zero
+
+§10 identified the `avgReduction: 7.8217%` as fabricated by an estimator mismatch and
+declined to cite it. The mismatch is now fixed (`1b1e999`, DECISIONS.md §19): all
+measurement routes through `estimateTokens` / `estimateBundleTokens` in
+`src/core/hashing/tokenizer.ts`, and `countTokens` is called from exactly one place.
+
+**Every per-fixture figure in the §10 table is 0.00%.** Re-measured on the same ten
+fixtures at `targetReductionRatio: 0.30`:
+
+| Fixture | in bytes | out bytes | identical | §10 reported | now |
+|---|---|---|---|---|---|
+| `HumanEval/0` | 348 | 348 | **yes** | 17.92% | **0.00%** |
+| `HumanEval/1` | 504 | 504 | **yes** | 13.70% | **0.00%** |
+| `HumanEval/2` | 328 | 328 | **yes** | 9.89% | **0.00%** |
+| `HumanEval/3` | 446 | 446 | **yes** | 11.11% | **0.00%** |
+| `HumanEval/4` | 386 | 386 | **yes** | 11.01% | **0.00%** |
+| `CodeXGLUE/py/101` | 192 | 192 | **yes** | 0.00% | **0.00%** |
+| `CodeXGLUE/py/102` | 164 | 164 | **yes** | 14.58% | **0.00%** |
+| `CodeXGLUE/ts/201` | 130 | 130 | **yes** | 0.00% | **0.00%** |
+| `CodeXGLUE/ts/202` | 49 | 49 | **yes** | 0.00% | **0.00%** |
+| `CodeXGLUE/js/301` | 112 | 112 | **yes** | 0.00% | **0.00%** |
+
+| Metric | §10 (valve on) | now |
+|---|---|---|
+| `avgReduction` | 7.8217% (fabricated) | **0.0000%** |
+| `fallbackRate` | 0.40 | **0.40** — unchanged |
+| `totalValidationIssues` | 4 | **4** — unchanged |
+
+The two unchanged metrics are the point: nothing about the engine's *behavior* moved. Only
+the arithmetic used to describe it did. §10's "actual token savings on this corpus remain
+exactly zero" is now what the tooling reports rather than something a reader has to know.
+
+**§10's four already-zero rows were not clean either.** Those are the fallbacks, where the
+*benchmark's* ratio compared two tokenizer-derived bundle summaries and correctly read 0%.
+Their `trace.tokenAfter` was still the naive count, so the MCP adapter — which divides
+`trace.tokenAfter` by `trace.tokenBefore` — reported a saving on them anyway.
+`CodeXGLUE/py/101` read 53 → 48, a phantom 9.4% **on a pure fallback**, where the emitted
+text is `request.rawInput` verbatim. It is now 53 → 53.
+
+**Accuracy is a separate, still-open question.** Scored against real `cl100k_base` over
+these ten fixtures plus the four `tokendamper-benchmark/test_data` payloads,
+`EnhancedHeuristicTokenizer` is the **less** accurate of the two estimators that were in
+use — mean absolute error 24% against `ceil(len / 4)`'s 17%, max 56% against 44%. It was
+adopted for the seam, not the numbers (DECISIONS.md §19). Recalibrating it, or landing
+`createTiktokenAdapter` against a real encoder, is now a one-line change to
+`DEFAULT_TOKENIZER`.
+
+**A weak test surfaced while checking this, not fixed here.** `test/integration/bench.test.ts`
+Test 2 asserts `avgReductionRatio >= 0.40` and passes — genuinely, in bytes: 151 → 77 and
+153 → 77 on two synthetic prose fixtures. But the 77 bytes are a bare `<BLOCK_HASH:…>`
+placeholder, and it passes the drift gate only because prose with no extractable symbols
+takes `R_AST`'s `symbolsBefore.size === 0` default of 1.0 — the "passes by having nothing to
+measure" case §6 already flagged. The threshold is being met by total content destruction on
+inputs the metric cannot grade. Not an instance of the estimator bug; recorded so it is not
+mistaken for evidence that the pipeline reduces anything.
+
+**§5 and §6 are unaffected**, for the same reason §10 gave: both are computed from
+`DriftTracker` on before/after bundles and never touch a token estimate. The four remaining
+fallbacks are still drift at exactly `0.60` plus the unclosed-bracket AST failure on
+`CodeXGLUE/ts/202`.

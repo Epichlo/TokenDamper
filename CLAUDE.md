@@ -144,11 +144,29 @@ Full detail in `tokendamper-headroom-known-issues.md`; proposed fixes in
   - This did **not** make `token-hashing` safe to run on the Gateway. It is lossy, sets no
     `recoverable` flag, and measures `S_k = 0.60` on JSON — so it now fails the drift gate
     instead of the AST gate. Invariant 8 still stands.
-- **Issue 5:** on fallback, `session.json` emits **-1.39%** — output is *larger* than
-  input. Fallback re-renders `currentBundle` instead of echoing raw input bytes.
+- **Issue 5 — the premise is wrong; Phase 1b needs re-deriving.** The claim was: *"on
+  fallback, `session.json` emits -1.39% — output is larger than input, because fallback
+  re-renders `currentBundle` instead of echoing raw input bytes."* Measured 2026-08-03,
+  both halves fail.
+  - `src/core/fallback/index.ts` returns `output: request.rawInput` when
+    `shouldFallback` — fallback **already** echoes raw bytes. All four
+    `tokendamper-benchmark/test_data` payloads fall back through the CLI and emit
+    byte-identical output. It is the **success** branch that re-renders
+    (`items.join('\n')`).
+  - The **-1.39%** is a benchmark-harness artifact. `run_benchmark.py:75-77` special-cases
+    session payloads and sets `orig_tokens = count_tokens(json.dumps(messages))`, a
+    re-serialization that drops the file's pretty-printing (15,785 chars) while TokenDamper
+    is handed and echoes back the raw file (16,131 chars). Reproduces to two decimals.
+  A case for splitting fallback may still exist — the success path's newline join is lossy
+  for multi-item bundles, which is why the Gateway must map `finalBundle` positionally
+  (invariant 9) — but it is a **different defect with different evidence**. Do not scope
+  Phase 1b from the -1.39%. See `NOTES-FOR-DOCS.md`.
 - **Issue 3 / Phase 1d — investigated 2026-08-03, threshold unchanged, remedy undesigned.**
-  Full record: `docs/phase-1d-drift-investigation.md`. **The threshold is not the defect;
-  do not tune it.**
+  Full record: `docs/phase-1d-drift-investigation.md`; read §10 and §12 before citing any
+  benchmark number from it. **The threshold is not the defect; do not tune it.**
+  - Bench reality at `targetReductionRatio: 0.30`: `avgReduction` **0.00%**,
+    `fallbackRate` 0.40, all ten fixtures byte-identical. The 7.82% that briefly appeared
+    was the estimator mismatch, not a saving (§12, DECISIONS §19).
   - `S_k = 0.60` is a **formula constant** — `w_AST` exactly — produced whenever
     `R_AST = 0` and `R_struct = 1`. It is not a measurement of how much was lost, and it is
     the **ceiling** for code, not a midpoint.
@@ -191,8 +209,10 @@ The agreed direction is three scoped changes (no rewrite):
    `NOTES-FOR-DOCS.md` and `docs/phase-1-stabilization-summary.md` §8.
 3. Split fallback into **raw passthrough** (byte-identical echo, bypasses the bundle
    render model) vs. **bundle rendering** (success path only). Make byte-identity
-   structural, not test-enforced. (**Phase 1b / Issue 5, not started.** The Gateway
-   sidesteps it structurally via `finalBundle`; CLI and MCP still re-render.)
+   structural, not test-enforced. (**Phase 1b, not started — and re-scope it before
+   starting.** The fallback branch already returns `request.rawInput`; the lossy join is on
+   the **success** branch. The Issue 5 figure this was scoped from is a harness artifact.
+   See the Issue 5 entry above and `NOTES-FOR-DOCS.md`.)
 
 Do this before roadmap feature work. `tokendamper-roadmap-v1.1-v2.0.md` schedules BM25
 scoring, MMR, AST folding and Prometheus metrics on top of a pipeline that currently
@@ -231,9 +251,20 @@ scoring, MMR, AST folding and Prometheus metrics on top of a pipeline that curre
   the baseline. Reconcile before cutting a release; don't assume either is right.
 - `configSchemaVersion` **already exists** in `src/config/types.ts`, despite the roadmap
   listing it as a v1.1.0 item to add.
-- Token counting is currently `content.length / 4`. It is an estimate, not exact. Anything
-  needing precise token boundaries (e.g. `cache_control` placement) cannot be exact until
-  a real tokenizer adapter lands.
+- **Token counting goes through exactly one place: `estimateTokens` /
+  `estimateBundleTokens` in `src/core/hashing/tokenizer.ts`.** `countTokens` is called from
+  nowhere else, and there is no inline `ceil(len / 4)` left. Do not add a second estimator —
+  until `1b1e999` there were two (tokenizer on a bundle's input side, `ceil(len / 4)` on
+  every output side) and every reduction ratio compared one against the other, so
+  byte-identical output reported an 11–22% saving. DECISIONS.md §19;
+  `test/unit/token-estimator-unity.test.ts` guards it.
+- The default estimator is `EnhancedHeuristicTokenizer`, and it is **not** the more accurate
+  one. Scored against real `cl100k_base`, it has 24% mean absolute error against
+  `ceil(len / 4)`'s 17%. It is the default because `TokenizerAdapter` is the seam a real BPE
+  tokenizer plugs into and the planner already denominates cache blocks in adapter units.
+  Anything needing exact token boundaries (e.g. `cache_control` placement) still cannot be
+  exact until `createTiktokenAdapter` is wired to a real encoder — which is now a one-line
+  change to `DEFAULT_TOKENIZER`.
 - Benchmark latency numbers are **not** apples-to-apples: TokenDamper is timed through a
   Node process spawn via `subprocess.run()`, Headroom via an in-process Python call.
 - Headroom's `target_ratio` is a soft hint, not an enforced budget — don't compare
