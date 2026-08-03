@@ -172,3 +172,142 @@ describe('runTokenHashingStage', () => {
     expect(result.bundle.items[0]?.content).toBe(rawContent);
   });
 });
+
+describe('runTokenHashingStage — sub-item granularity', () => {
+  const bundleOf = (item: ReturnType<typeof createContextItem>): ContextBundle =>
+    freeze({
+      id: 'b',
+      bundleId: 'b',
+      source: 'file',
+      items: freeze([item]),
+      summary: freeze({ itemCount: 1, tokenEstimate: 100, preview: item.content.slice(0, 20) }),
+      statistics: freeze({
+        itemCount: 1,
+        contentTypeCounts: freeze({ text: 0, markdown: 0, code: 1, html: 0, json: 0, yaml: 0, logs: 0, unknown: 0 }),
+        kindCounts: freeze({ prompt: 0, file: 1, diff: 0, conversation: 0, note: 0 }),
+        totalCharacters: item.content.length,
+      }),
+      contentHash: 'b',
+    });
+
+  const filler = (n: number) => `  const filler${n} = "${'x'.repeat(60)}";`;
+  const source = [
+    'import { helper } from "./helper";',
+    'export function alpha(x: number): number {',
+    filler(1),
+    filler(2),
+    '  return helper(x);',
+    '}',
+    'export class Widget {',
+    '  render(): string {',
+    filler(3),
+    filler(4),
+    '    return "widget";',
+    '  }',
+    '}',
+  ].join('\n');
+
+  const budget = createOptimizationBudget({ riskTolerance: 'medium' });
+
+  it('elides function bodies and keeps the declarations that carry the symbols', () => {
+    const item = createContextItem({
+      id: 'f1',
+      kind: 'file',
+      contentType: 'code',
+      content: source,
+      origin: 'src/a.ts',
+      path: 'src/a.ts',
+    });
+    const hasher = new TokenHasher();
+    const result = runTokenHashingStage(bundleOf(item), budget, { tokenHasher: hasher });
+
+    expect(result.changed).toBe(true);
+    expect(result.metrics.regionsHashed).toBe(2);
+
+    const content = result.bundle.items[0]!.content;
+    // The whole-item path would have replaced all of this with one 77-byte placeholder.
+    expect(content).toContain('import { helper } from "./helper";');
+    expect(content).toContain('export function alpha(x: number): number {');
+    expect(content).toContain('export class Widget {');
+    expect(content).toContain('render(): string {');
+    expect(content).not.toContain('return helper(x);');
+    expect(content).not.toContain('return "widget";');
+  });
+
+  it('round-trips byte-identically through the recovery valve', () => {
+    const item = createContextItem({
+      id: 'f2',
+      kind: 'file',
+      contentType: 'code',
+      content: source,
+      origin: 'src/a.ts',
+      path: 'src/a.ts',
+    });
+    const hasher = new TokenHasher();
+    const result = runTokenHashingStage(bundleOf(item), budget, { tokenHasher: hasher });
+
+    expect(hasher.rehydrateText(result.bundle.items[0]!.content)).toBe(source);
+  });
+
+  it('is deterministic — same input, same bytes out', () => {
+    const build = () =>
+      createContextItem({
+        id: 'f3',
+        kind: 'file',
+        contentType: 'code',
+        content: source,
+        origin: 'src/a.ts',
+        path: 'src/a.ts',
+      });
+    const one = runTokenHashingStage(bundleOf(build()), budget, { tokenHasher: new TokenHasher() });
+    const two = runTokenHashingStage(bundleOf(build()), budget, { tokenHasher: new TokenHasher() });
+
+    expect(two.bundle.items[0]!.content).toBe(one.bundle.items[0]!.content);
+    expect(two.bundle.contentHash).toBe(one.bundle.contentHash);
+  });
+
+  it('falls back to whole-item hashing where no region can be selected', () => {
+    // Prose has no function bodies; behaviour here must be exactly what it was before.
+    const prose = 'Detailed multi-line file content that is sufficiently long for token hashing to save space';
+    const item = createContextItem({
+      id: 'f4',
+      kind: 'file',
+      contentType: 'code',
+      content: prose,
+      origin: 'src/main.ts',
+      path: 'src/main.ts',
+    });
+    const result = runTokenHashingStage(bundleOf(item), budget, { tokenHasher: new TokenHasher() });
+
+    expect(result.changed).toBe(true);
+    expect(result.metrics.regionsHashed).toBe(0);
+    expect(result.bundle.items[0]!.content).toMatch(/^<BLOCK_HASH:[a-f0-9]{64}>$/);
+  });
+
+  it('refuses a docstring-only body rather than deleting the specification', () => {
+    // The Phase 1d precondition. Whole-item hashing is still attempted and still refused
+    // by drift downstream; what must not happen is a "successful" 55% reduction here.
+    const docOnly = [
+      'def has_close_elements(numbers, threshold):',
+      '    """ Check if in given list of numbers, any two numbers are closer to each',
+      '    other than the given threshold.',
+      '    >>> has_close_elements([1.0, 2.0, 3.0], 0.5)',
+      '    False',
+      '    """',
+      '',
+    ].join('\n');
+    const item = createContextItem({
+      id: 'f5',
+      kind: 'file',
+      contentType: 'code',
+      content: docOnly,
+      origin: 'src/a.py',
+      path: 'src/a.py',
+    });
+    const result = runTokenHashingStage(bundleOf(item), budget, { tokenHasher: new TokenHasher() });
+
+    expect(result.metrics.regionsHashed).toBe(0);
+    expect(result.bundle.items[0]!.content).not.toContain('""" Check if');
+    expect(result.bundle.items[0]!.content).toMatch(/^<BLOCK_HASH:[a-f0-9]{64}>$/);
+  });
+});
