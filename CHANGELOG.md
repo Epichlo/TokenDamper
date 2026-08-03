@@ -21,9 +21,15 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
   `0.40` gate every time. For code the gate reduces exactly to **`R_AST ≥ 1/3`**.
 
   Measured over 52 real source files through the CLI: **22 reduce with no fallback, mean
-  52.99%**, byte-identical output across fresh processes (6/6), every elision reversible
-  through the existing recovery valve. `codebase.py`: 16,937 → 11,360 bytes, 5,029 → 3,281
-  tokens, **34.76%**, no fallback.
+  52.99%**, byte-identical output across fresh processes (6/6). `codebase.py`:
+  16,937 → 11,360 bytes, 5,029 → 3,281 tokens, **34.76%**, no fallback.
+
+  ~~every elision reversible through the existing recovery valve~~ — **withdrawn.** That
+  sentence read as a property of the CLI run it was attached to, and it is not one. The
+  reversibility measurement injected a `TokenHasher`; the CLI injects none, so the recovery
+  valve returns at its first line (`if (!hasher && !ledger) return undefined`) and the
+  emitted markers resolve to nothing. Measured on `codebase.py` through the real binary: 19
+  placeholders emitted, **0** resolvable. See the `reversible` entry under Fixed.
 
   Remaining fallbacks are the safety net working, not failures: 17 on constraint-directive
   retention (an imperative comment inside an elided body), 11 on drift over `0.40`, 2 on the
@@ -39,6 +45,21 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
   `R_struct` is inert for code. The guard defends that case, **not the class**.
 
 ### Fixed
+- **`compression:token-hashing` no longer fabricates the store that makes it "reversible"**:
+  line 23 was `options?.tokenHasher ?? new TokenHasher()`. That default registered every
+  elided block into a store that was garbage-collected when the stage returned, so on the
+  CLI — which supplies no hasher — the emitted `<BLOCK_HASH:…>` markers referred to content
+  held by nothing. Measured on `codebase.py` through the real binary: 19 placeholders, **0**
+  resolvable by any store in the process or out of it. The engine's own
+  `detectCorruptedPlaceholders` reported clean, because it reads
+  `if (hash && hasher && !hasher.hasHash(hash))` and there is no hasher.
+
+  The hasher is now used only if the caller supplies one. Reversibility is recorded on the
+  item (`metadata.reversible`) and in the stage metrics (`irreversibleElisions`), and stated
+  in the stage notes. Emitted bytes are unchanged and do not depend on whether a hasher was
+  passed. Reversibility on the CLI is not unimplemented but unachievable — a one-shot pipe
+  has nowhere for a store to live — so the marker itself has to carry the information.
+
 - **An unvalidated item no longer reads as a passing item (DECISIONS §23)**: `valid: true`
   meant both "a validator examined this and found no syntax errors" and "no validator covers
   this content type, so nothing was examined". `AstValidatorResult.validated` now separates

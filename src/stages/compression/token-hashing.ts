@@ -5,6 +5,13 @@ import { TokenHasher } from '../../core/hashing/token-hasher';
 import { DEFAULT_TOKENIZER, estimateBundleTokens, type TokenizerAdapter } from '../../core/hashing/tokenizer';
 
 export interface TokenHashingStageOptions {
+  /**
+   * The store that will retain the elided content, supplied by whoever can still reach it
+   * later — an MCP session, a bench run. **Its absence is meaningful**: without it, the
+   * content this stage removes is gone, and the marker must stand on its own.
+   *
+   * Do not default it. See the note on `runTokenHashingStage`.
+   */
   readonly tokenHasher?: TokenHasher;
   readonly minContentLength?: number;
   readonly tokenizer?: TokenizerAdapter;
@@ -12,7 +19,26 @@ export interface TokenHashingStageOptions {
 
 /**
  * Built-in compression stage: `compression:token-hashing`.
- * Converts eligible context items into reversible `<BLOCK_HASH:sha256>` placeholders.
+ *
+ * Replaces content with `<BLOCK_HASH:sha256>` markers — **reversibly only when the caller
+ * supplies a `tokenHasher` that outlives this call.**
+ *
+ * This used to read "converts eligible context items into reversible placeholders", and
+ * line 23 used to be `options?.tokenHasher ?? new TokenHasher()`. That default made the
+ * sentence true of the type and false of the CLI: the fabricated store registered every
+ * elided block and was garbage-collected when the stage returned, so the markers in the
+ * emitted output referred to content held by nothing, anywhere. Measured on `codebase.py`
+ * through the real binary — 19 placeholders emitted, 0 resolvable by any store in the
+ * process or out of it, and the engine's own `detectCorruptedPlaceholders` reported a clean
+ * result because it is written `if (hash && hasher && !hasher.hasHash(hash))` and the CLI
+ * passes no hasher.
+ *
+ * Reversibility on the CLI is not unimplemented, it is unachievable: the CLI is a one-shot
+ * pipe with no session on either end, so there is nowhere for a store to live. The remedy is
+ * not to manufacture one — that produces a mechanism that satisfies the sentence while the
+ * reader is no better off. It is to stop claiming it, record it on the item
+ * (`metadata.reversible`) and in the metrics (`irreversibleElisions`), and make the marker
+ * itself carry what was removed.
  */
 export function runTokenHashingStage(
   bundle: ContextBundle,
@@ -20,7 +46,8 @@ export function runTokenHashingStage(
   options?: TokenHashingStageOptions,
 ): StageResult {
   const stageId = 'compression:token-hashing';
-  const hasher = options?.tokenHasher ?? new TokenHasher();
+  const hasher = options?.tokenHasher;
+  const reversible = hasher !== undefined;
   const minContentLength = options?.minContentLength ?? 40;
   const tokenizer = options?.tokenizer ?? DEFAULT_TOKENIZER;
 
@@ -30,9 +57,23 @@ export function runTokenHashingStage(
   let regionsHashed = 0;
   let itemsSkipped = 0;
   let bytesSaved = 0;
+  let irreversibleElisions = 0;
   const skipReasons: Record<ElisionSkipReason, number> = {
     no_savings: 0,
     post_condition_rejected: 0,
+  };
+
+  /**
+   * Builds the marker for one span and hands the span to the caller's store when there is
+   * one. When there is not, nothing is registered — there is no store to register with, and
+   * writing to a local one would only make the absence harder to see.
+   */
+  const placeholderFor = (text: string, blockType: string): string => {
+    const blockHash = hashContent(text);
+    if (hasher) {
+      hasher.registerBlock(blockHash, text, { bytes: text.length, blockType });
+    }
+    return `<BLOCK_HASH:${blockHash}>`;
   };
 
   const newItems: ContextItem[] = bundle.items.map((item) => {
@@ -72,12 +113,13 @@ export function runTokenHashingStage(
       const regionOutcome = elideRegions({
         item,
         regions,
-        markerFor: (regionText) => hasher.createBlockPlaceholder(regionText, { blockType: item.kind }),
+        markerFor: (regionText) => placeholderFor(regionText, item.kind),
         contentHash: hashContent({ originalHash: item.contentHash, regions: regions.length }),
         metadata: {
           ...item.metadata,
           elided: true,
           tokenHashed: true,
+          reversible,
           originalContentHash: item.contentHash,
           originalBytes: originalLength,
         },
@@ -88,6 +130,9 @@ export function runTokenHashingStage(
         itemsHashed += 1;
         regionsHashed += regions.length;
         bytesSaved += regionOutcome.bytesSaved;
+        if (!reversible) {
+          irreversibleElisions += 1;
+        }
         return regionOutcome.item;
       }
 
@@ -96,10 +141,8 @@ export function runTokenHashingStage(
       return item;
     }
 
-    const placeholder = hasher.createBlockPlaceholder(item.content, { blockType: item.kind });
-
-    const match = /^<BLOCK_HASH:([^>]+)>$/.exec(placeholder);
-    const blockHash: string = match && match[1] ? match[1] : item.contentHash;
+    const blockHash = hashContent(item.content);
+    const placeholder = placeholderFor(item.content, item.kind);
 
     // Rule 6: content-type correctness is enforced by the chokepoint, not here. It renders
     // the placeholder in a syntax valid for this item and refuses to return anything its
@@ -113,6 +156,7 @@ export function runTokenHashingStage(
         ...item.metadata,
         elided: true,
         tokenHashed: true,
+        reversible,
         blockHash,
         originalContentHash: item.contentHash,
         originalBytes: originalLength,
@@ -128,6 +172,9 @@ export function runTokenHashingStage(
     changed = true;
     itemsHashed += 1;
     bytesSaved += outcome.bytesSaved;
+    if (!reversible) {
+      irreversibleElisions += 1;
+    }
 
     return outcome.item;
   });
@@ -145,6 +192,7 @@ export function runTokenHashingStage(
         skippedPostConditionRejected: skipReasons.post_condition_rejected,
         bytesSaved: 0,
         tokenEstimateSaved: 0,
+        irreversibleElisions: 0,
       },
       notes:
         itemsSkipped > 0
@@ -192,7 +240,13 @@ export function runTokenHashingStage(
       skippedPostConditionRejected: skipReasons.post_condition_rejected,
       bytesSaved,
       tokenEstimateSaved,
+      irreversibleElisions,
     },
-    notes: `Successfully token-hashed ${itemsHashed} context item(s) (${regionsHashed} sub-item region(s)); skipped ${itemsSkipped} (${skipReasons.post_condition_rejected} rejected by post-condition, ${skipReasons.no_savings} for no savings).`,
+    notes:
+      `Successfully token-hashed ${itemsHashed} context item(s) (${regionsHashed} sub-item region(s)); ` +
+      `skipped ${itemsSkipped} (${skipReasons.post_condition_rejected} rejected by post-condition, ${skipReasons.no_savings} for no savings).` +
+      (irreversibleElisions > 0
+        ? ` ${irreversibleElisions} elision(s) are irreversible: no token hasher was supplied, so the removed content is not retained anywhere.`
+        : ''),
   });
 }
