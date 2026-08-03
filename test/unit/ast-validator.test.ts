@@ -248,7 +248,13 @@ describe('Orchestrator: validateItemAst & validateBundleAst', () => {
     }
   });
 
-  it('enforces maxTimeMs SLA', () => {
+  it('reports a maxTimeMs breach without changing the syntax verdict', () => {
+    // This test previously asserted `valid: false` and an `AST_SLA_EXCEEDED` issue on a
+    // budget breach. That behaviour was removed deliberately, not relaxed to accommodate a
+    // failure: it let a timing measurement decide a syntax question, which made the verdict
+    // depend on machine load (measured: identical bytes, six fresh processes, verdicts split
+    // valid/INVALID) and fell the engine back on large but perfectly valid files. The budget
+    // is now carried on `slaExceeded`. See `test/unit/ast-sla-determinism.test.ts`.
     const item = createContextItem({
       id: 'item-fast',
       kind: 'file',
@@ -260,9 +266,10 @@ describe('Orchestrator: validateItemAst & validateBundleAst', () => {
       metadata: {},
     });
 
-    // Setting maxTimeMs to 0ms forces SLA failure
+    // Setting maxTimeMs to 0ms forces the budget to be exceeded.
     const result = validateItemAst(item, { maxTimeMs: 0 });
-    expect(result.valid).toBe(false);
-    expect(result.issues.some((i) => i.code === 'AST_SLA_EXCEEDED')).toBe(true);
+    expect(result.slaExceeded).toBe(true);
+    expect(result.valid).toBe(true);
+    expect(result.issues.some((i) => i.code === 'AST_SLA_EXCEEDED')).toBe(false);
   });
 });

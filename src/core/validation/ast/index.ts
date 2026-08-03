@@ -67,7 +67,23 @@ export function selectValidator(item: ContextItem): AstValidator | null {
 }
 
 /**
- * Validates a single ContextItem's syntax using language-specific AST rules while enforcing SLA (<5ms).
+ * Validates a single ContextItem's syntax using language-specific AST rules, and measures
+ * the run against a latency budget (5ms per item by default).
+ *
+ * **The budget is reported, not enforced as a verdict.** It used to return `valid: false`
+ * with an `AST_SLA_EXCEEDED` issue, which made a timing measurement decide a syntax
+ * question. That is wrong twice over:
+ *
+ *  - It is non-deterministic. Identical bytes validated differently depending on machine
+ *    load and JIT warmth — measured across six fresh processes on a 16 KB Python file:
+ *    `valid(4.06ms) INVALID(5.28ms) INVALID(6.86ms) INVALID(8.04ms) INVALID(14.70ms)
+ *    INVALID(17.58ms)`. Determinism is the product.
+ *  - It made the engine fall back on large but perfectly valid files, reporting a syntax
+ *    error where there was none. `codebase.py` (16 KB) fell back on
+ *    `AST validation exceeded SLA threshold (5.99ms > 5ms)` with drift at 0.00 and every
+ *    other check passing.
+ *
+ * `slaExceeded` on the result carries the signal for anyone who wants to act on latency.
  */
 export function validateItemAst(item: ContextItem, options?: AstValidatorOptions): AstValidatorResult {
   const maxTimeMs = options?.maxTimeMs ?? 5;
@@ -88,21 +104,10 @@ export function validateItemAst(item: ContextItem, options?: AstValidatorOptions
 
   const durationMs = performance.now() - startTime;
 
-  if (durationMs > maxTimeMs) {
-    const slaIssue: AstIssue = {
-      code: 'AST_SLA_EXCEEDED',
-      message: `AST validation exceeded SLA threshold (${durationMs.toFixed(2)}ms > ${maxTimeMs}ms)`,
-    };
-    return {
-      valid: false,
-      issues: Object.freeze([...baseResult.issues, slaIssue]),
-      durationMs,
-    };
-  }
-
   return {
     ...baseResult,
     durationMs,
+    slaExceeded: durationMs > maxTimeMs,
   };
 }
 

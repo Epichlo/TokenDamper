@@ -20,6 +20,14 @@ export interface AstValidatorResult {
   readonly valid: boolean;
   readonly issues: ReadonlyArray<AstIssue>;
   readonly durationMs: number;
+  /**
+   * Whether `durationMs` exceeded the configured budget.
+   *
+   * Reported, never voted on. A slow validation says nothing about whether the content is
+   * syntactically valid, and letting it set `valid: false` made the verdict depend on
+   * machine load — see `test/unit/ast-sla-determinism.test.ts`.
+   */
+  readonly slaExceeded?: boolean;
 }
 
 /**
