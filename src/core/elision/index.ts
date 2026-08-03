@@ -1,6 +1,9 @@
 import type { ContextItem } from '../model/types';
 import { classifyContent, createContextItem, freeze } from '../model/constructors';
 import { selectValidator, validateItemAst } from '../validation/ast';
+import type { ElisionRegion } from './regions';
+
+export * from './regions';
 
 /**
  * Reserved key identifying a TokenDamper elision inside JSON-shaped content.
@@ -146,6 +149,118 @@ export function elideItem(params: ElideItemParams): ElisionOutcome {
   });
 
   if (!validateItemAst(candidate).valid) {
+    return { status: 'skipped', reason: 'post_condition_rejected', item };
+  }
+
+  return {
+    status: 'elided',
+    item: candidate,
+    bytesSaved: item.content.length - content.length,
+  };
+}
+
+export interface ElideRegionsParams {
+  readonly item: ContextItem;
+  /** Disjoint, ascending ranges within `item.content`. Typically from `selectElisionRegions`. */
+  readonly regions: ReadonlyArray<ElisionRegion>;
+  /** Produces the stage's marker for one region's text, e.g. a `<BLOCK_HASH:...>` placeholder. */
+  readonly markerFor: (regionText: string) => string;
+  /** Optional; defaults to `createContextItem`'s hash of the spliced content. */
+  readonly contentHash?: string;
+  readonly metadata: Readonly<Record<string, string | number | boolean | null>>;
+}
+
+/**
+ * The chokepoint for **sub-item** elision: replaces regions within an item's content and
+ * leaves the rest intact.
+ *
+ * Why this exists at all. `compression:token-hashing` replaces an item's *entire* content,
+ * and `createContextBundle` builds a single-item bundle for CLI and bench input, so every
+ * symbol in the bundle dies at once. `DriftTracker`'s `R_AST` is then a boolean and `S_k`
+ * is pinned at the formula constant `0.60` — above the `0.40` gate, every time, structurally.
+ * Whole-item hashing can never succeed on a single-item code bundle
+ * (`docs/phase-1d-drift-investigation.md` §6). Regions give the metric something fractional
+ * to grade, and measured, it grades correctly.
+ *
+ * Two rules govern where a region may start and end, and both were found by measurement
+ * rather than reasoning. They are documented on `selectElisionRegions` and
+ * `scanPythonDefBodies`; the short version:
+ *
+ *  1. **The elided region must be exactly the bytes replaced.** `rehydrateText` substitutes
+ *     the marker in place, so anything the caller adds around it survives rehydration and
+ *     the round trip is no longer byte-identical. A prototype that emitted
+ *     `indent + marker` scored 0/7 on round-trip; removing the added indent scored 7/7.
+ *  2. **The marker must land in a syntactically valid position.** Rule 1 alone puts a Python
+ *     marker at column 0, which `PythonValidator` rejects. Applying rule 1 without rule 2
+ *     took AST validity from 8/8 to 0/8.
+ *
+ * ### The post-condition is *relative*, unlike `elideItem`'s
+ *
+ * `elideItem` requires the result to be valid outright. This requires only that the elision
+ * **introduce no new AST issues**. The difference is not laxity; an absolute check is
+ * unusable here for two independent reasons, both measured:
+ *
+ *  - Real inputs are already invalid. Three of the ten bundled bench fixtures are truncated
+ *    CodeXGLUE completion prompts that end at an open brace, and a completion prompt is a
+ *    first-class input for this product.
+ *  - `TypeScriptValidator` has no regex-literal mode, so it reports valid TypeScript
+ *    containing e.g. `/\([^)]+/` as `AST_UNBALANCED_BRACKET`. `src/core/model/constructors.ts`
+ *    fails its own validator today for exactly this reason.
+ *
+ * Under an absolute check both classes yield 0% forever. The relative check still refuses
+ * any elision that *breaks* something, which is the property that matters. It follows the
+ * precedent already in `BenchmarkEvaluator.syntaxPreserved`
+ * (`!rawAstResult.valid || optAstResult.valid`).
+ *
+ * Refusal semantics match `elideItem`: a rejected item is skipped and the stage continues.
+ */
+export function elideRegions(params: ElideRegionsParams): ElisionOutcome {
+  const { item, regions, markerFor, contentHash, metadata } = params;
+
+  if (regions.length === 0) {
+    return { status: 'skipped', reason: 'no_savings', item };
+  }
+
+  // JSON is excluded structurally, not by convention. The `{"__td_block__":…}` wrapper is
+  // not composable at sub-item granularity: `rehydrateText` unwraps only when the whole item
+  // is a wrapped marker, so a nested wrapper gets the stored content substituted *inside* it,
+  // yielding text that is neither byte-identical nor valid JSON.
+  if (resolveElisionSyntax(item) === 'json') {
+    return { status: 'skipped', reason: 'post_condition_rejected', item };
+  }
+
+  let content = '';
+  let cursor = 0;
+  for (const region of regions) {
+    if (region.start < cursor || region.end <= region.start || region.end > item.content.length) {
+      // Overlapping, inverted or out-of-bounds ranges would make the splice ambiguous and
+      // the result non-deterministic. Refuse rather than guess.
+      return { status: 'skipped', reason: 'post_condition_rejected', item };
+    }
+    content += item.content.slice(cursor, region.start);
+    content += markerFor(item.content.slice(region.start, region.end));
+    cursor = region.end;
+  }
+  content += item.content.slice(cursor);
+
+  if (content.length >= item.content.length) {
+    return { status: 'skipped', reason: 'no_savings', item };
+  }
+
+  const candidate = createContextItem({
+    id: item.id,
+    kind: item.kind,
+    contentType: item.contentType,
+    content,
+    origin: item.origin,
+    ...(contentHash ? { contentHash } : {}),
+    ...(item.role ? { role: item.role } : {}),
+    ...(item.path ? { path: item.path } : {}),
+    ...(item.language ? { language: item.language } : {}),
+    metadata: freeze({ ...metadata, elisionSyntax: 'raw', elidedRegions: regions.length }),
+  });
+
+  if (validateItemAst(candidate).issues.length > validateItemAst(item).issues.length) {
     return { status: 'skipped', reason: 'post_condition_rejected', item };
   }
 
