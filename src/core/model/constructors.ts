@@ -393,6 +393,19 @@ export function freeze<T>(value: T): Readonly<T> {
 
 /**
  * Classifies raw content deterministically.
+ *
+ * **Extension first, content probes second.** The two used to be interleaved, with each
+ * probe tried before the extension it competed with and `isCodeExtension` consulted fifth,
+ * after json/yaml/html/logs. Measured on this repository, that ordering classified 46 of its
+ * 57 TypeScript sources as `html` and every markdown document as `html` or `yaml` — because
+ * a probe that fires early wins over an extension that would have decided correctly.
+ *
+ * A filename extension is a declaration by whoever named the file; a probe is a guess about
+ * bytes. When both are available the declaration wins. Probes run only when the extension is
+ * absent or unrecognized, which is the Gateway/MCP case: a provider message has no filename.
+ *
+ * See `test/unit/content-classification.test.ts`, which pins this against the repository's
+ * own sources rather than synthetic strings.
  */
 export function classifyContent(
   rawInput: string,
@@ -402,19 +415,19 @@ export function classifyContent(
   const text = rawInput.trim();
   const extension = sourcePath ? sourcePath.split('.').pop()?.toLowerCase() ?? '' : '';
 
-  if (extension === 'json' || looksLikeJson(text)) {
+  if (extension === 'json') {
     return 'json';
   }
 
-  if (extension === 'yml' || extension === 'yaml' || looksLikeYaml(text)) {
+  if (extension === 'yml' || extension === 'yaml') {
     return 'yaml';
   }
 
-  if (extension === 'html' || extension === 'htm' || looksLikeHtml(text)) {
+  if (extension === 'html' || extension === 'htm') {
     return 'html';
   }
 
-  if (extension === 'log' || looksLikeLogs(text)) {
+  if (extension === 'log') {
     return 'logs';
   }
 
@@ -424,6 +437,22 @@ export function classifyContent(
 
   if (isCodeExtension(extension)) {
     return 'code';
+  }
+
+  if (looksLikeJson(text)) {
+    return 'json';
+  }
+
+  if (looksLikeYaml(text)) {
+    return 'yaml';
+  }
+
+  if (looksLikeHtml(text)) {
+    return 'html';
+  }
+
+  if (looksLikeLogs(text)) {
+    return 'logs';
   }
 
   if (looksLikeMarkdown(text)) {
@@ -479,12 +508,88 @@ function looksLikeYaml(text: string): boolean {
   return /^(---\s*$)?([\w.-]+:\s+.+)$/m.test(text);
 }
 
+const HTML_CLOSING_TAG = /<\/([a-z][a-z0-9-]*)\s*>/gi;
+const HTML_OPENING_TAG = /<([a-z][a-z0-9-]*)(?:\s[^<>]*)?\/?>/gi;
+
+/**
+ * Detects markup by a matched open/close tag pair, not by the presence of angle brackets.
+ *
+ * The previous probe was `/<\/?[a-z][\s\S]*>/i`. `[\s\S]*` is greedy and unanchored, so the
+ * match ran from the first `<letter` to the **last** `>` anywhere in the input — one generic
+ * parameter plus any later `>` was sufficient, and TypeScript guarantees both. It reported
+ * `html` for 46 of this repository's 57 TypeScript sources.
+ *
+ * Requiring a closing tag whose element name also appears as an opening tag costs nothing on
+ * real markup (a document without a single matched pair is not a document) and rejects
+ * `Array<string>`, `a <b && c> d`, and a bare `<placeholder>`, none of which have one.
+ */
 function looksLikeHtml(text: string): boolean {
-  return /<\/?[a-z][\s\S]*>/i.test(text);
+  if (/<!doctype\s+html/i.test(text)) {
+    return true;
+  }
+
+  const closing = new Set<string>();
+  for (const match of text.matchAll(HTML_CLOSING_TAG)) {
+    closing.add(match[1]!.toLowerCase());
+  }
+  if (closing.size === 0) {
+    return false;
+  }
+
+  for (const match of text.matchAll(HTML_OPENING_TAG)) {
+    if (closing.has(match[1]!.toLowerCase())) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
+/** A clock time, not preceded by a digit/colon/dot so it cannot start mid-number. */
+const LOG_CLOCK = /(?<![\d:.])\d{1,2}:\d{2}:\d{2}(?!\d)/;
+/** A severity token, delimited so `ERRORS` or `information` do not match. Uppercase only. */
+const LOG_LEVEL = /(?:^|[\s[(<|])(?:TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL|CRITICAL|NOTICE)(?:$|[\s\])>:,|])/;
+/** A line that opens with its timestamp, with or without a leading date. */
+const LOG_TIMESTAMP_PREFIX = /^\s*\[?(?:\d{4}[-/]\d{2}[-/]\d{2}[T ])?\d{1,2}:\d{2}:\d{2}/;
+
+/**
+ * Detects log output by asking whether the input is *predominantly* log lines.
+ *
+ * Both previous alternatives failed on ISO-8601, which is what every structured logger
+ * emits, for independent reasons:
+ *
+ *  - `/(?:\bINFO\b|...).*\d{4}-\d{2}-\d{2}/m` required the level **before** the date. Real
+ *    lines are `2026-07-30T19:00:01.012Z [DEBUG] ...` — date first.
+ *  - `/\b\d{2}:\d{2}:\d{2}\b/` cannot match `T19:00:01`, because `T` and `1` are both word
+ *    characters and there is therefore no word boundary before the hour.
+ *
+ * The consequence was that `tokendamper-benchmark/test_data/sample_logs.txt` — 75 lines of
+ * nothing but log output — classified as `text`.
+ *
+ * The replacement is a per-line predicate (a clock time, plus either a severity token or a
+ * timestamp in leading position) applied across the whole input. The majority requirement is
+ * what keeps a prose document that mentions one timestamp from being read as logs; the old
+ * second alternative had no such requirement and fired on any single `hh:mm:ss` anywhere.
+ */
 function looksLikeLogs(text: string): boolean {
-  return /(?:\bINFO\b|\bWARN\b|\bERROR\b|\bDEBUG\b).*\d{4}-\d{2}-\d{2}/m.test(text) || /\b\d{2}:\d{2}:\d{2}\b/.test(text);
+  if (!LOG_CLOCK.test(text)) {
+    return false;
+  }
+
+  let nonEmpty = 0;
+  let logLines = 0;
+
+  for (const line of text.split('\n')) {
+    if (line.trim().length === 0) {
+      continue;
+    }
+    nonEmpty += 1;
+    if (LOG_CLOCK.test(line) && (LOG_LEVEL.test(line) || LOG_TIMESTAMP_PREFIX.test(line))) {
+      logLines += 1;
+    }
+  }
+
+  return nonEmpty > 0 && logLines / nonEmpty >= 0.5;
 }
 
 function looksLikeMarkdown(text: string): boolean {

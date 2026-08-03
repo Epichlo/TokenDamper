@@ -840,3 +840,63 @@ is the inverse of invariant 10's pattern: not a check passing without running, b
   contract. That is a changed requirement, not a weakened assertion: the new case asserts
   strictly more (validity unchanged **and** the breach reported **and** real syntax errors
   still surfacing).
+
+## 22. A Filename Extension Outranks a Content Probe
+
+### Decision
+
+`classifyContent` resolves every recognized filename extension before it runs any content
+probe. `looksLikeHtml` requires a matched open/close tag pair rather than an angle bracket
+somewhere. `looksLikeLogs` asks whether the input is predominantly log lines, using a
+per-line predicate that recognizes ISO-8601 timestamps.
+
+### Context
+
+Measured against this repository's own sources, the previous classifier answered:
+
+```
+  46  ts -> html          e.g. src/adapters/mcp/index.ts
+  10  ts -> code          e.g. src/adapters/cli/index.ts
+  11  md -> yaml          e.g. ARCHITECTURE.md
+  10  md -> html          e.g. CHANGELOG.md
+   2  md -> markdown      e.g. SECURITY.md
+   1  txt -> text         tokendamper-benchmark/test_data/sample_logs.txt  (75 log lines)
+```
+
+Three independent causes, each a check that returned a confident answer without examining
+the thing it claimed to detect:
+
+1. `/<\/?[a-z][\s\S]*>/i` — `[\s\S]*` is greedy and unanchored, so the match spanned from
+   the first `<letter` to the **last** `>` in the input. One generic parameter plus any
+   later `>` was sufficient, and TypeScript guarantees both.
+2. Probes ran before extensions; `isCodeExtension` was consulted fifth, after json, yaml,
+   html and logs. An early probe therefore overrode an extension that would have decided
+   correctly.
+3. `looksLikeLogs` missed ISO-8601 twice over: its first alternative required the severity
+   level **before** the date (real lines are date-first), and its second,
+   `/\b\d{2}:\d{2}:\d{2}\b/`, cannot match `T19:00:01` — `T` and `1` are both word
+   characters, so there is no word boundary before the hour.
+
+### Rationale
+
+An extension is a declaration by whoever named the file. A probe is a guess about bytes.
+When both are present, the declaration wins; probes exist to serve the case where there is
+no filename at all, which is exactly the Gateway and MCP shape.
+
+This is the seventh instance of the invariant 10 pattern in this project, and the first
+where the mis-answer was *positive* rather than vacuous: the classifier did not decline to
+answer, it answered `html` with confidence.
+
+### Consequences
+
+- All 57 TypeScript sources in `src/` classify as `code`; every document in `docs/` as
+  `markdown`; `sample_logs.txt` as `logs`. Pinned in
+  `test/unit/content-classification.test.ts` against the repository itself, not synthetic
+  strings, because that is the corpus the defect was found on.
+- It partially reopens Phase 1a. See §23.
+- `looksLikeYaml` remains `/^(---\s*$)?([\w.-]+:\s+.+)$/m`, which matches any line of the
+  form `word: value` — including ordinary prose. It is untouched here because the extension
+  reordering removes its blast radius on named files, and because a loose probe that
+  produces a type with no validator is now *visible* rather than silent (§23). It is still
+  the loosest probe in the chain and should be tightened before anything starts trusting
+  `yaml` for a decision.

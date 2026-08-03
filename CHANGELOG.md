@@ -39,6 +39,23 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
   `R_struct` is inert for code. The guard defends that case, **not the class**.
 
 ### Fixed
+- **Content classification no longer answers `html` for TypeScript (DECISIONS §22)**:
+  `classifyContent` ran its content probes *before* its extension checks, and two of those
+  probes were wrong. Measured on this repository: **46 of 57 TypeScript sources classified as
+  `html`**, every markdown document as `html` or `yaml`, and a 75-line file of pure log
+  output as `text`.
+
+  Three causes: `looksLikeHtml`'s `/<\/?[a-z][\s\S]*>/i` matched from the first `<letter` to
+  the **last** `>` in the input, so any generic parameter sufficed; `isCodeExtension` was
+  consulted fifth, after four probes that could pre-empt it; and `looksLikeLogs` missed
+  ISO-8601 both ways — it required the level before the date, and `\b\d{2}:\d{2}:\d{2}\b`
+  cannot match `T19:00:01` because `T` and `1` are both word characters.
+
+  Now: every recognized extension resolves first; `looksLikeHtml` requires a matched
+  open/close tag pair; `looksLikeLogs` requires a majority of lines to carry a clock time
+  plus either a severity token or a leading timestamp. Regression fixtures are the
+  repository's own files (`test/unit/content-classification.test.ts`).
+
 - **Latency budget no longer decides a syntax verdict (DECISIONS §21)**: `validateItemAst`
   returned `valid: false` with `AST_SLA_EXCEEDED` when validation exceeded 5ms. Identical
   bytes therefore produced different verdicts depending on machine load — measured on a 16 KB
