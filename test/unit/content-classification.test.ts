@@ -139,3 +139,58 @@ describe('looksLikeLogs recognizes ISO-8601 timestamps', () => {
     expect(classifyContent(prose, 'text')).not.toBe('logs');
   });
 });
+
+describe('looksLikeYaml asks whether the input is predominantly YAML', () => {
+  const ROOT = resolve(process.cwd());
+
+  // `/^(---\s*$)?([\w.-]+:\s+.+)$/m` fired on any single line of the form `word: text`, which
+  // is a shape ordinary English uses constantly. Measured pathless — the Gateway's shape —
+  // it claimed `yaml` for 12 of this repository's 22 markdown documents.
+  it('does not read a prose line with a colon as YAML', () => {
+    const prose = [
+      'Note: the AST validators run in CLI and MCP mode.',
+      '',
+      'The planner is stateless, and the engine executes stages in order.',
+      'Where: each stage reports its own metrics.',
+    ].join('\n');
+    expect(classifyContent(prose, 'text')).not.toBe('yaml');
+  });
+
+  it('does not read any of this repository\'s markdown as YAML when there is no path', () => {
+    const files = walk(resolve(ROOT, 'docs'), '.md').concat(
+      ['README.md', 'ARCHITECTURE.md', 'DECISIONS.md', 'CHANGELOG.md', 'CODE_OF_CONDUCT.md'].map(
+        (name) => resolve(ROOT, name),
+      ),
+    );
+    expect(files.length).toBeGreaterThan(10);
+
+    const asYaml = files
+      .map((file) => ({ file, got: classifyContent(readFileSync(file, 'utf8'), 'text') }))
+      .filter((entry) => entry.got === 'yaml')
+      .map((entry) => entry.file.slice(ROOT.length + 1));
+
+    expect(asYaml).toEqual([]);
+  });
+
+  // Guards on the tightening rather than regression fixtures: these already passed before it,
+  // and they are what stops "fix the false positives" from becoming "never say yaml".
+  it('still recognizes real YAML with no path to go on', () => {
+    const workflow = readFileSync(resolve(ROOT, '.github/workflows/ci.yml'), 'utf8');
+    expect(classifyContent(workflow, 'text')).toBe('yaml');
+
+    const compose = [
+      'version: "3.9"',
+      'services:',
+      '  api:',
+      '    image: node:20-alpine',
+      '    ports:',
+      '      - "3000:3000"',
+      '    environment:',
+      '      NODE_ENV: production',
+    ].join('\n');
+    expect(classifyContent(compose, 'text')).toBe('yaml');
+
+    const frontMatter = ['---', 'title: Release notes', 'date: 2026-08-04', 'tags:', '  - release', '---'].join('\n');
+    expect(classifyContent(frontMatter, 'text')).toBe('yaml');
+  });
+});

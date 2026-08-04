@@ -899,7 +899,8 @@ answer, it answered `html` with confidence.
   reordering removes its blast radius on named files, and because a loose probe that
   produces a type with no validator is now *visible* rather than silent (§23). It is still
   the loosest probe in the chain and should be tightened before anything starts trusting
-  `yaml` for a decision.
+  `yaml` for a decision. **Tightened in §27** — and the premise that the tag was inert was
+  wrong: `DriftTracker` was already trusting it.
 
 ## 23. "No Validator Applied" Is Not "The Check Passed"
 
@@ -1192,3 +1193,92 @@ line, never the rest of the file.
 - The known residue is the keyword list. A regex after a non-reserved token that is not in the
   punctuation set — `)` in `if (x) /re/.test(y)` — is still read as division. It fails closed,
   it is bounded to one line, and it is stated here rather than discovered later.
+
+## 27. YAML Is a Document Shape, Not a Line Shape
+
+### Decision
+
+`looksLikeYaml` asks whether the input is *predominantly* YAML — the same shape as
+`looksLikeLogs` — instead of whether any single line looks like `key: value`. Lines that are
+legal YAML *and* ordinary markdown (`#` comments, bare `- ` sequence entries) are evidence of
+nothing and are counted on neither side; block-scalar bodies are skipped as free text.
+
+### Context
+
+The probe was `/^(---\s*$)?([\w.-]+:\s+.+)$/m`. The leading group is optional and cannot span
+a line, so what it actually tested was "some line looks like `word: text`". Measured
+**pathless** — the Gateway and MCP shape, which is live provider traffic — it claimed `yaml`
+for **12 of this repository's 22 markdown documents**:
+
+```
+ARCHITECTURE.md         "Responsibilities:"
+CODE_OF_CONDUCT.md      "Consequence: A private, written warning from project maintainers"
+README.md               "Note: the `AST Validators` and `Explicit Fallback` steps above run"
+DECISIONS.md            "entry: `filepath:<path>`."
+docs/…/milestone_6…md   "Where:\n- $C_0 = 1.0$: Initial confidence baseline"
+```
+
+§22 recorded this as acceptable on the grounds that a loose probe producing a type with no
+validator is now merely *visible* (§23) rather than harmful. **That premise was wrong, and it
+is the reason this is a fix rather than a tidy-up.** `DriftTracker.extractMarkers` gates
+markdown structural markers on an allowlist that does not include `yaml`. Measured on the same
+pathless item:
+
+```
+contentType=yaml       markers=0
+contentType=markdown   markers=19
+```
+
+So the mistag silently zeroed `R_struct`'s input on the one content type where it does real
+work — while §18 was concurrently recording that `R_struct` is inert *for code*. Half the
+metric was being disabled on prose too, by a probe nobody was reading as load-bearing.
+
+### Alternatives Considered
+
+- **Run `looksLikeMarkdown` before `looksLikeYaml`.** Fixes these twelve and is one line.
+  Rejected: it does not make either probe correct, it makes the wrong one lose. A `#`-heavy
+  YAML file would then be markdown, which is the same class of error facing the other way.
+- **Require a leading `---`.** Rejects front-matterless YAML, which is most YAML — the
+  repository's own `ci.yml` has no document marker.
+- **Require a majority of *all* non-blank lines.** This was tried first and measured:
+  `tokendamper-benchmark/BENCHMARK_RESULTS.md` scored **0.826** and stayed a false positive at
+  every threshold, because markdown bullets and headings were being counted as YAML evidence.
+  Removing the ambiguous line kinds from both sides is what produced separation.
+
+### Rationale
+
+The discriminating question is what counts as evidence, not where the threshold sits. Once
+`#` and `- ` lines are excluded from both numerator and denominator, the two populations do
+not overlap at all:
+
+| | score |
+|---|---|
+| `.github/workflows/ci.yml`, compose, k8s manifest, front matter, block scalar | **1.000** each |
+| highest-scoring prose document (`BENCHMARK_RESULTS.md`) | **0.455** |
+
+The threshold is **0.75**, near the middle of that empty band rather than against either edge,
+so it is not tuned to a single sample on either side. The structure guard — two mappings, or a
+document marker plus one — exists because a ratio over one or two lines is not a measurement;
+it is what keeps a lone `Note: …` sentence from carrying a classification.
+
+Block-scalar bodies are skipped because they are free text by definition. Without that rule a
+config file that documents itself scores 0.600 — *below* an ambiguous prose fragment at 0.667 —
+and no threshold can order those two correctly.
+
+### Consequences
+
+- Pathless classification of this repository's 27 prose documents: **12 `yaml` → 0**. All 24
+  markdown documents now classify as `markdown`; the two `.txt` fixtures stay `text` and the
+  log fixture stays `logs`.
+- `R_struct` can see heading loss on pathless prose again. This is the Gateway's only content
+  type with working structural markers, so it is also the only place the drift gate currently
+  measures anything on the proxy path.
+- No change on the CLI code corpus: 68 frozen files, fallbacks 36, files reducing 30, mean
+  48.75% — identical before and after, because a file argument carries a path and the
+  extension already outranked the probe (§22).
+- Two known false negatives, both stated rather than found later: a YAML document that is
+  mostly free text under block scalars *with no explicit `|`/`>` indicator*, and a fragment
+  with a single mapping and no document marker. Both fall to `text`, which is in
+  `MARKDOWN_MARKER_TYPES` — so they over-harvest markers rather than under-harvest them, which
+  is the direction that inflates drift rather than hiding it. Worth knowing before that
+  allowlist is next touched.

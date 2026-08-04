@@ -74,6 +74,24 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
   dense with imperative directives, which is a property of the corpus. See §24.
 
 ### Fixed
+- **`looksLikeYaml` asks whether the input is predominantly YAML (DECISIONS §27)**: the probe
+  was `/^(---\s*$)?([\w.-]+:\s+.+)$/m`, whose optional leading group cannot span a line, so it
+  actually tested "some line looks like `word: text`". Measured **pathless** — the Gateway and
+  MCP shape — it claimed `yaml` for **12 of this repository's 22 markdown documents**, on
+  lines like `Responsibilities:` and `Note: the AST validators run in CLI mode`.
+
+  §22 judged that harmless because `yaml` selects no validator. It was not:
+  `DriftTracker.extractMarkers` gates markdown structural markers on an allowlist that
+  excludes `yaml`, so the same pathless prose item yields **0 markers as `yaml` and 19 as
+  `markdown`**. The mistag silently zeroed `R_struct`'s input on the one content type where it
+  does real work.
+
+  Now a per-line predicate with a majority requirement, like `looksLikeLogs`. Lines that are
+  legal YAML *and* ordinary markdown (`#`, bare `- `) count on neither side, and block-scalar
+  bodies are skipped. Measured, the populations do not overlap: real YAML samples score
+  **1.000**, the highest-scoring prose document **0.455**; the threshold is 0.75. Pathless
+  prose: 12 `yaml` → **0**. No change on the CLI code corpus — a file argument carries a path,
+  and the extension already outranked the probe.
 - **`TypeScriptValidator` reads regex literals (DECISIONS §26)**: it had no regex mode, so it
   counted the brackets and quotes inside one. `const re = /([^)]+/;` was reported
   `AST_UNBALANCED_BRACKET`, and **7 of this repository's own 64 TypeScript sources were
