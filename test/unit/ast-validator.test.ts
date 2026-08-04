@@ -1,3 +1,5 @@
+import { readFileSync, readdirSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { classifyContent, createContextItem, freeze } from '../../src/core/model/constructors';
 import type { ContextBundle } from '../../src/core/model/types';
@@ -65,6 +67,85 @@ describe('TypeScriptValidator', () => {
     const result = validator.validate(code);
     expect(result.valid).toBe(false);
     expect(result.issues[0]?.code).toBe('AST_UNTERMINATED_COMMENT');
+  });
+
+  // The fixtures below are real lines from this repository, which failed its own validator.
+  it('reads a regex literal as a literal, not as brackets and quotes', () => {
+    const cases = [
+      // src/core/elision/regions.ts:50
+      'const FUNCTION_HEADER = /\\)\\s*(?::\\s*[^{;=]+)?$|=>$/;',
+      // src/core/ledger/drift-tracker.ts:258 — a quote inside a character class
+      'const jsonKeyRegex = /"([^"\\\\]+)":/g;',
+      // src/cli/diff-renderer.ts:236 — an escaped bracket inside a class
+      "line = line.replace(/(\\[TokenDamper[^\\]]*\\])/g, '$1');",
+      // src/core/topology/dependency-graph.ts:21 — an escaped slash
+      "const p = raw.replace(/\\\\/g, '/');",
+    ];
+
+    for (const code of cases) {
+      const result = validator.validate(code);
+      expect(result.valid, `${code} -> ${result.issues.map((i) => i.message).join('; ')}`).toBe(true);
+    }
+  });
+
+  it('still reads a slash after a value as division', () => {
+    expect(validator.validate('const half = (a + b) / 2;').valid).toBe(true);
+
+    // The point of the previous case is that this one keeps failing: a genuine unbalanced
+    // bracket after a division must not be swallowed by a regex mode that never ends.
+    const result = validator.validate('const ratio = a / b;\nconst arr = [1, 2;');
+    expect(result.valid).toBe(false);
+    expect(result.issues.some((i) => i.code === 'AST_UNBALANCED_BRACKET')).toBe(true);
+  });
+
+  it('reads a regex that follows a reserved word', () => {
+    const code = 'function looksLower(s: string): boolean {\n  return /^([a-z]+/.test(s);\n}';
+    expect(validator.validate(code).valid).toBe(true);
+  });
+
+  it('does not let an unterminated regex swallow the rest of the input', () => {
+    // A guard on the new mode rather than a regression fixture: this input is rejected both
+    // before and after regex support, and the property being pinned is that it stays rejected
+    // for the *right* reason instead of the scanner running to EOF inside a literal.
+    const result = validator.validate('const x = /unterminated\nconst arr = [1, 2;');
+    expect(result.valid).toBe(false);
+    expect(result.issues.some((i) => i.code === 'AST_UNBALANCED_BRACKET')).toBe(true);
+  });
+});
+
+/**
+ * The regression corpus is this repository, because that is where the defect was found:
+ * seven of its own sources were rejected by its own validator, all of them for regex
+ * literals. Same precedent as `content-classification.test.ts` — a synthetic string would
+ * not have caught it, and a real one did.
+ */
+describe('the repository against its own TypeScript validator', () => {
+  const validator = new TypeScriptValidator();
+  const ROOT = resolve(process.cwd());
+
+  function walk(dir: string, out: string[] = []): string[] {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (['node_modules', '.git', 'dist'].includes(entry.name)) continue;
+        walk(full, out);
+      } else if (entry.name.endsWith('.ts')) {
+        out.push(full);
+      }
+    }
+    return out;
+  }
+
+  it('accepts every TypeScript source in src/', () => {
+    const files = walk(resolve(ROOT, 'src'));
+    expect(files.length).toBeGreaterThan(40);
+
+    const rejected = files
+      .map((file) => ({ file, result: validator.validate(readFileSync(file, 'utf8')) }))
+      .filter((entry) => !entry.result.valid)
+      .map((entry) => `${entry.file.slice(ROOT.length + 1)}: ${entry.result.issues[0]?.message ?? ''}`);
+
+    expect(rejected).toEqual([]);
   });
 });
 

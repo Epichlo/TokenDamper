@@ -316,7 +316,15 @@ an accurate record of what that harness printed; the correction is to its interp
 **Date:** 2026-08-03
 **Status:** one fixed (`20ac438`), one open
 
-### 1. `TypeScriptValidator` has no regex-literal mode — **open**
+### 1. `TypeScriptValidator` has no regex-literal mode — **fixed 2026-08-04, DECISIONS §26**
+
+> Closed by adding a regex-literal mode. The count below was **7 of 64**, not the three files
+> named — `src/cli/diff-renderer.ts`, `src/cli/html-reporter.ts` and
+> `src/core/ledger/drift-tracker.ts` were also rejected. All 64 `src/` and 46 `test/` sources
+> now pass, pinned by a corpus test. The paragraph on `scanBraceSpans` still holds and is now
+> a deliberate duplication: the validator copies that scanner's punctuation rule rather than
+> sharing code with it, because `scanBraceSpans` decides what the product removes.
+
 
 **What the code implies.** `src/core/validation/ast/ts-validator.ts` presents itself as a
 bracket/quote/comment scanner sufficient to judge TypeScript syntax, and `validate()` runs

@@ -74,6 +74,20 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
   dense with imperative directives, which is a property of the corpus. See §24.
 
 ### Fixed
+- **`TypeScriptValidator` reads regex literals (DECISIONS §26)**: it had no regex mode, so it
+  counted the brackets and quotes inside one. `const re = /([^)]+/;` was reported
+  `AST_UNBALANCED_BRACKET`, and **7 of this repository's own 64 TypeScript sources were
+  rejected by their own project's validator** — three of them the classifier's regexes from
+  §22. A `/` now opens a literal where a value may begin (the punctuation set
+  `scanBraceSpans` already uses, plus reserved words that cannot end an expression), and an
+  unterminated literal is dropped at the newline rather than run to EOF.
+
+  Now 0 of 64 `src/` and 0 of 46 `test/` sources are rejected, pinned by a corpus test.
+  End-to-end on a frozen 68-file corpus with the input held constant: fallbacks **37 → 36**,
+  files reducing **29 → 30**, total emitted tokens **102,800 → 100,715**;
+  `src/core/elision/regions.ts` reduces 52.56% where it used to fall back on a syntax error it
+  did not have. `elideRegions`'s relative post-condition is unchanged — its other reason
+  (truncated completion prompts, invalid on input) still holds.
 - **`compression:token-hashing` no longer fabricates the store that makes it "reversible" (DECISIONS §25)**:
   line 23 was `options?.tokenHasher ?? new TokenHasher()`. That default registered every
   elided block into a store that was garbage-collected when the stage returned, so on the

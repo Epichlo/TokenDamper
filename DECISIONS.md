@@ -1106,3 +1106,89 @@ its own instead (§24).
 - The CHANGELOG's Phase 1d line "every elision reversible through the existing recovery valve"
   is withdrawn. That measurement injected a hasher and the sentence was attached to a CLI run
   that had none.
+
+## 26. A Regex Literal Is Not Brackets
+
+### Decision
+
+`TypeScriptValidator` tracks regex literals. A `/` opens one where a value may begin — after
+the punctuation set `scanBraceSpans` already uses, or after a reserved word that cannot end an
+expression — and the brackets, quotes and slashes inside it are literal text. An unterminated
+literal is dropped at the newline rather than run to end of input.
+
+### Context
+
+The validator presented itself as a bracket/quote/comment scanner sufficient to judge
+TypeScript, and `validate()` runs it over every item in every bundle. It did not know regex
+literals existed, so it counted the brackets inside them:
+
+```
+const re = /([^)]+/;     ->  INVALID (AST_UNBALANCED_BRACKET)
+const x = (a + b) / 2;   ->  VALID
+```
+
+Measured over this repository's own 64 TypeScript sources, **7 were rejected by their own
+project's validator**, every one for a regex literal:
+
+```
+src/cli/diff-renderer.ts:236        /(\[TokenDamper[^\]]*\])/g
+src/cli/html-reporter.ts:316        /(\[TokenDamper[^\]]*\])/g
+src/core/elision/regions.ts:50      /\)\s*(?::\s*[^{;=]+)?$|=>$/
+src/core/ledger/drift-tracker.ts:258  /"([^"\\]+)":/g
+src/core/model/constructors.ts:553  /(?:^|[\s[(<|])(?:TRACE|DEBUG|…)(?:$|[\s\])>:,|])/
+src/core/topology/dependency-graph.ts:21  /\\/g
+src/core/topology/git-inspector.ts:30     /\\/g
+```
+
+Three of them are the classifier's own regexes, from the fix in §22 — the change that made
+`classifyContent` correct also handed the validator content it could not read.
+
+### Alternatives Considered
+
+- **Leave it: it fails closed.** The direction of failure is right — the pipeline falls back
+  and the user gets their input — which is why this was recorded rather than rushed
+  (`NOTES-FOR-DOCS.md`). But a check that answers "invalid" without examining what makes it
+  invalid is the same defect as one answering "valid" without looking; invariant 10 is about
+  verdicts that were not derived, in either direction. And the cost is not only yield: a
+  validator that rejects ordinary code cannot be a backstop for anything inside a literal,
+  which is why `elideRegions`'s post-condition had to be relative in the first place.
+- **Share one scanner with `scanBraceSpans`.** The right end state, and deliberately not done
+  here. `scanBraceSpans` decides *elision boundaries*; changing it changes what the product
+  removes, which is a behavioural change wearing a refactor's clothes. The rule is duplicated
+  and the duplication is named at both sites instead.
+
+### Rationale
+
+The disambiguation is the whole problem: `/` is division or a literal depending on what
+precedes it. Two rules, both conservative in the direction that matters:
+
+1. **The punctuation set is copied from `scanBraceSpans`, not re-derived.** That scanner
+   learned regex literals first, *because* this validator could not be trusted to catch a
+   boundary it got wrong inside one. Two different answers to "where does this literal start"
+   would be worse than one imperfect answer.
+2. **Reserved words only.** `return /^([a-z]+/.test(s)` was still rejected under the
+   punctuation rule alone. A reserved word can never be the end of an expression, so a `/`
+   after one cannot be division — which makes the rule sound rather than heuristic. `in` and
+   `of` are excluded: both are legal identifiers in enough positions that `of / 2` is
+   expressible, and a wrong guess turns real code into a swallowed literal.
+
+The newline bail-out is the containment property. A misread `/` costs at most the rest of one
+line, never the rest of the file.
+
+### Consequences
+
+- **0 of 64 `src/` sources and 0 of 46 `test/` sources are now rejected**, from 7 and 0.
+  Pinned by a corpus test over `src/**/*.ts`, following §22's precedent — the defect was found
+  on real files and a synthetic string would not have caught it.
+- End-to-end on the frozen 68-file corpus, engine varied and input held constant: fallbacks
+  **37 → 36**, files reducing **29 → 30**, total emitted tokens **102,800 → 100,715**.
+  `src/core/elision/regions.ts` now reduces 52.56% where it previously fell back on a syntax
+  error it did not have. All three `AST Error` fallbacks are gone; drift moves 14 → 15,
+  because a file that used to fail the AST gate now reaches the drift gate.
+- **The relative post-condition in `elideRegions` stays.** Its second reason is unchanged:
+  three of the ten bundled bench fixtures are truncated completion prompts that are invalid on
+  input, and a completion prompt is a first-class input for this product. Only one of the two
+  justifications for it has been removed.
+- The known residue is the keyword list. A regex after a non-reserved token that is not in the
+  punctuation set — `)` in `if (x) /re/.test(y)` — is still read as division. It fails closed,
+  it is bounded to one line, and it is stated here rather than discovered later.
