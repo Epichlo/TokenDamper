@@ -352,7 +352,17 @@ TS validator cannot be relied on as a backstop for anything inside a regex liter
 *does* track regex literals, deliberately: the validator's blind spot means it could not
 catch a region boundary the scanner got wrong inside one.
 
-### 2. Python delivered over stdin is invisible to the whole validator layer — **open**
+### 2. Python delivered over stdin is invisible to the whole validator layer — **open, scoped**
+
+> Scoped 2026-08-04: `docs/phase-1e-pathless-code-scope.md`. Nothing implemented. Two
+> corrections to the entry below. The suggested remedy — "a content-based fallback when no
+> path is available" — is right about *where* but the narrow version of it is wrong: resolving
+> a language inside `selectValidator` without also correcting `contentType` raises drift on
+> 14 of 20 measured files and pushes one over the gate, because pathless Python classifies as
+> `markdown` or `text` and `extractMarkers` then harvests its `#` comments as headings —
+> **1,025 fabricated markers across 43 files**. And the entry treats this as one defect; it is
+> two, the second currently dormant and made material by fixing the first.
+
 
 **What `CLAUDE.md` implies.** That `tokendamper optimize <input-file|->` treats the two
 input forms equivalently.
