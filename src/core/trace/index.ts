@@ -55,5 +55,9 @@ export function buildTrace(
     // coverage, so without this line an unchecked item is invisible on the one entry mode
     // that has no session and no second chance to notice. DECISIONS §23.
     ...(validation.astCoverage === undefined ? {} : { astCoverage: validation.astCoverage }),
+    // Same reasoning for drift: `driftScore: 0` means "retained everything" and "found
+    // nothing to measure" indistinguishably, and the CLI's stderr trace is the only place a
+    // one-shot run can notice the difference.
+    ...(validation.driftCoverage === undefined ? {} : { driftCoverage: validation.driftCoverage }),
   });
 }

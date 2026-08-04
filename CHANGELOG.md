@@ -74,6 +74,55 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
   dense with imperative directives, which is a property of the corpus. See §24.
 
 ### Fixed
+- **An empty before-set is "nothing to measure", not "perfectly retained" (DECISIONS §28)**:
+  `R_AST` and `R_struct` each default to `1.0` when their pre-optimization set is empty, so an
+  item the extractors found nothing in scored as perfectly retained. That is invariant 10's
+  ninth instance, and it was an approval to delete content outright — `src/index.ts` is
+  fourteen `export * from './x';` lines, yields no symbols, and went **420 bytes → a 67-byte
+  marker (86.15% of its tokens)** at `S_k = 0.0000`, no fallback, no complaint.
+
+  Drift now refuses to certify an item that **changed**, that an **AST validator covers** (so
+  symbols were the expected witness), and that produced **neither symbols nor content-derived
+  markers**. New `SEMANTIC_DRIFT_UNMEASURABLE` issue code, distinct from
+  `SEMANTIC_DRIFT_EXCEEDED` — one means the metric ran and the answer was too high, the other
+  means it never ran on anything, and collapsing them would report a threshold breach for a
+  score of 0.00.
+
+  **`filepath:` is excluded from the evidence.** It is derived from `item.path`, not content,
+  so no elision can destroy it; counting it would make every pathed item look witnessed. It
+  still counts in `R_struct` — that is §18's separate argument and is untouched here.
+
+  The check is **per item**, not per bundle. A bundle holding one richly-symbolled file next
+  to a symbol-free barrel measures `astMeasured: true` while the barrel is deleted unwitnessed;
+  the transform is per item, so the evidence check has to be too.
+
+  Reported as well as enforced: `DriftCoverage` on `ValidationReport` and on the trace
+  (`astMeasured`, `structMeasured`, `measured`, `contentChanged`, `symbolsBefore`,
+  `contentMarkersBefore`, `symbolBearingItems`, `unwitnessedItems`), the same shape §23 gave
+  syntax. `driftScore: 0` alone cannot distinguish "retained everything" from "found nothing".
+
+  **Measured over 68 frozen repo sources (64 TS + 4 py), engine A/B'd by patching only this
+  clause in `dist/`: 5 files change outcome, 0 collateral.** All five are pure barrel files
+  (`src/index.ts`, `src/bench/index.ts`, `src/bench/fixtures/index.ts`, `src/config/index.ts`,
+  `src/core/ledger/index.ts`), each previously reducing 13.33%–84.05% at `S_k = 0`. The 28
+  files reducing under both variants hold an **identical** 48.52% aggregate — the rule costs
+  nothing where drift could already measure.
+
+  **Three things it deliberately does not do.**
+  - **Prose is untouched.** No validator covers it, so `R_AST = 1.0` there is an inapplicable
+    measurement rather than a failed one. Enforcing on it would make every prose bundle
+    incompressible and end `cleanup:session-dedup` on the conversational traffic the Gateway
+    exists to carry. That gap is real and now *visible* on `DriftCoverage` — closing it is a
+    product decision about whether TokenDamper may compress prose at all, not a bug fix.
+  - **Pruned-away items are untouched.** Dropping an item is a selection decision the planner
+    exists to make under a caller's budget, and `R_AST` already scores it wherever the item
+    carried symbols. The symbol-free-file-pruned case stays open as the planner's half.
+  - **`R_struct`'s constants are untouched.** §18 stands.
+
+  Turn-1 Gateway measured as required (`docs/phase-1-stabilization-summary.md` §8 method):
+  `fallbackUsed: false`, no false positives; turn 2 falls back identically with the rule on
+  and off, so the existing cross-turn behaviour is unchanged. Output byte-identical across
+  6/6 fresh processes; fail-open holds — a refusal still returns the caller's input.
 - **The benchmark harness measured a route nobody uses (4b.0)**: `run_benchmark.py` piped its
   fixtures to `tokendamper optimize -`. With no path the engine resolves no language, selects
   no elision regions, falls to whole-item hashing, and `S_k` pins at the formula constant

@@ -196,6 +196,36 @@ export interface AstCoverage {
 }
 
 /**
+ * Whether the drift metric had anything to measure — the same distinction `AstCoverage`
+ * draws for syntax, applied to `S_k`.
+ *
+ * `R_AST` and `R_struct` each default to `1.0` when their *pre-optimization* set is empty,
+ * so an item the extractors found nothing in scored as perfectly retained. That is "nothing
+ * to measure" reported as "measured and clean", and it approved deleting content outright:
+ * `src/index.ts` is fourteen `export * from './x';` lines, yields no symbols, and was elided
+ * whole — 420 bytes to a 67-byte marker, 86.15% of its tokens — at `S_k = 0.0000` with no
+ * fallback.
+ *
+ * `filepath:` deserves separate mention. It is derived from `item.path`, not from content,
+ * so no content transform can destroy it: it makes `markersBefore` non-empty for every item
+ * that has a path while witnessing nothing about what the item contains. It is counted in
+ * `R_struct` (unchanged — see DECISIONS §18 for that separate defect) but must not count as
+ * evidence here, or every pathed item would look measured.
+ */
+export interface DriftCoverage {
+  readonly astMeasured: boolean;
+  readonly structMeasured: boolean;
+  readonly measured: boolean;
+  readonly contentChanged: boolean;
+  readonly symbolsBefore: number;
+  readonly contentMarkersBefore: number;
+  /** Items an AST validator covers, for which symbols are the expected witness. */
+  readonly symbolBearingItems: number;
+  /** Of those, the ones changed without leaving any evidence of retention. */
+  readonly unwitnessedItems: ReadonlyArray<string>;
+}
+
+/**
  * The immutable validation outcome for an optimization attempt.
  */
 export interface ValidationReport {
@@ -206,6 +236,7 @@ export interface ValidationReport {
   readonly reason?: string | undefined;
   readonly driftReport?: DriftReport | undefined;
   readonly astCoverage?: AstCoverage | undefined;
+  readonly driftCoverage?: DriftCoverage | undefined;
 }
 
 /**
@@ -238,6 +269,7 @@ export interface OptimizationTrace {
   readonly debtScore?: number | undefined;
   readonly driftScore?: number | undefined;
   readonly astCoverage?: AstCoverage | undefined;
+  readonly driftCoverage?: DriftCoverage | undefined;
 }
 
 /**

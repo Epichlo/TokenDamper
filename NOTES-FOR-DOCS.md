@@ -522,3 +522,43 @@ returns the empty set on `README.md`, `SECURITY.md` and `sample_logs.txt`, and
 bytes are real — but "passes at `S_k = 0.00`" is not evidence of safety there and should not
 be cited as if it were. Markdown is the exception: `README.md` yields 20 real markers, so
 `R_struct` does genuine work on it.
+
+---
+
+## `docs/phase-1d-semantic-gate-disposition.md` §3 — the ninth invariant-10 instance, and one detail it got wrong
+
+**Date:** 2026-08-05
+**Status of the correction:** measured, implemented (DECISIONS §28)
+
+**What the document says.** That `R_AST` and `R_struct` "default to `1.0` when the *before*
+set is empty", which scores "nothing to measure" as "perfect retention" and lets
+`src/index.ts` be deleted whole at 86.15% with `S_k = 0.0000`.
+
+**What is actually true.** The conclusion holds and is now fixed. The mechanism was stated
+one step too loosely, and the difference matters to anyone touching this next.
+
+Measured on `src/index.ts` through the real `DriftTracker`:
+
+```
+symbolsBefore 0   markersBefore 1   R_AST 1.0   R_struct 1.0   S_k 0.0000
+markers before: ["filepath:src/index.ts"]
+```
+
+Only **`R_AST`** is at its empty-set default. `R_struct`'s before-set is *not* empty — it
+holds one marker, `filepath:src/index.ts`, harvested from `item.path`. So the file is not a
+case of "both components found nothing"; it is one component finding nothing and the other
+finding a marker that **elision cannot destroy**, because `item.path` is metadata and no
+content transform touches it. `R_struct` reports `1.0` as a genuine measurement of a quantity
+that is preserved by construction.
+
+That is why the fix needed two parts rather than one. Renormalising away the empty component
+would have left `R_struct = 1.0` vouching for the file on its own, and `S_k` would still have
+been 0. Evidence had to exclude metadata-derived markers (`extractContentMarkers`) as well as
+handle the empty set. §18's separate point — that `R_struct` is decorative for code — is the
+same observation arriving from the yield side rather than the safety side.
+
+**Also corrected: "empty before-set" is not one rule.** Enforcing it wherever a before-set was
+empty gutted prose (4 failing tests, including both Gateway cross-turn dedup cases and the
+bench baseline). For prose the empty set is *inapplicability*, not extractor failure. The
+shipped rule is scoped to items an AST validator covers. Prose and pruner-removed items remain
+unwitnessed and are now reported on `DriftCoverage` rather than enforced.

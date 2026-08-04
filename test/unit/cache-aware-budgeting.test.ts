@@ -172,8 +172,39 @@ describe('engine end-to-end with topology knapsack optimization', () => {
 
     expect(result.trace.planMode).toBe('topology_knapsack');
     expect(result.trace.stageCount).toBe(4);
-    expect(result.validation.passed).toBe(true);
-    expect(result.fallbackUsed).toBe(false);
-    expect(result.finalBundle.items.length).toBeLessThan(multiItemBundle.items.length);
+
+    // The planner's own work is what this test is named for, and it is unaffected: the
+    // knapsack still runs all four stages and the pruner still drops the unpinned candidate
+    // beyond the horizon. Asserted on the stage trace rather than on `finalBundle`, because
+    // `finalBundle` is the *post-gate* bundle and reverts to the input on fallback.
+    const prune = result.trace.stageTraces.find((s) => s.stageId === 'pruning:topology-pruner');
+    expect(prune?.status).toBe('ok');
+    expect(prune?.changed).toBe(true);
+
+    // This scenario used to assert `validation.passed === true`, and it cleared the gate for
+    // one reason only: both files are `.ts` paths whose entire content is repeated `//`
+    // lines, so `extractSymbols` returned nothing, `R_AST` fell back to its empty-set
+    // default of 1.0, and `S_k` came out 0.0000 while `compression:token-hashing` replaced
+    // `pad-1` outright with a 69-byte marker. The gate was not satisfied, it was blind.
+    //
+    // Refusing it is now the correct outcome, and this asserts *why* rather than merely
+    // flipping the boolean — a plain `passed === false` would also be satisfied by an
+    // unrelated regression in any of the other three stages.
+    expect(result.validation.passed).toBe(false);
+    expect(result.fallbackUsed).toBe(true);
+    expect(result.validation.issues.map((i) => i.code)).toContain('SEMANTIC_DRIFT_UNMEASURABLE');
+    expect(result.validation.driftCoverage?.unwitnessedItems).toEqual(['pad-1']);
+
+    // And the specific shape of the old lie. `S_k` here is 0.1333 — comfortably inside the
+    // 0.40 gate, and every bit of it comes from `R_struct` losing the pruned item's
+    // `filepath:` marker. `R_AST` contributes its empty-set 1.0 while `pad-1`'s entire
+    // content is replaced by a marker. The score is not high and never was; it simply is
+    // not evidence, which is why the boolean beside it has to carry the verdict.
+    expect(result.trace.driftScore).toBeLessThan(0.4);
+    expect(result.validation.driftCoverage?.astMeasured).toBe(false);
+    expect(result.validation.driftCoverage?.symbolsBefore).toBe(0);
+
+    // Fail-open still holds — the caller gets their input back, not an error.
+    expect(result.emittedOutput).toBe(requestWithBudget.rawInput);
   });
 });

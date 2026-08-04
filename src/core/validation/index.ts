@@ -1,6 +1,7 @@
 import type {
   AstCoverage,
   ContextBundle,
+  DriftCoverage,
   OptimizationBudget,
   OptimizationPlan,
   ValidationIssue,
@@ -67,11 +68,36 @@ export function validate(
   // 3. Evaluate Semantic Drift Tracker
   const driftTrackerOptions = options?.maxDriftThreshold !== undefined ? { maxDriftThreshold: options.maxDriftThreshold } : {};
   const driftTracker = new DriftTracker(driftTrackerOptions);
-  const driftReport = driftTracker.calculateDrift(before, after);
+
+  // Reuse the coverage computed in step 1. `validateBundleAst` ran over `after`, and elision
+  // carries `id`, `path`, `language` and `contentType` through unchanged, so an item covered
+  // after was covered before — no second AST pass, and no second copy of the validator
+  // precedence rules to drift out of sync.
+  const symbolBearingItemIds = new Set(after.items.filter((item) => !unchecked.has(item.id)).map((item) => item.id));
+
+  const driftReport = driftTracker.calculateDrift(before, after, { symbolBearingItemIds });
+
+  const driftCoverage: DriftCoverage = {
+    astMeasured: driftReport.astMeasured,
+    structMeasured: driftReport.structMeasured,
+    measured: driftReport.measured,
+    contentChanged: driftReport.contentChanged,
+    symbolsBefore: driftReport.symbolsBeforeCount,
+    contentMarkersBefore: driftReport.contentMarkersBeforeCount,
+    symbolBearingItems: symbolBearingItemIds.size,
+    unwitnessedItems: driftReport.unwitnessedItemIds,
+  };
 
   if (driftReport.shouldFallback) {
+    // Two distinct failures, deliberately given two codes. `SEMANTIC_DRIFT_EXCEEDED` means
+    // the metric ran and the answer was too high. `SEMANTIC_DRIFT_UNMEASURABLE` means it
+    // never ran on anything: content changed, but the pre-optimization bundle offered no
+    // symbols and no content-derived markers, so `S_k` is its empty-set default rather than
+    // a measurement. Collapsing them into one code would report a threshold breach for a
+    // score of 0.00, which reads as a contradiction and hides which defect fired.
+    const unmeasurable = driftReport.unwitnessedItemIds.length > 0;
     issues.push({
-      code: 'SEMANTIC_DRIFT_EXCEEDED',
+      code: unmeasurable ? 'SEMANTIC_DRIFT_UNMEASURABLE' : 'SEMANTIC_DRIFT_EXCEEDED',
       message:
         driftReport.reason ??
         `Semantic drift metric (${driftReport.driftScore.toFixed(2)}) exceeds maximum threshold (${(options?.maxDriftThreshold ?? 0.40).toFixed(2)}).`,
@@ -121,6 +147,7 @@ export function validate(
     shouldFallback,
     driftReport,
     astCoverage,
+    driftCoverage,
     ...(reason ? { reason } : {}),
   };
 }

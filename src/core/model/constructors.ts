@@ -332,6 +332,7 @@ export function createValidationReport(report: ValidationReport): ValidationRepo
     ...(report.reason === undefined ? {} : { reason: report.reason }),
     ...(report.driftReport === undefined ? {} : { driftReport: report.driftReport }),
     ...(report.astCoverage === undefined ? {} : { astCoverage: report.astCoverage }),
+    ...(report.driftCoverage === undefined ? {} : { driftCoverage: report.driftCoverage }),
   });
 }
 
@@ -356,6 +357,7 @@ export function createOptimizationTrace(trace: OptimizationTrace): OptimizationT
     ...(trace.debtScore === undefined ? {} : { debtScore: trace.debtScore }),
     ...(trace.driftScore === undefined ? {} : { driftScore: trace.driftScore }),
     ...(trace.astCoverage === undefined ? {} : { astCoverage: trace.astCoverage }),
+    ...(trace.driftCoverage === undefined ? {} : { driftCoverage: trace.driftCoverage }),
   });
 }
 

@@ -213,6 +213,7 @@ export function optimize(
         reason,
         ...(validation.driftReport ? { driftReport: validation.driftReport } : {}),
         ...(validation.astCoverage ? { astCoverage: validation.astCoverage } : {}),
+        ...(validation.driftCoverage ? { driftCoverage: validation.driftCoverage } : {}),
       });
     }
 
@@ -233,6 +234,7 @@ export function optimize(
         reason: failureReason ?? 'Stage execution failed',
         ...(validation.driftReport ? { driftReport: validation.driftReport } : {}),
         ...(validation.astCoverage ? { astCoverage: validation.astCoverage } : {}),
+        ...(validation.driftCoverage ? { driftCoverage: validation.driftCoverage } : {}),
       });
     }
 

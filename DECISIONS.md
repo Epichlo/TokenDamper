@@ -1282,3 +1282,106 @@ and no threshold can order those two correctly.
   `MARKDOWN_MARKER_TYPES` — so they over-harvest markers rather than under-harvest them, which
   is the direction that inflates drift rather than hiding it. Worth knowing before that
   allowlist is next touched.
+
+---
+
+## 28. An Empty Before-Set Is "Nothing to Measure", Not "Perfectly Retained"
+
+**Date:** 2026-08-05
+**Status:** implemented
+
+### The defect
+
+`DriftTracker.calculateDrift` initialises both retention ratios to `1.0` and overwrites them
+only when their pre-optimization set is non-empty:
+
+```ts
+let astSymbolRetentionRatio = 1.0;
+if (symbolsBefore.size > 0) { /* ... */ }
+```
+
+So an item the extractors found nothing in scores as *perfectly retained*. `S_k` is then
+`1 - (0.6·1 + 0.4·1) = 0.0000` regardless of what the stages did to the bytes.
+
+Measured on `src/index.ts` — fourteen `export * from './x';` lines, no named declarations:
+
+```
+420 bytes -> 67 bytes   130 -> 18 tokens (86.15%)
+[TokenDamper: 14 code lines elided, 420 bytes, sha256:10a4b0eb949b]
+fallbackUsed false   driftScore 0
+```
+
+The whole file replaced by a marker, certified clean. This is invariant 10's **ninth**
+instance: a green result from a check that never ran.
+
+Note the mechanism precisely, because the standing description had it slightly wrong. It is
+`R_AST` that is empty here (`symbolsBefore = 0`). `R_struct` is **not** empty — it holds
+exactly one marker, `filepath:src/index.ts`, derived from `item.path`. That marker is why the
+second half of the metric could not save the file either: elision never touches `item.path`,
+so the marker survives by construction and `R_struct` reports `1.0` while every byte of
+content is destroyed.
+
+### The decision
+
+An empty before-set means the component was **not measured**. A component that was not
+measured contributes no evidence of retention, and an item destroyed without evidence is not
+certifiable. Concretely, drift refuses when all of:
+
+1. the item's content **changed**, and
+2. an **AST validator covers** it, so symbols were the *expected* witness, and
+3. it yielded **neither symbols nor content-derived markers**.
+
+Reported through `DriftCoverage` on `ValidationReport` and the trace, alongside a distinct
+`SEMANTIC_DRIFT_UNMEASURABLE` issue code. `driftScore: 0` on its own cannot distinguish
+"retained everything" from "found nothing to look at", which is the entire defect; the boolean
+beside it now carries the verdict. Same shape §23 gave syntax with `validated`.
+
+### What is excluded from the evidence, and why
+
+**`filepath:` and metadata-derived directives.** They come from `item.path` and
+`item.metadata.constraintDirectives`, not from content, and survive any content transform. A
+witness that cannot be destroyed is not a witness. `extractContentMarkers` is the subset used
+for evidence; `extractMarkers` and `R_struct` itself are unchanged, because reweighting the
+metric is §18's argument and does not belong in a safety fix.
+
+### Why it is per item
+
+The bundle-level ratios are set comparisons with no attribution. A bundle holding one
+richly-symbolled file next to a symbol-free barrel measures `astMeasured: true` at bundle
+level while the barrel is deleted unwitnessed. The transform is per item, so the evidence
+check has to be too — keying them at different granularities is exactly what produced Issue 2.
+
+### Scope refused, deliberately
+
+**Prose.** The first implementation enforced on any unwitnessed change and was wrong. No
+validator covers prose, so `R_AST = 1.0` there is not a failed measurement but an
+inapplicable one; enforcing made every prose bundle incompressible and killed
+`cleanup:session-dedup` on the conversational traffic the Gateway carries — 4 tests, including
+both cross-turn dedup cases and the bench baseline. Plain prose remains unwitnessed by both
+components and still passes at `S_k = 0.00`. That hole is now **reported** rather than
+enforced, because closing it decides whether TokenDamper may compress prose at all, which is a
+product question, not a bug.
+
+**Pruned-away items.** Dropping an item is the planner doing its job under a budget the caller
+set, and `R_AST` already scores it wherever the item carried symbols. Refusing here would stop
+the knapsack pruning any symbol-free file. A symbol-free code file the pruner removes is still
+invisible to drift; that is the planner's half of the same defect and wants its own decision.
+
+### Measured cost
+
+68 frozen repo sources (64 TS + 4 py), engine A/B'd by patching only this clause in `dist/`,
+corpus fixed by `sha256` manifest:
+
+| | |
+|---|---|
+| files changing outcome | **5**, all pure barrel files |
+| collateral on anything else | **0** |
+| paired aggregate over the 28 files reducing under both | **48.52% → 48.52%** |
+
+Turn-1 Gateway measured as required: `fallbackUsed: false`, no false positives, and turn 2
+falls back identically with the rule on and off. Output byte-identical across 6/6 fresh
+processes, and fail-open holds — a refusal returns the caller's input verbatim.
+
+The five barrel files are a real, if small, loss of yield. That is the intended direction:
+they were only ever "reducing" by having their entire contents deleted under a score that had
+measured nothing.
