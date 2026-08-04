@@ -74,6 +74,41 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
   dense with imperative directives, which is a property of the corpus. See §24.
 
 ### Fixed
+- **The benchmark harness measured a route nobody uses (4b.0)**: `run_benchmark.py` piped its
+  fixtures to `tokendamper optimize -`. With no path the engine resolves no language, selects
+  no elision regions, falls to whole-item hashing, and `S_k` pins at the formula constant
+  `0.60` — so it fell back on **all four** fixtures and reported 0%. It now passes a **file
+  argument**, the route a developer actually uses.
+
+  Harness only; no engine code changed. Engine frozen at `95056df` across both runs (all 64
+  `dist/**/*.js` hashes identical), fixtures frozen by `sha256` manifest.
+
+  | fixture | before (stdin) | after (path) |
+  |---|---|---|
+  | `codebase.py` | 0.00%, fallback `S_k 0.60` | **27.61%**, no fallback |
+  | `sample_logs.txt` | 0.00%, fallback (constraint directive) | 0.00%, unchanged |
+  | `tool_output.json` | 0.00%, fallback `S_k 0.60` | 0.00%, unchanged |
+  | `session.json` | −1.39%, fallback `S_k 0.60` | −1.39%, unchanged |
+
+  **One fixture of four moves**, and that is the honest headline — this corpus is one Python
+  file, one log and two JSON payloads, and only the Python file is reachable by the path route.
+  Output byte-identical across 6/6 fresh processes.
+
+  Percentages are `cl100k_base` via the harness's own `tiktoken`. The engine's trace calls the
+  same `codebase.py` output **34.18%**; that is `EnhancedHeuristicTokenizer` self-reporting at
+  its documented 24% mean absolute error. **Publish the `cl100k` figure.**
+
+  Two things this does **not** fix. The −1.39% on `session.json` is the harness's *other*
+  defect — `orig_tokens` comes from `count_tokens(json.dumps(messages))`, which discards the
+  file's pretty-printing while the engine is handed and echoes the raw file. Separate concern.
+  And the pathless route remains broken **in the engine** for stdin, MCP and Gateway callers;
+  4b.0 stops the harness from misreporting it, and closes nothing else
+  (`docs/phase-4b-pathless-code-scope.md`).
+
+  Corrected as a consequence: Issue 3 is **closed for `codebase.py`** in
+  `tokendamper-headroom-known-issues.md` — the drift abort there was the harness, and the
+  question of whether it was "correct conservative behavior" was moot because the engine had
+  never looked at the file. Issue 3 stays open for the two JSON payloads.
 - **`looksLikeYaml` asks whether the input is predominantly YAML (DECISIONS §27)**: the probe
   was `/^(---\s*$)?([\w.-]+:\s+.+)$/m`, whose optional leading group cannot span a line, so it
   actually tested "some line looks like `word: text`". Measured **pathless** — the Gateway and

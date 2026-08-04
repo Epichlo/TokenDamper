@@ -236,6 +236,20 @@ count of the input against the `len / 4` count of the *same* input:
 
 Re-measured through the real CLI at `--target-reduction-ratio 0.3`, build at `1b1e999`.
 
+> **Correction 2026-08-04 (4b.0), one row only.** Those four rows were measured the way the
+> harness invoked the CLI at the time — bytes piped to `optimize -`. With no path the engine
+> cannot resolve a language, so *all four* fell back; that is the pathless defect, not a
+> property of the payloads. The harness now passes a path, and `codebase.py` changes:
+> **5,029 → 3,310, no fallback** (27.61% by `cl100k`, 34.18% by the engine's own estimator —
+> publish the former). The other three rows stand exactly as written: logs and JSON fall back
+> on the path route too, for reasons unrelated to the path. Engine frozen at `95056df` across
+> both runs, corpus frozen by `sha256` manifest.
+>
+> The "reduction percentages are **Valid**" row above (`cl100k`, independent of the internal
+> estimator) remains true as a statement about *how* the harness counted — but every
+> TokenDamper percentage it published before this date was measured on the wrong route and
+> understates it. `BENCHMARK_RESULTS.md` has been regenerated.
+
 **Accuracy, separately.** `EnhancedHeuristicTokenizer` is named as though it improves on
 `len / 4`. Scored against `cl100k_base` over the ten bench fixtures plus the four Gateway
 payloads, it does not: mean absolute error **24%** against `len / 4`'s **17%** (max 56% vs
@@ -354,7 +368,10 @@ catch a region boundary the scanner got wrong inside one.
 
 ### 2. Python delivered over stdin is invisible to the whole validator layer — **open, scoped**
 
-> Scoped 2026-08-04: `docs/phase-1e-pathless-code-scope.md`. Nothing implemented. Two
+> Scoped 2026-08-04: `docs/phase-4b-pathless-code-scope.md` (renamed from
+> `phase-1e-…`; the file said 1e and its contents said 4b, so the label is now **4b**
+> everywhere). **4b.0 has since landed** — the benchmark harness passes a path; the engine
+> defect below is untouched and 4b.1–4b.3 are not started. Two
 > corrections to the entry below. The suggested remedy — "a content-based fallback when no
 > path is available" — is right about *where* but the narrow version of it is wrong: resolving
 > a language inside `selectValidator` without also correcting `contentType` raises drift on

@@ -1,6 +1,11 @@
-# 4b — Pathless Code Is Invisible to the Validator Layer (Scope)
+# Phase 4b — Pathless Code Is Invisible to the Validator Layer (Scope)
 
-> **Status: scoping only. Nothing implemented, nothing approved.** This document exists to be
+> **Label:** this document was filed as `phase-1e-pathless-code-scope.md` while its contents
+> called the work "4b". One label, and it is **4b** — filename, heading and steps now agree.
+> Renamed 2026-08-04, before anything else came to reference the old name.
+>
+> **Status: 4b.0 landed 2026-08-04 (harness only — no engine change). 4b.1, 4b.2 and 4b.3
+> remain scoping only, nothing implemented, nothing approved.** This document exists to be
 > argued with before any code is written. Measured 2026-08-04 against `dist/` at `04ce2a3`,
 > over corpora frozen in a scratch directory (`CLAUDE.md`, Gotchas — freeze before measuring).
 >
@@ -172,10 +177,42 @@ Probe **order** is load-bearing, and a code probe must stay behind the JSON chec
 Four changes, deliberately separable, in this order. Each is independently useful and each has
 its own evidence.
 
-**4b.0 — the benchmark harness passes a path (one line, no engine change).**
-`run_benchmark.py` invokes `[cmd, "optimize", "-"]` and pipes the text, which is why it "sees
-no improvement from granularity". This is a harness defect, not an engine defect, and it is the
-one that has been distorting published numbers. It can land immediately and alone.
+**4b.0 — the benchmark harness passes a path (one line, no engine change). — LANDED
+2026-08-04.** `run_benchmark.py` invoked `[cmd, "optimize", "-"]` and piped the text, which is
+why it "saw no improvement from granularity". A harness defect, not an engine defect, and the
+one that had been distorting published numbers. Landed alone, as proposed.
+
+Measured over the four bundled fixtures, engine frozen at `95056df` (all 64 `dist/**/*.js`
+hashes identical across both runs), corpus frozen by `sha256` manifest. Tokens are
+`cl100k_base` via the harness's own `tiktoken`:
+
+| fixture | before (stdin) | after (path) | outcome |
+|---|---|---|---|
+| `codebase.py` | 0.00% — fallback `S_k 0.60` | **27.61%** — no fallback | changed |
+| `sample_logs.txt` | 0.00% — fallback, constraint directive | 0.00% — same | unchanged |
+| `tool_output.json` | 0.00% — fallback `S_k 0.60` | 0.00% — same | unchanged |
+| `session.json` | −1.39% — fallback `S_k 0.60` | −1.39% — same | unchanged |
+
+**One fixture of four moves.** That is the honest headline: this corpus is one Python file,
+one log, and two JSON payloads, and only the Python file is reachable by the path route. Logs
+and JSON fall back for reasons that have nothing to do with the path, and would not move under
+4b.1–4b.3 either.
+
+Two figures in §1 and §7 of this document need reading in that light. §1 reports
+`codebase.py` at 16,937 → 11,328 bytes, which the engine's own trace calls **34.18%**
+(5,029 → 3,310). Scored with a real BPE tokenizer the same output is **27.61%**. The gap is
+`EnhancedHeuristicTokenizer`, whose 24% mean absolute error CLAUDE.md already records; the
+trace figure is a self-estimate and the `cl100k` figure is the one to publish. The §7
+projections (`2.42% → up to 14.11%`, `1 → up to 20 files`) are likewise engine-estimator
+figures over the frozen pip corpus and should be re-derived against `cl100k` before they are
+quoted as expected value.
+
+The −1.39% on `session.json` is **not** fixed by 4b.0 and is not meant to be. It is the
+harness's *other* defect: `run_benchmark.py:75-77` sets `orig_tokens` from
+`count_tokens(json.dumps(messages))`, a re-serialization that drops the file's pretty-printing,
+while TokenDamper is handed the raw file and — correctly — echoes it back byte-identically on
+fallback. The engine is behaving; the denominator is wrong. Separate concern, separate commit;
+see CLAUDE.md's Issue 5 entry, which already documents it.
 
 **4b.1 — let the caller declare the language.** `item.language` already exists on
 `ContextItem`, is already **first** in `selectValidator`'s precedence, and **is never populated

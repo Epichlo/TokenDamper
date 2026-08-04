@@ -233,4 +233,9 @@ scratch/
 .agents/
 diff_report.html
 
+# Windows Explorer per-folder settings, created on any folder given a custom icon
+# or view. Never content; appears untracked in every `git status` until ignored.
+desktop.ini
+Thumbs.db
+
 

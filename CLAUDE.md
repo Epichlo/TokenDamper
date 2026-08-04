@@ -287,8 +287,12 @@ scoring, MMR, AST folding and Prometheus metrics on top of a pipeline that curre
   **turn 1** of a Gateway session: `cleanup:session-dedup` has no previous block hashes
   there and cannot elide anything, so any fallback is a false positive by construction.
   That is how the fenced-prose defect in DECISIONS.md §17 was found.
-- `package.json` and `src/version.ts` say **1.1.0**, but the roadmap treats **v1.0.3** as
-  the baseline. Reconcile before cutting a release; don't assume either is right.
+- **Version is reconciled at 1.1.0 — closed 2026-08-04, stop re-listing it.** `src/version.ts`
+  is the single source (`TOKENDAMPER_VERSION = '1.1.0'`); `package.json`, `CLI_ADAPTER_VERSION`,
+  `MCP_ADAPTER_VERSION`, `SERVER_VERSION` and `config.appVersion` all derive from it, and the
+  `v1.1.0` tag exists. ROADMAP.md:6 already carries its own correction retracting the v1.0.3
+  baseline. There was never a code discrepancy — only this note outliving the fix, which put it
+  on every status list for weeks.
 - `configSchemaVersion` **already exists** in `src/config/types.ts`, despite the roadmap
   listing it as a v1.1.0 item to add.
 - **Token counting goes through exactly one place: `estimateTokens` /

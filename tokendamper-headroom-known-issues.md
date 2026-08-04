@@ -120,6 +120,21 @@ available (not `HEADROOM_DETECT_BACKEND=rust`) before this corroboration can be 
 also fires on `tool_output.json` and `session.json`, co-occurring there with the Issue 2
 JSON-AST error in a single combined `fallbackReason`. See Issue 2.
 
+**Update 2026-08-04 (4b.0) — on `codebase.py` this symptom was the harness, not the engine,
+and it is gone.** The drift abort above was reproduced through `run_benchmark.py`, which piped
+the file to `optimize -`. With no path the engine resolves no language, selects no elision
+regions, falls to whole-item hashing, and `S_k` pins at the formula constant `0.60` — the
+ceiling for code, not a measurement of what was lost. Handed the same bytes as a **file
+argument**, `codebase.py` reduces **27.61%** (`cl100k`) with **no fallback** and drift `0`.
+
+So the question this issue was holding open — "is the drift abort on `codebase.py` correct
+conservative behavior?" — was the wrong question. There was nothing conservative happening: the
+engine had not looked at the file. **Issue 3 is closed for `codebase.py`.**
+
+It is **not** closed for `tool_output.json` and `session.json`. Both still fall back at `0.60`
+on the path route, and the paragraph above about Headroom's timeout still stands — there is
+still no independent corroboration for those two. Do not read this update as retiring Issue 3.
+
 ---
 
 ## Issue 4 — Constraint-preservation correctly protected a planted "secret" (not a bug, confirms feature works)

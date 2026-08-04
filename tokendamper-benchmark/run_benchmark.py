@@ -39,13 +39,29 @@ def run_headroom(messages: List[Dict[str, Any]], target_tokens: int, orig_tokens
     elapsed_ms = (time.perf_counter() - start) * 1000.0
     return compressed_text, elapsed_ms, trace
 
-def run_tokendamper(text: str, target_ratio: float) -> Tuple[str, float, Dict[str, Any]]:
+def run_tokendamper(file_path: str, target_ratio: float) -> Tuple[str, float, Dict[str, Any]]:
+    # Pass the path, not the bytes over stdin.
+    #
+    # This is not cosmetic and it is not a style preference. `createContextBundle` derives
+    # `contentType` from the content *and* the `sourcePath`, and `selectValidator` dispatches
+    # `language` -> path extension -> `contentType`. Piping to `optimize -` supplies no path,
+    # so the item classifies as `text`, `selectValidator` returns null, `selectElisionRegions`
+    # finds no language to select regions for, and the item falls to whole-item hashing --
+    # where `S_k` pins at the formula constant 0.60 and the pipeline falls back to raw input.
+    #
+    # Measured on test_data/codebase.py at 0.3: stdin 16,937 bytes out, fallback, 0% saved;
+    # path 11,328 bytes out, no fallback, 34.18% saved. Same bytes, same engine, same budget.
+    # Every TokenDamper figure this harness published before 2026-08-04 was measured through
+    # the stdin route and understates the file-argument route it was presented as measuring.
+    #
+    # The pathless route is a real engine defect (docs/phase-4b-pathless-code-scope.md) and is
+    # tracked separately. It is not this harness's job to compensate for it: the harness should
+    # exercise the route a developer actually uses, which is a file argument.
     cmd = shutil.which("tokendamper") or "tokendamper"
     start = time.perf_counter()
     try:
         process = subprocess.run(
-            [cmd, "optimize", "-", "--target-reduction-ratio", str(target_ratio)],
-            input=text,
+            [cmd, "optimize", file_path, "--target-reduction-ratio", str(target_ratio)],
             text=True,
             capture_output=True,
             check=True,
@@ -86,7 +102,7 @@ def benchmark_payload(file_path: str) -> Dict[str, Any]:
 
     # Warmup pass (1 iteration)
     run_headroom(messages, target_tokens, orig_tokens, is_session)
-    run_tokendamper(raw_text, target_reduction_ratio)
+    run_tokendamper(file_path, target_reduction_ratio)
 
     # 5 Timed Iterations for Headroom
     hr_latencies: List[float] = []
@@ -107,7 +123,7 @@ def benchmark_payload(file_path: str) -> Dict[str, Any]:
     td_compressed_text = ""
     td_trace = {}
     for _ in range(5):
-        comp_text, lat_ms, tr = run_tokendamper(raw_text, target_reduction_ratio)
+        comp_text, lat_ms, tr = run_tokendamper(file_path, target_reduction_ratio)
         td_latencies.append(lat_ms)
         td_compressed_text = comp_text
         td_trace = tr
@@ -170,6 +186,7 @@ def generate_markdown_report(results: List[Dict[str, Any]], report_path: str):
         "- **Target**: 30% reduction ratio for both engines.",
         "- **Message Formatting**: Single payload files were formatted as `role: tool` for Headroom. A multi-turn JSON session was passed as an array of messages.",
         "- **Latency Note**: ⚠️ **Latency comparison is non-equivalent.** TokenDamper latency includes a Node.js process spawn overhead (`subprocess.run`), while Headroom is timed as an in-process Python call.",
+        "- **Invocation**: TokenDamper is invoked with a **file argument** (`tokendamper optimize <path>`), the route a developer actually uses. Until 2026-08-04 this harness piped bytes to `optimize -` instead; with no path the engine cannot resolve a language, elides nothing, and falls back. Every TokenDamper figure published here before that date understates the file-argument route it was presented as measuring.",
         "- **Iterations**: 5 timed iterations per payload per engine after a warmup pass.",
         "",
         "## Consolidated Benchmark Results",
