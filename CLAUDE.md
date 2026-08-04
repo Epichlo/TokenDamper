@@ -253,6 +253,18 @@ scoring, MMR, AST folding and Prometheus metrics on top of a pipeline that curre
   elided content is deleted, not referenced. Do not infer the exemption from `elided` or
   `originalContentHash`; `token-hashing` sets both and must stay fully scored.
   See DECISIONS.md §16 and the §16 entry in `NOTES-FOR-DOCS.md`.
+- **This repo is its own corpus. Freeze it before measuring, or the measurement moves under
+  you.** Every reduction figure in this project is measured over `src/**/*.ts` and the
+  repository's own `*.py` — the same files a session edits while it works. A re-run after
+  three commits is not a re-run: a previous session read movement as a behavioral change when
+  it was reading its own edits. **Copy the corpus to a scratch directory, record the commit
+  and a `sha256sum` manifest, and point the CLI at the copy.** Then vary only the engine —
+  patch `dist/` and restore it — never the input. Two corollaries that have both bitten:
+  a paired comparison must be made over the files that reduce under *every* variant (a variant
+  that converts fallbacks into reductions changes the denominator and can make a strictly
+  worse rule look better on the mean); and the corpus is ~94% TypeScript, which is not a
+  neutral sample for anything language-dependent — a docstring rule that costs 0.45pp here
+  costs 6.8pp on real Python (`docs/phase-1d-semantic-gate-disposition.md` §2).
 - **Classification has a blast radius over items no stage touched.** `validate()` runs
   `validateBundleAst` over *every* item in the final bundle, so changing what
   `classifyContent` returns can fail an item nothing transformed. To see it, measure
