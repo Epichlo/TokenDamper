@@ -110,9 +110,12 @@ MCP tools: `optimize_context`, `rehydrate_context`, `get_session_metrics`,
 9. **The Gateway maps `finalBundle` back onto the parsed payload, never `emittedOutput`** —
    `emittedOutput` is a newline-joined blob, and using it reintroduces Issue 5.
 10. **When a check passes, confirm it ran.** A green result from a check that never executed
-    is worse than a red one — it has happened seven times in this project already. Read
+    is worse than a red one — it has happened **nine** times in this project already. Read
     `AstValidatorResult.validated` and `trace.astCoverage`, not `valid`, when the question is
-    whether anything looked (DECISIONS §23).
+    whether anything looked (DECISIONS §23). The ninth is still open: `DriftTracker` defaults
+    `R_AST` and `R_struct` to `1.0` when the pre-optimization symbol or marker set is empty,
+    so a file it found nothing in scores as perfectly retained
+    (`docs/phase-1d-semantic-gate-disposition.md` §3).
 
 ## Known bugs — highest-priority work
 
@@ -195,6 +198,19 @@ Full detail in `tokendamper-headroom-known-issues.md`; proposed fixes in
   - The old "Headroom independently chose `router:noop`, so this is probably correct" claim
     is **retracted** — on re-run Headroom hit a 20-second backend timeout and failed open.
     Same 0%, different mechanism. Do not cite it as corroboration.
+  - **The semantic gate was investigated 2026-08-04 and precondition (a) is disposed of:
+    `docs/phase-1d-semantic-gate-disposition.md`. Nothing implemented.** §18's proposed
+    markers for code (brace balance, function/class boundaries, imports) are measured to be
+    near-constants under the shipped selector — it preserves them by construction — so they
+    would replace one decorative constant with four. Only comments and docstrings vary.
+    Three findings to carry: `HumanEval/0` is **already caught** (`selectElisionRegions`
+    returns `[]`, `S_k` pins at 0.60, input echoed) so stop citing it as the live hole;
+    `R_AST` and `R_struct` **default to 1.0 when the *before* set is empty**, which scores
+    "nothing to measure" as "perfect retention" and lets `src/index.ts` be deleted whole at
+    86.15% with `S_k = 0.0000` (the ninth invariant-10 instance); and on real Python **86% of
+    elided function bodies contribute no symbols**, so the drift gate is nearly inert there
+    and it is `cleanup:constraint-preservation` that catches docstring loss — only when the
+    prose is phrased as an imperative.
 - **Issue 4 (not a bug):** constraint-preservation correctly refused to drop a planted
   imperative-tagged line in `sample_logs.txt`. `BLUE-PANDA-992` is a synthetic test
   string, not a credential.

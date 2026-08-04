@@ -426,3 +426,64 @@ The remaining gap is deliberate: DECISIONS §17 removed content-only code detect
 its only signal was a markdown fence, and the resulting verdict flipped on apostrophe parity
 in the surrounding prose. Nothing here re-opens that. The change is that the gap is now
 *stated* by the engine instead of being indistinguishable from a clean bill of health.
+
+---
+
+## `DECISIONS.md` §18 — the structural markers it proposes for code would be constants too
+
+**Date:** 2026-08-04
+**Status of the correction:** measured; **nothing implemented**. Full record:
+`docs/phase-1d-semantic-gate-disposition.md`.
+
+**What the document says.** §18's Future Revisit Conditions name the remedy for an inert
+`R_struct`: *"until `extractMarkers` learns structural markers that (a) live in the content
+and (b) are meaningful for code — nesting depth, function and class boundaries, import
+blocks, brace balance."* `docs/phase-1d-granularity-design.md` §8 carries the same list as
+precondition **(a)**, "the real fix".
+
+**What is actually true.** Four of those five candidates do not vary under the selector that
+shipped. Each was computed on the original and on the **real CLI output** of every file that
+reduces, over two frozen corpora (this repo's 68 sources; 39 `pip` Python files):
+
+| proposed marker | differs before/after (repo) | differs (pip) |
+|---|---|---|
+| brace balance | 1 / 29 | 0 / 20 |
+| paren balance | 0 / 29 | 1 / 20 |
+| function headers | 0 / 29 | 2 / 20 |
+| class headers | 0 / 29 | 0 / 20 |
+| import lines | 0 / 29 | 2 / 20 |
+| max nesting depth | 20 / 29 | 13 / 20 |
+| **comment starts** | **14 / 29** | **14 / 20** |
+| **docstring delimiters** | 1 / 29 | **17 / 20** |
+
+The reason is the same one that makes `filepath:` inert: `selectElisionRegions` preserves
+signatures and brace balance **by construction**, because that is how it was designed to pass
+the gate. Adding these markers replaces one decorative constant with four. Nesting depth does
+vary, but on *every* successful body elision — as a retention term it penalises the transform
+for having worked, which makes it a compression detector, not a loss detector.
+
+The only markers that move are comments and docstrings. So §18's remedy, followed to its
+measurement, lands on the same content class as the "cheap" docstring exclusion it was
+contrasted against. **(a) is not the real fix and (b) the stopgap; (a) is the scored version
+of (b)** — it grades partial loss instead of vetoing, and it covers the whole-item path where
+a region rule does nothing. If it is ever built it belongs beside `R_AST` as an explicit
+information-class term: a "structural integrity" ratio computed from comment density would be
+a lie in the metric's own vocabulary.
+
+**Also corrected: `HumanEval/0` is not the live instance.** `DECISIONS.md` §20 and the
+design's §8 both present it as the measured hole. It is closed on the shipped path —
+`selectElisionRegions` returns `[]`, the item falls to whole-item hashing, `S_k` pins at 0.60
+and the input is echoed verbatim. The live instances are different in kind and larger:
+`src/index.ts` is elided **whole** at 86.15% with `S_k = 0.0000` because `extractSymbols`
+finds no symbols in a barrel file and an empty *before* set is scored as perfect retention;
+and 42% of this repo's elided function bodies (86% of `pip`'s) contribute no symbols at all,
+so their removal cannot move the metric. Quote the class, not the fixture.
+
+**One consequence for `DECISIONS.md` §24.** Its `prose:WHOLE S_k=0.00 saved=78.4%` and
+`logs:WHOLE S_k=0.00 saved=97.5%` rows are produced by that same default: `extractSymbols`
+returns the empty set on `README.md`, `SECURITY.md` and `sample_logs.txt`, and
+`sample_logs.txt` has exactly one marker (`filepath:`), so **neither term examined anything**.
+§24's conclusion stands — a static content-type gate is still the wrong shape, and the saved
+bytes are real — but "passes at `S_k = 0.00`" is not evidence of safety there and should not
+be cited as if it were. Markdown is the exception: `README.md` yields 20 real markers, so
+`R_struct` does genuine work on it.
