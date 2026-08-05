@@ -562,3 +562,33 @@ empty gutted prose (4 failing tests, including both Gateway cross-turn dedup cas
 bench baseline). For prose the empty set is *inapplicability*, not extractor failure. The
 shipped rule is scoped to items an AST validator covers. Prose and pruner-removed items remain
 unwitnessed and are now reported on `DriftCoverage` rather than enforced.
+
+---
+
+## `docs/phase-4b-pathless-code-scope.md` §6/§7 — the risk register missed the effect that dominated
+
+**Date:** 2026-08-05
+**Status of the correction:** measured, implemented (DECISIONS §29). Full record: that
+document's own §8.
+
+**What the document says.** §6 lists five risks for the declaration/probe work, of which
+risk 2 is *"new validation means new fallbacks are possible"* — expected to cost yield through
+`PythonValidator` rejecting fragments. §7 projects the pip corpus from `2.42% → up to 14.11%`.
+
+**What is actually true.** Zero fallbacks came from syntax. The six files that reduce under
+bare stdin and fall back once declared are all `SEMANTIC_DRIFT_UNMEASURABLE` — five TypeScript
+barrels and `pip`'s `status_codes.py` — and that is **DECISIONS §28 reaching a route it had
+never reached**. §28's refusal is conditional on an AST validator covering the item; nothing
+covers a pathless item; so over stdin the barrel file that fix is recorded as saving was still
+being elided whole at `S_k = 0.0000` with no fallback. `index.ts`: 135 → 18 tokens,
+`astCoverage.checked: 0`, `unwitnessedItems: []`.
+
+The operative consequence is not about yield. **A pathless item is not merely unoptimized, it
+is unprotected** — every safety property that dispatches on a validator is inert on it. Anyone
+scoping 4b.2 from §7's token figures is scoping it from the weaker half of the argument.
+
+**Also: §7's projection is not comparable to the landed measurement**, and neither refutes the
+other. `2.42% → 14.11%` is the engine's own estimator (24% MAE, CLAUDE.md) over a 39-file
+selection; the landed `0.02% → 12.34%` is `cl100k_base` over a 45-file selection re-frozen on
+2026-08-05 because the earlier scratch corpus was gone. Quote §8's table, which names its
+tokenizer and its manifest.

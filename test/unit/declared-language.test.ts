@@ -1,0 +1,425 @@
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { parse } from '../../src/adapters/cli';
+import { handleToolCall, TOOL_DEFINITIONS } from '../../src/adapters/mcp/tools';
+import { loadConfig } from '../../src/config/load';
+import { runCli } from '../../src/cli/main';
+import { optimize } from '../../src/core/engine';
+import { TokenHasher } from '../../src/core/hashing/token-hasher';
+import { DriftTracker } from '../../src/core/ledger/drift-tracker';
+import {
+  contentTypeForLanguage,
+  createBundleFromItems,
+  createContextBundle,
+  createContextItem,
+  declarableLanguages,
+  normalizeLanguage,
+  type DeclaredLanguage,
+} from '../../src/core/model/constructors';
+import { GatewaySessionStore } from '../../src/gateway/session-store';
+import { selectValidator, validateItemAst } from '../../src/core/validation/ast';
+
+/**
+ * Phase 4b.1 — the caller declares what the content is.
+ *
+ * Two of the three entry modes are pathless by construction (`optimize -` has no filename,
+ * an MCP `optimize_context` call is a string in a JSON-RPC frame), and `createContextBundle`
+ * derived everything from `sourcePath` plus a content probe. With no path, TypeScript
+ * classified as `text`/`html`, `selectValidator` returned null, `selectElisionRegions` found
+ * no language, and the item fell to whole-item hashing where `S_k` pins at 0.60 and the
+ * pipeline falls back. Measured over two frozen corpora, the stdin route saved 0.07% (repo
+ * TypeScript) and 0.02% (pip Python) against 19.27% and 12.34% for the same bytes passed as
+ * a file argument.
+ *
+ * `item.language` already existed, was already first in `selectValidator`'s precedence, and
+ * was populated by no adapter at all.
+ */
+const PY = [
+  'import os',
+  '',
+  'def load(path):',
+  '    # read it',
+  '    return os.stat(path)',
+  '',
+].join('\n');
+
+const TS = [
+  'export function beta(items: Array<string>): string {',
+  '  const label = items.join(",");',
+  '  return label;',
+  '}',
+  '',
+].join('\n');
+
+const BROKEN_TS = [
+  'export function beta(items: Array<string>): string {',
+  '  const label = "unterminated;',
+  '  return label;',
+  '}',
+].join('\n');
+
+describe('normalizeLanguage', () => {
+  it('canonicalizes aliases, case and surrounding space', () => {
+    expect(normalizeLanguage('py')).toBe('python');
+    expect(normalizeLanguage('Python')).toBe('python');
+    expect(normalizeLanguage('  PY  ')).toBe('python');
+    expect(normalizeLanguage('ts')).toBe('typescript');
+    expect(normalizeLanguage('tsx')).toBe('typescript');
+    expect(normalizeLanguage('c++')).toBe('cpp');
+    expect(normalizeLanguage('yml')).toBe('yaml');
+  });
+
+  it('returns undefined for an unrecognized declaration rather than a guess', () => {
+    expect(normalizeLanguage('kotlin')).toBeUndefined();
+    expect(normalizeLanguage('pyton')).toBeUndefined();
+    expect(normalizeLanguage('')).toBeUndefined();
+    expect(normalizeLanguage(undefined)).toBeUndefined();
+  });
+
+  it('accepts every spelling it advertises, and every canonical name is a spelling', () => {
+    // Invariant 10: without this the two assertions below could pass over an empty list.
+    expect(declarableLanguages().length).toBeGreaterThan(20);
+
+    for (const spelling of declarableLanguages()) {
+      const canonical = normalizeLanguage(spelling);
+      expect(canonical, `advertised but unrecognized: ${spelling}`).toBeDefined();
+      // Canonical names round-trip, so `item.language` is always a value this table knows.
+      expect(normalizeLanguage(canonical)).toBe(canonical);
+      expect(contentTypeForLanguage(canonical as DeclaredLanguage)).toBeDefined();
+    }
+  });
+});
+
+describe('a declaration sets language and contentType together', () => {
+  it('tags pathless Python as code and carries the canonical language', () => {
+    const bundle = createContextBundle(PY, 'stdin', undefined, undefined, 'py');
+    const item = bundle.items[0]!;
+
+    expect(item.contentType).toBe('code');
+    expect(item.language).toBe('python');
+  });
+
+  it('sends declared Python to the Python validator, not the TypeScript one', () => {
+    const item = createContextBundle(PY, 'stdin', undefined, undefined, 'python').items[0]!;
+
+    expect(selectValidator(item)?.language).toBe('python');
+  });
+
+  it('pins why the two fields must move together: contentType alone picks TypeScript', () => {
+    // `CONTENT_TYPE_VALIDATORS.code` is the TypeScript validator, so a `code` tag without a
+    // language is how Python gets checked by the wrong checker. This is the trap
+    // `docs/phase-4b-pathless-code-scope.md` §6.3 names; the declaration route avoids it by
+    // never setting one field without the other.
+    const untagged = createContextItem({
+      id: 'no-language',
+      kind: 'file',
+      contentType: 'code',
+      content: PY,
+    });
+
+    expect(selectValidator(untagged)?.language).toBe('typescript');
+  });
+
+  it('does not harvest Python comments as markdown headings', () => {
+    // The other half of the coupling. `text` is in `DriftTracker`'s MARKDOWN_MARKER_TYPES, so
+    // declaring only the language would leave `#` comment leaders read as headings — markers
+    // invented before the elision, then "destroyed" by it (DECISIONS §18).
+    const tracker = new DriftTracker();
+    const commented = '# alpha\n# beta\nvalue = 1\n';
+
+    const probed = createBundleFromItems(
+      createContextBundle(commented, 'stdin').items.map((item) => item),
+      'text',
+    );
+    const declared = createBundleFromItems(
+      createContextBundle(commented, 'stdin', undefined, undefined, 'python').items.map(
+        (item) => item,
+      ),
+      'text',
+    );
+
+    // Not a hypothetical: two comment lines are enough for the probe to call a Python file a
+    // markdown document, and `markdown` harvests headings by definition.
+    expect(probed.items[0]?.contentType).toBe('markdown');
+    expect(
+      [...tracker.extractMarkers(probed)].filter((m) => m.startsWith('heading:')),
+    ).toHaveLength(2);
+    expect(
+      [...tracker.extractMarkers(declared)].filter((m) => m.startsWith('heading:')),
+    ).toHaveLength(0);
+  });
+});
+
+describe('precedence: declaration > extension > probe', () => {
+  it('outranks a filename extension that says otherwise', () => {
+    const bundle = createContextBundle(PY, 'file', 'notes.txt', undefined, 'python');
+    const item = bundle.items[0]!;
+
+    expect(item.contentType).toBe('code');
+    expect(selectValidator(item)?.language).toBe('python');
+  });
+
+  it('outranks the content probe, which is what the pathless route was left with', () => {
+    const probed = createContextBundle(TS, 'stdin').items[0]!;
+    const declared = createContextBundle(TS, 'stdin', undefined, undefined, 'typescript').items[0]!;
+
+    expect(selectValidator(probed)).toBeNull();
+    expect(validateItemAst(probed).validated).toBe(false);
+
+    expect(selectValidator(declared)?.language).toBe('typescript');
+    expect(validateItemAst(declared).validated).toBe(true);
+  });
+
+  it('makes a broken pathless file fail the check it was previously exempt from', () => {
+    const probed = createContextBundle(BROKEN_TS, 'stdin').items[0]!;
+    const declared = createContextBundle(BROKEN_TS, 'stdin', undefined, undefined, 'ts').items[0]!;
+
+    // The §23 shape: `valid: true` with `validated: false` is "nothing looked", not a pass.
+    expect(validateItemAst(probed).valid).toBe(true);
+    expect(validateItemAst(probed).validated).toBe(false);
+
+    const checked = validateItemAst(declared);
+    expect(checked.validated).toBe(true);
+    expect(checked.valid).toBe(false);
+    expect(checked.issues.length).toBeGreaterThan(0);
+  });
+
+  it('classifies by extension when a language is declared for a document type', () => {
+    const yaml = createContextBundle('a: 1\nb: 2\n', 'stdin', undefined, undefined, 'yaml');
+    expect(yaml.items[0]?.contentType).toBe('yaml');
+  });
+});
+
+describe('an undeclared bundle is unchanged', () => {
+  it('produces the same id, content type and shape it did before the parameter existed', () => {
+    const bundle = createContextBundle('const answer = 42;\n', 'stdin');
+
+    // Pinned against the pre-change build (dist at 5b19394). The declaration is spread into
+    // the item and the hash only when present, so no existing id may move.
+    expect(bundle.id).toBe('e620ce492587b2156b3e07db0db1d9384451134e65fba7e6a165adfc0ef1e938');
+    expect(bundle.items[0]?.contentType).toBe('text');
+    expect('language' in bundle.items[0]!).toBe(false);
+  });
+
+  it('ignores an unrecognized declaration rather than half-applying it', () => {
+    // The adapters reject this before it gets here (see the CLI and MCP cases below). If one
+    // ever stops, the model must not invent a content type from a language it cannot resolve.
+    const declared = createContextBundle(PY, 'stdin', undefined, undefined, 'kotlin');
+
+    expect(declared.items[0]?.contentType).toBe('text');
+    expect('language' in declared.items[0]!).toBe(false);
+    expect(declared.id).toBe(createContextBundle(PY, 'stdin').id);
+  });
+});
+
+describe('end to end: the declared route reaches what the file route reaches', () => {
+  const config = loadConfig();
+
+  it('reduces pathless Python that the probe route falls back on', () => {
+    const content = [
+      'import os',
+      '',
+      'def collect(paths):',
+      '    results = []',
+      '    for path in paths:',
+      '        stat = os.stat(path)',
+      '        results.append((path, stat.st_size, stat.st_mtime))',
+      '    results.sort(key=lambda entry: entry[1])',
+      '    return results',
+      '',
+      'def summarize(paths):',
+      '    collected = collect(paths)',
+      '    total = sum(entry[1] for entry in collected)',
+      '    largest = collected[-1] if collected else None',
+      '    return {"count": len(collected), "total": total, "largest": largest}',
+      '',
+    ].join('\n');
+
+    const withBudget = (request: ReturnType<typeof parse>) =>
+      optimize({ ...request, budget: { ...request.budget, targetReductionRatio: 0.3 } });
+
+    const probed = withBudget(parse(content, config, { sourceKind: 'stdin' }));
+    const declared = withBudget(
+      parse(content, config, { sourceKind: 'stdin', language: 'python' }),
+    );
+    const viaPath = withBudget(
+      parse(content, config, { sourceKind: 'file', sourcePath: 'collect.py' }),
+    );
+
+    // The reproduction: no validator looked, no region could be selected, whole-item hashing
+    // pinned `S_k` at 0.60 and the input came back verbatim.
+    expect(probed.trace.astCoverage).toEqual({
+      checked: 0,
+      unchecked: 1,
+      uncheckedContentTypes: ['text'],
+    });
+    expect(probed.fallbackUsed).toBe(true);
+    expect(probed.emittedOutput).toBe(content);
+
+    expect(declared.trace.astCoverage).toEqual({
+      checked: 1,
+      unchecked: 0,
+      uncheckedContentTypes: [],
+    });
+    expect(declared.fallbackUsed).toBe(false);
+    expect(declared.trace.tokenAfter).toBeLessThan(declared.trace.tokenBefore);
+
+    // The claim 4b.1 is actually making — parity with the one route that works. Measured
+    // byte-identical on all 45 files of a frozen pip corpus and all 64 of this repo's.
+    expect(declared.emittedOutput).toBe(viaPath.emittedOutput);
+  });
+
+  it('extends §28 to the pathless route: a barrel is refused instead of deleted', () => {
+    // The live instance from `5b19394` arriving by the other door. §28 refuses to certify an
+    // elision only when an AST validator covers the item — and nothing covers a pathless one,
+    // so over stdin the same barrel was still elided whole, unwitnessed, at S_k = 0.00.
+    const content =
+      Array.from({ length: 14 }, (_, i) => `export * from './module-number-${i}';`).join('\n') +
+      '\n';
+
+    const probed = optimize({
+      ...parse(content, config, { sourceKind: 'stdin' }),
+      budget: { ...loadConfig().budget, targetReductionRatio: 0.3 },
+    });
+
+    expect(probed.trace.stageCount).toBeGreaterThan(0);
+    expect(probed.fallbackUsed).toBe(false);
+    expect(probed.trace.tokenAfter).toBeLessThan(probed.trace.tokenBefore);
+    expect(probed.validation.driftCoverage?.symbolBearingItems).toBe(0);
+    expect(probed.validation.driftCoverage?.unwitnessedItems).toEqual([]);
+
+    const declared = optimize({
+      ...parse(content, config, { sourceKind: 'stdin', language: 'typescript' }),
+      budget: { ...loadConfig().budget, targetReductionRatio: 0.3 },
+    });
+
+    expect(declared.validation.issues.map((issue) => issue.code)).toContain(
+      'SEMANTIC_DRIFT_UNMEASURABLE',
+    );
+    expect(declared.fallbackUsed).toBe(true);
+    expect(declared.emittedOutput).toBe(content);
+    expect(declared.validation.driftCoverage?.symbolBearingItems).toBe(1);
+  });
+});
+
+describe('CLI', () => {
+  const io = () => {
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    return {
+      stdout,
+      stderr,
+      streams: {
+        stdout: { write: (chunk: unknown) => (stdout.push(String(chunk)), true) } as never,
+        stderr: { write: (chunk: unknown) => (stderr.push(String(chunk)), true) } as never,
+      },
+    };
+  };
+
+  it('rejects an unrecognized --language instead of silently ignoring it', () => {
+    const sink = io();
+    const exitCode = runCli(['optimize', '-', '--language', 'kotlin'], sink.streams, process.cwd());
+
+    expect(exitCode).toBe(1);
+    expect(sink.stderr.join('')).toContain('Invalid value for --language: kotlin');
+    // The accepted set is printed from the table, not restated beside it.
+    expect(sink.stderr.join('')).toContain('python');
+    expect(sink.stdout.join('')).toBe('');
+  });
+
+  it('requires a value for --language', () => {
+    const sink = io();
+    expect(runCli(['optimize', '-', '--language'], sink.streams, process.cwd())).toBe(1);
+    expect(sink.stderr.join('')).toContain('Missing value for --language.');
+  });
+
+  it('refuses --input-name alongside a real file argument', () => {
+    const sink = io();
+    const exitCode = runCli(
+      ['optimize', 'test/fixtures/sample.txt', '--input-name', 'other.py'],
+      sink.streams,
+      process.cwd(),
+    );
+
+    expect(exitCode).toBe(1);
+    expect(sink.stderr.join('')).toContain('--input-name applies to stdin input only');
+  });
+
+  it('applies --language over the extension of the file it was given', () => {
+    // A `.txt` extension is unrecognized by `classifyContent`, so this file is probe-classified
+    // and unchecked without the flag — the same hole as stdin, reachable without one.
+    const dir = mkdtempSync(join(tmpdir(), 'td-declared-'));
+    const file = join(dir, 'snippet.txt');
+    writeFileSync(file, PY, 'utf8');
+
+    const probed = io();
+    expect(runCli(['optimize', file], probed.streams, process.cwd())).toBe(0);
+    expect(JSON.parse(probed.stderr.join('')).astCoverage.checked).toBe(0);
+
+    const declared = io();
+    expect(runCli(['optimize', file, '--language', 'py'], declared.streams, process.cwd())).toBe(0);
+    const trace = JSON.parse(declared.stderr.join(''));
+    expect(trace.astCoverage).toEqual({ checked: 1, unchecked: 0, uncheckedContentTypes: [] });
+  });
+});
+
+describe('MCP optimize_context', () => {
+  const context = () => ({
+    sessionStore: new GatewaySessionStore(),
+    tokenHasher: new TokenHasher(),
+    config: loadConfig(),
+  });
+
+  it('advertises the declaration in its input schema', () => {
+    const tool = TOOL_DEFINITIONS.find((definition) => definition.name === 'optimize_context');
+    const properties = tool?.inputSchema.properties as Record<string, unknown> | undefined;
+
+    expect(properties?.language).toBeDefined();
+    expect(properties?.path).toBeDefined();
+  });
+
+  it('rejects an unsupported language', async () => {
+    const result = await handleToolCall(
+      'optimize_context',
+      { rawInput: PY, language: 'kotlin' },
+      context(),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain('unsupported language "kotlin"');
+  });
+
+  it('optimizes declared Python that it would otherwise leave untouched', async () => {
+    const rawInput = [
+      'def render(rows):',
+      '    lines = []',
+      '    for row in rows:',
+      '        lines.append(" | ".join(str(cell) for cell in row))',
+      '        lines.append("-" * 40)',
+      '    return "\\n".join(lines)',
+      '',
+    ].join('\n');
+
+    const probed = JSON.parse(
+      (await handleToolCall('optimize_context', { rawInput, maxInputTokens: 32 }, context()))
+        .content[0]!.text!,
+    );
+    const declared = JSON.parse(
+      (
+        await handleToolCall(
+          'optimize_context',
+          { rawInput, language: 'python', maxInputTokens: 32 },
+          context(),
+        )
+      ).content[0]!.text!,
+    );
+
+    expect(probed.fallbackUsed).toBe(true);
+    expect(probed.tokensSaved).toBe(0);
+
+    expect(declared.fallbackUsed).toBe(false);
+    expect(declared.tokensSaved).toBeGreaterThan(0);
+  });
+});

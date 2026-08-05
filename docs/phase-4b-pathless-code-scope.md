@@ -4,8 +4,9 @@
 > called the work "4b". One label, and it is **4b** — filename, heading and steps now agree.
 > Renamed 2026-08-04, before anything else came to reference the old name.
 >
-> **Status: 4b.0 landed 2026-08-04 (harness only — no engine change). 4b.1, 4b.2 and 4b.3
-> remain scoping only, nothing implemented, nothing approved.** This document exists to be
+> **Status: 4b.0 landed 2026-08-04 (harness only — no engine change). 4b.1 landed 2026-08-05
+> — see §8 for what it measured and where this document was wrong. 4b.2 and 4b.3 remain
+> scoping only, nothing implemented, nothing approved.** This document exists to be
 > argued with before any code is written. Measured 2026-08-04 against `dist/` at `04ce2a3`,
 > over corpora frozen in a scratch directory (`CLAUDE.md`, Gotchas — freeze before measuring).
 >
@@ -214,7 +215,8 @@ while TokenDamper is handed the raw file and — correctly — echoes it back by
 fallback. The engine is behaving; the denominator is wrong. Separate concern, separate commit;
 see CLAUDE.md's Issue 5 entry, which already documents it.
 
-**4b.1 — let the caller declare the language.** `item.language` already exists on
+**4b.1 — let the caller declare the language. — LANDED 2026-08-05, DECISIONS §29. See §8.**
+`item.language` already exists on
 `ContextItem`, is already **first** in `selectValidator`'s precedence, and **is never populated
 by any adapter** — `constructors.ts:251` passes it through and nothing supplies it. Add the
 declaration routes: a CLI `--language` / `--input-name` flag for stdin, a `path` or `language`
@@ -267,3 +269,83 @@ frozen pip corpus that is **1 → up to 20 files reducing** and **2.42% → up t
 tokens saved, minus the five files the probe does not detect and minus whatever risk 2 costs.
 TypeScript over stdin is **not** addressed and should not be claimed as addressed; 4b.1's
 declaration route is the only thing on offer for it.
+
+---
+
+## 8. 4b.1 as landed — what it measured, and three things this document got wrong
+
+**Date:** 2026-08-05. Implemented: DECISIONS §29, `test/unit/declared-language.test.ts`.
+Shipped surface: CLI `--language` / `--input-name`, MCP `optimize_context.language` /
+`.path`. **No Gateway hint** — see below.
+
+### The measurement
+
+Corpora re-frozen for this change (the 2026-08-04 scratch copies were gone): 64 TypeScript
+sources extracted from `HEAD` with `git archive`, and 45 `pip/_internal` Python files, each
+under a `sha256` manifest. Engine A/B'd as `dist-before` (built from a stashed tree at
+`5b19394`) against `dist-after`. Tokens are real `cl100k_base`, not the engine's estimator.
+`--target-reduction-ratio 0.3`.
+
+| corpus | bare stdin | `--language` | file argument | `--input-name` |
+|---|---|---|---|---|
+| repo TypeScript (64) | 0.07%, 2 files reduce, 57 fallbacks | **19.27%, 25 files** | 19.27% | 19.27% |
+| `pip` Python (45) | 0.02%, 1 file, 43 fallbacks | **12.34%, 19 files** | 12.34% | 12.34% |
+
+Byte-identical to the file-argument route on **109/109 files**. AST coverage 0/109 → 109/109
+items checked. Deterministic across 6/6 fresh processes. Zero collateral: every undeclared
+run is byte-identical before and after.
+
+### Correction 1 — §7's expected value is not comparable to what landed, in either direction
+
+§7 projected the pip corpus from `2.42% → up to 14.11%` and `1 → up to 20 files`. Those are
+**engine-estimator** figures over a **different 39-file selection**. The landed measurement
+is `0.02% → 12.34%` and `1 → 19 files` over 45 files in `cl100k`. Both differences push the
+same way — a 24%-MAE estimator and a different file set — so the numbers are not evidence for
+or against each other. Quote the §8 table, which states its tokenizer and its manifest.
+
+### Correction 2 — TypeScript over stdin *is* addressed, by the declaration route
+
+§7 closes: *"TypeScript over stdin is **not** addressed and should not be claimed as
+addressed; 4b.1's declaration route is the only thing on offer for it."* That was written
+about 4b.2's probe, which is Python-only and deliberately so. The declaration route landed
+and delivers 19.27% on this repository's own sources. What remains unaddressed is
+**undeclared** TypeScript over stdin, which is 4b.2's excluded scope (§4) and stays excluded.
+
+### Correction 3 — the risk register missed the effect that dominates
+
+§6 lists five risks, of which risk 2 (*"new validation means new fallbacks are possible"*)
+was expected to cost a little yield through `PythonValidator` rejecting fragments. That is
+not what happened. **Zero** fallbacks came from syntax. Six files across the two corpora
+reduce under bare stdin and fall back once declared, and every one is `SEMANTIC_DRIFT_
+UNMEASURABLE` — five TypeScript barrels and `pip`'s `status_codes.py`.
+
+That is §28 reaching a route it had not reached. §28 refuses to certify an unwitnessed
+elision only for items an AST validator **covers**, and nothing covers a pathless item, so
+over stdin a symbol-free barrel was still being elided whole at `S_k = 0.0000` with no
+fallback — the exact defect `5b19394` is recorded as closing:
+
+```
+index.ts, bare stdin:  135 -> 18 tokens   fallbackUsed false
+                       astCoverage {checked: 0, unchecked: 1, uncheckedContentTypes: ["text"]}
+                       driftCoverage {symbolBearingItems: 0, unwitnessedItems: []}
+index.ts, declared:    refused            fallbackUsed true
+                       driftCoverage {symbolBearingItems: 1, unwitnessedItems: [7c2bce68…]}
+```
+
+The consequence for anyone reading the yield table: the declared route is not uniformly
+additive. It gains 44 files and gives back 6, and the 6 were reducing only by being deleted
+under a score that had measured nothing. It also means **a pathless item is not merely
+unoptimized — it is unprotected**, which is a stronger argument for 4b.2 than the yield
+figures §7 makes it on.
+
+### The Gateway hint, proposed in §5 and not built
+
+§5's 4b.1 includes "an optional Gateway hint". It is deliberately unbuilt. A provider payload
+has no per-message language field, so the only shape available to a header or a config key is
+a **whole-request** declaration — and §4's own scoring shows a real session is heterogeneous:
+of seven `session.json` messages, one is a Python snippet, one is JSON, and the rest are
+prose and logs. Declaring `python` for that request tags English as Python and hands it to
+`PythonValidator`, whose indentation rule prose does not satisfy. That turns a declaration
+route into a fallback generator on precisely the traffic invariant 8 exists to protect. A
+per-message declaration would need a header format naming message indices; that is a design
+with its own measurement, not a flag.

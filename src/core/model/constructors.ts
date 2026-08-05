@@ -36,6 +36,11 @@ export interface CreateRequestOptions {
   readonly adapterVersion: string;
   readonly source: NormalizedInputSource;
   readonly sourcePath?: string;
+  /**
+   * A language declared by the caller. See `createContextBundle` — this is a declaration,
+   * not a probe, and it outranks both the filename extension and the content heuristics.
+   */
+  readonly language?: string;
 }
 
 /**
@@ -47,7 +52,13 @@ export function createOptimizationRequest(
   options: CreateRequestOptions,
   tokenizer: TokenizerAdapter = DEFAULT_TOKENIZER,
 ): OptimizationRequest {
-  const bundle = createContextBundle(rawInput, options.source, options.sourcePath, tokenizer);
+  const bundle = createContextBundle(
+    rawInput,
+    options.source,
+    options.sourcePath,
+    tokenizer,
+    options.language,
+  );
 
   return freeze({
     requestId: options.requestId,
@@ -62,14 +73,38 @@ export function createOptimizationRequest(
 
 /**
  * Creates an immutable normalized context bundle from raw adapter input.
+ *
+ * `declaredLanguage` is the caller saying what this content *is*. Two of the three entry
+ * modes are pathless by construction — `optimize -` has no filename, and an MCP
+ * `optimize_context` call is a string in a JSON-RPC frame — so without a declaration the
+ * only signal left is the content probe, and §17 removed content-only code detection on
+ * purpose. See `docs/phase-4b-pathless-code-scope.md`.
+ *
+ * **It sets `language` and `contentType` together, never one without the other.** Setting
+ * only `language` leaves `contentType` at whatever the probe guessed — `text` for most
+ * pathless code — and `text` is in `DriftTracker`'s `MARKDOWN_MARKER_TYPES`, so a declared
+ * Python file would still have its `#` comments harvested as markdown headings and then
+ * "destroyed" by the elision that follows. Setting only `contentType: 'code'` is worse:
+ * `CONTENT_TYPE_VALIDATORS.code` maps to the **TypeScript** validator, so declared Python
+ * would be checked by the wrong checker. The two fields answer to different consumers and
+ * have to agree.
+ *
+ * **Precedence: declaration > extension > probe.** A `--language` flag is a per-invocation
+ * statement by whoever is running the tool; an extension is a statement by whoever named the
+ * file, which may be neither the same person nor still true of a piped fragment. §22
+ * established that a declaration outranks a probe; this is the same rule one step further.
  */
 export function createContextBundle(
   rawInput: string,
   source: NormalizedInputSource,
   sourcePath?: string,
   tokenizer: TokenizerAdapter = DEFAULT_TOKENIZER,
+  declaredLanguage?: string,
 ): ContextBundle {
-  const contentType = classifyContent(rawInput, source, sourcePath);
+  const language = normalizeLanguage(declaredLanguage);
+  const contentType =
+    (language ? contentTypeForLanguage(language) : undefined) ??
+    classifyContent(rawInput, source, sourcePath);
   const kind: ContextItemKind = source === 'file' ? 'file' : 'prompt';
   const metadata: Readonly<Record<string, string | number | boolean | null>> = freeze({
     source,
@@ -82,6 +117,9 @@ export function createContextBundle(
     kind,
     contentType,
     metadata,
+    // Spread, not `language: language ?? null`: an undeclared item must hash exactly as it
+    // did before this parameter existed, or every pinned id in the suite moves for nothing.
+    ...(language ? { language } : {}),
   });
   const item = createContextItem({
     id: contentHash,
@@ -91,6 +129,7 @@ export function createContextBundle(
     origin: sourcePath ?? source,
     contentHash,
     ...(sourcePath ? { path: sourcePath } : {}),
+    ...(language ? { language } : {}),
     metadata,
   });
   const items = freeze([item]);
@@ -468,6 +507,157 @@ export function classifyContent(
   }
 
   return 'unknown';
+}
+
+/**
+ * The canonical spellings a caller may declare.
+ *
+ * The set is not arbitrary: it is exactly the languages the *filename* route already
+ * recognizes (`isCodeExtension` plus the document extensions above). Declaration parity is
+ * the point — `--language python` and a `.py` filename must reach the same validator with
+ * the same content type, or the two routes become two behaviours to reason about. Adding a
+ * language here without adding its extension there would create a declaration that no file
+ * can make, which is how the routes drift apart.
+ */
+export type DeclaredLanguage =
+  | 'typescript'
+  | 'javascript'
+  | 'python'
+  | 'go'
+  | 'rust'
+  | 'java'
+  | 'c'
+  | 'cpp'
+  | 'shell'
+  | 'powershell'
+  | 'css'
+  | 'scss'
+  | 'sql'
+  | 'json'
+  | 'yaml'
+  | 'html'
+  | 'markdown'
+  | 'logs'
+  | 'text';
+
+const LANGUAGE_ALIASES: Readonly<Record<string, DeclaredLanguage>> = {
+  ts: 'typescript',
+  tsx: 'typescript',
+  typescript: 'typescript',
+  js: 'javascript',
+  jsx: 'javascript',
+  cjs: 'javascript',
+  mjs: 'javascript',
+  javascript: 'javascript',
+  py: 'python',
+  python: 'python',
+  python3: 'python',
+  go: 'go',
+  golang: 'go',
+  rs: 'rust',
+  rust: 'rust',
+  java: 'java',
+  c: 'c',
+  h: 'c',
+  cpp: 'cpp',
+  'c++': 'cpp',
+  cc: 'cpp',
+  hpp: 'cpp',
+  sh: 'shell',
+  bash: 'shell',
+  zsh: 'shell',
+  shell: 'shell',
+  ps1: 'powershell',
+  powershell: 'powershell',
+  css: 'css',
+  scss: 'scss',
+  sql: 'sql',
+  json: 'json',
+  yml: 'yaml',
+  yaml: 'yaml',
+  htm: 'html',
+  html: 'html',
+  md: 'markdown',
+  markdown: 'markdown',
+  log: 'logs',
+  logs: 'logs',
+  txt: 'text',
+  text: 'text',
+  plaintext: 'text',
+};
+
+/**
+ * The content type a declared language implies.
+ *
+ * `Record<DeclaredLanguage, …>` for the same reason `CONTENT_TYPE_VALIDATORS` is total:
+ * adding a language without deciding what content type it is becomes a compile error rather
+ * than a silent `undefined` that falls back to a probe.
+ *
+ * Every programming language maps to `code`, including the ones the AST-lite suite has no
+ * validator for. That is not an oversight, and it is the same answer the filename route
+ * gives today: `foo.rs` classifies as `code` and `CONTENT_TYPE_VALIDATORS.code` is the
+ * TypeScript validator, so Rust is bracket-checked as TypeScript either way. Declaring the
+ * language does not make that better; it makes it *reachable from stdin*, and it is pinned
+ * in `test/unit/declared-language.test.ts` so the next person meets it as a recorded
+ * decision rather than as a surprise.
+ */
+const CONTENT_TYPE_BY_LANGUAGE: Readonly<Record<DeclaredLanguage, ContentType>> = {
+  typescript: 'code',
+  javascript: 'code',
+  python: 'code',
+  go: 'code',
+  rust: 'code',
+  java: 'code',
+  c: 'code',
+  cpp: 'code',
+  shell: 'code',
+  powershell: 'code',
+  css: 'code',
+  scss: 'code',
+  sql: 'code',
+  json: 'json',
+  yaml: 'yaml',
+  html: 'html',
+  markdown: 'markdown',
+  logs: 'logs',
+  text: 'text',
+};
+
+/**
+ * Resolves a caller-supplied language string to its canonical spelling.
+ *
+ * Returns `undefined` for anything unrecognized, and the caller is expected to *reject*
+ * that rather than proceed: an adapter that quietly drops `--language pyton` hands back a
+ * clean-looking run in which nothing was declared and nothing was validated, which is
+ * invariant 10's failure shape. `src/cli/main.ts` and the MCP `optimize_context` handler
+ * both error on `undefined`.
+ *
+ * Normalizing (rather than storing the caller's spelling) means `item.language` has one
+ * value per language, so downstream comparisons — `selectValidator`, `detectLanguage`,
+ * `selectElisionRegions` — cannot disagree about whether `py` and `Python` are the same
+ * thing.
+ */
+export function normalizeLanguage(language?: string): DeclaredLanguage | undefined {
+  if (!language) {
+    return undefined;
+  }
+
+  return LANGUAGE_ALIASES[language.trim().toLowerCase()];
+}
+
+/**
+ * The content type implied by a canonical language. See `CONTENT_TYPE_BY_LANGUAGE`.
+ */
+export function contentTypeForLanguage(language: DeclaredLanguage): ContentType {
+  return CONTENT_TYPE_BY_LANGUAGE[language];
+}
+
+/**
+ * Every spelling `normalizeLanguage` accepts, sorted — for CLI and MCP error messages, so
+ * the accepted set is derived from the table rather than restated next to it.
+ */
+export function declarableLanguages(): ReadonlyArray<string> {
+  return Object.keys(LANGUAGE_ALIASES).sort();
 }
 
 /**

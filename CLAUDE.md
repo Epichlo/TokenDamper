@@ -38,7 +38,14 @@ tokendamper mcp
 Key `optimize` flags: `--max-input-tokens`, `--max-output-tokens`,
 `--target-reduction-ratio`, `--max-latency-ms`, `--risk-tolerance`, `--preserve-kinds`,
 `--max-debt`, `--max-drift`, `--planner-mode`, `--minimum-confidence`, `--trace-output`,
-`--diff`, `--diff-html <path>`, `--report-json <path>`, `--config <path>`, `--quiet`.
+`--diff`, `--diff-html <path>`, `--report-json <path>`, `--config <path>`, `--quiet`,
+`--language <name>`, `--input-name <name>`.
+
+**Second critical flag, for stdin:** `--language`. Without it a piped payload has no filename,
+classification falls to content probes, no validator covers the item and reduction is ~0%
+(0.07% on this repo's TypeScript vs 19.27% with it, cl100k, DECISIONS §29). `--input-name`
+declares a filename instead and is equivalent. Pathless MCP calls take `language`/`path` on
+`optimize_context`. Unrecognized names are rejected, never ignored.
 
 **Critical:** with no budget flag, the planner returns `pass_through` with an empty
 `stageIds` array — zero stages run and reduction is guaranteed 0%. This is not a bug;
@@ -122,6 +129,11 @@ MCP tools: `optimize_context`, `rehydrate_context`, `get_session_metrics`,
     plain prose is unwitnessed by both components and still passes at `S_k = 0.00` (enforcing
     there would make prose incompressible and end Gateway dedup), and a symbol-free code file
     the *pruner* removes is still invisible to drift.
+    A third part was found and closed by Phase 4b.1 (DECISIONS §29): "validator-covered" is
+    itself route-dependent, so **the same barrel file was still being deleted unwitnessed over
+    stdin** — nothing covers a pathless item, so the refusal never fired. Declaring the
+    language brings it under a validator and it does. An **undeclared** pathless item is still
+    unprotected; that is the safety argument for 4b.2, and it is larger than the yield one.
 
 ## Known bugs — highest-priority work
 
@@ -156,8 +168,11 @@ Full detail in `tokendamper-headroom-known-issues.md`; proposed fixes in
     vacuity Phase 1a is recorded as having closed, arriving by a different route. Fixed in
     Phase 1.5: DECISIONS §22 (the classifier) and §23 (an unvalidated item now reports
     `validated: false` and shows on `trace.astCoverage` instead of reading as a pass).
-    Pathless *code* is still unchecked — §17 removed content-only code detection on purpose —
-    but it is now visible rather than silent.
+    Pathless code is still unchecked *when nothing is declared* — §17 removed content-only
+    code detection on purpose — but it is visible rather than silent, and since Phase 4b.1
+    (DECISIONS §29) a caller can close it per invocation with `--language` / `--input-name`
+    or the MCP `language` / `path` properties. Inference for the undeclared case is 4b.2,
+    still unbuilt.
   - The load-bearing mechanism is **correct-by-construction rendering**, not the
     post-condition check. Only `JsonValidator` rejects a bare placeholder; the TS and
     Python AST-lite validators accept it, so `post_condition_rejected` is unreachable

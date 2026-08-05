@@ -10,6 +10,55 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
 `git log v1.1.0..HEAD` to confirm current scope before relying on this list.
 
 ### Added
+- **The caller can declare what the content is — Phase 4b.1 (DECISIONS §29)**: new CLI
+  `--language` and `--input-name` flags, and new `language` and `path` properties on the MCP
+  `optimize_context` tool schema. `item.language` already existed, was already **first** in
+  `selectValidator`'s precedence, and was populated by **no adapter at all**.
+
+  Two of the three entry modes are pathless by construction — `optimize -` has no filename
+  and an MCP call is a string in a JSON-RPC frame — so classification fell to the content
+  probe, which §17 deliberately left unable to detect code. The consequence was not a
+  degraded result but no result: no validator covered the item, `selectElisionRegions` found
+  no language, whole-item hashing pinned `S_k` at the formula constant `0.60`, and the
+  pipeline fell back. **The one route that works is the one a coding assistant does not
+  use.**
+
+  Measured over two corpora frozen in a scratch directory (`sha256` manifests; engine A/B'd
+  as `dist-before` at `5b19394` vs `dist-after`), tokens counted with real `cl100k_base`, at
+  `--target-reduction-ratio 0.3`:
+
+  | corpus | bare stdin | `--language` | file argument |
+  |---|---|---|---|
+  | 64 repo TypeScript sources | 0.07% (2 files reduce, 57 fallbacks) | **19.27%** (25 files) | 19.27% |
+  | 45 `pip` Python sources | 0.02% (1 file) | **12.34%** (19 files) | 12.34% |
+
+  The declared route's output is **byte-identical to the file-argument route on all 109
+  files**, and AST coverage goes from 0/109 items checked to 109/109. `--input-name` matches
+  byte-for-byte too. Determinism holds across 6 fresh processes on both languages.
+  **Collateral: zero** — every undeclared run, file or stdin, is byte-identical before and
+  after the change, which is the property the spread-guarded item hash is there to protect.
+
+  Two design points that are load-bearing rather than incidental:
+  - **A declaration sets `language` and `contentType` together, never one alone.** Language
+    alone leaves the tag at whatever the probe guessed, and `text`/`markdown` are in
+    `DriftTracker`'s `MARKDOWN_MARKER_TYPES` — so a declared Python file would still have its
+    `#` comments harvested as markdown headings and then "destroyed" by the elision that
+    follows. Two comment lines are enough for the probe to call a Python file a markdown
+    document. Content type alone is worse: `CONTENT_TYPE_VALIDATORS.code` is the **TypeScript**
+    validator, so declared Python would be checked by the wrong checker.
+  - **An unrecognized language is rejected at the adapters, not dropped in the model.** A
+    `--language pyton` that quietly does nothing produces a run that looks declared, validates
+    nothing, and reports a clean trace — invariant 10's shape.
+
+- **The pathless route inherits §28's protection.** Unplanned, and the strongest single
+  result of 4b.1: §28 refuses to certify an unwitnessed elision only for items an AST
+  validator covers, and nothing covers a pathless item — so over stdin a symbol-free barrel
+  file was **still** being elided whole at `S_k = 0.0000` with no fallback, the exact defect
+  `5b19394` is recorded as closing. Declaring the language brings the item under a validator
+  and the refusal fires. Six files across the two corpora reduce under bare stdin and fall
+  back once declared (`index.ts` 135 → 18 tokens unwitnessed; five other barrels and
+  `pip`'s `status_codes.py`); every one is that class, and losing those "savings" is the
+  point of them.
 - **Sub-item hashing granularity (DECISIONS §20)**: `compression:token-hashing` now elides
   **function bodies** within an item and keeps the declarations around them, falling back to
   whole-item hashing only where no region can be selected (prose, logs, JSON, truncated code).

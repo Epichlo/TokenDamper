@@ -46,6 +46,24 @@ Or read from stdin:
 cat prompt.txt | tokendamper optimize -
 ```
 
+**Tell it what the content is when you pipe it.** Optimization is language-aware: the
+validators, the elision-region selector and the drift metric all dispatch on the item's
+language, and a piped stream carries no filename to infer one from. Without a declaration
+code is probe-classified as prose, no validator covers it, and the pipeline falls back —
+measured over a frozen 45-file Python corpus, the same bytes save **0.02% over bare stdin
+and 12.34% with `--language`**, which is exactly what the file-argument route achieves.
+
+```bash
+cat service.py | tokendamper optimize - --language python --target-reduction-ratio 0.3
+cat service.py | tokendamper optimize - --input-name src/service.py   # equivalent
+```
+
+- `--language <name>`: `typescript`, `python`, `json`, `markdown`, … Outranks both the
+  filename extension and the content heuristics. An unrecognized name is an error, never a
+  silent no-op.
+- `--input-name <name>`: the filename the piped content would have had. Declares a name for
+  classification only — the path is never opened or resolved.
+
 ### 2. Transparent Proxy Wrapper (`exec`)
 Automatically intercept and optimize LLM API calls made by CLI tools like `aider`, `curl`, or Python scripts by wrapping them with `tokendamper exec`:
 ```bash

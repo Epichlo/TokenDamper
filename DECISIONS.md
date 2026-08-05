@@ -1385,3 +1385,119 @@ processes, and fail-open holds — a refusal returns the caller's input verbatim
 The five barrel files are a real, if small, loss of yield. That is the intended direction:
 they were only ever "reducing" by having their entire contents deleted under a score that had
 measured nothing.
+
+---
+
+## 29. The Caller May Declare What the Content Is
+
+**Date:** 2026-08-05
+**Status:** implemented (Phase 4b.1)
+**Scope:** `docs/phase-4b-pathless-code-scope.md` §5. 4b.2 (a Python content probe) and 4b.3
+(the `MARKDOWN_MARKER_TYPES` allowlist) remain scoping only.
+
+### The defect
+
+`item.language` exists on `ContextItem`, is **first** in `selectValidator`'s precedence, and
+was populated by **no adapter at all**. Every entry mode inferred everything from
+`sourcePath` plus a content probe, and two of the three modes are pathless by construction:
+`optimize -` has no filename, and the MCP `optimize_context` schema accepted `rawInput` plus
+budget knobs and nothing else. Gateway messages are provider payloads and have neither.
+
+With no path, `classifyContent` falls to probes, and §17 removed content-only code detection
+on purpose. The result is not a degraded classification but an absent one: `selectValidator`
+returns `null`, `selectElisionRegions` asks the same validator for a language and gets none,
+the item falls to whole-item hashing, `S_k` pins at the formula constant `0.60`, and the
+pipeline falls back. Same bytes, two entry forms:
+
+```
+optimize corpus/service.py        11,328 bytes out   fallback false   astCoverage checked 1
+optimize - < corpus/service.py    16,937 bytes out   fallback true    astCoverage checked 0
+```
+
+**The one route that works is the one a coding assistant does not use.**
+
+### The decision
+
+The caller declares. `--language` and `--input-name` on the CLI; `language` and `path` on the
+MCP tool schema. Zero inference — this is strictly a route for information the caller already
+has, and on the MCP path the caller always has it.
+
+**Precedence: declaration > extension > probe.** §22 established that a filename outranks a
+content probe, because a name is a statement by whoever named the file and a probe is a guess
+about bytes. A `--language` flag is a statement by whoever is running the tool *now*, about
+*this* input — one step more specific than a filename, which may belong to a different person
+and may not still be true of a piped fragment.
+
+### The declaration sets two fields, atomically
+
+`language` and `contentType` move together or not at all. Both halves are load-bearing and
+each was measured:
+
+- **Language alone** leaves `contentType` at whatever the probe guessed. `text` and
+  `markdown` are both in `DriftTracker`'s `MARKDOWN_MARKER_TYPES`, so a declared Python file
+  would still have its `#` comment leaders harvested as markdown headings — markers invented
+  before the elision and then "destroyed" by it (§18). Two comment lines are enough for the
+  probe to classify a Python file as a markdown document.
+- **Content type alone** is worse: `CONTENT_TYPE_VALIDATORS.code` maps to the **TypeScript**
+  validator, so a `code` tag with no language sends Python to the wrong checker. Pinned in
+  `test/unit/declared-language.test.ts` rather than left as a comment.
+
+The two fields answer to different consumers — dispatch reads one, drift reads the other —
+and keying a transform and its check at different granularities is what produced Issue 2.
+
+### An unrecognized declaration is an error, not a no-op
+
+`normalizeLanguage` returns `undefined` for anything outside the table, and the CLI and the
+MCP handler both **reject** it. A `--language pyton` that is quietly dropped yields a run that
+looks declared, validates nothing, and prints a clean trace — invariant 10's shape, and the
+reason the check lives at the adapter edge rather than in the model.
+
+The accepted set is exactly the languages the *filename* route already recognizes
+(`isCodeExtension` plus the document extensions). Declaration parity is the rule: `--language
+python` and a `.py` name must reach the same validator with the same content type, or there
+are two behaviours to reason about instead of one. A consequence worth stating plainly:
+`rust`, `go`, `java`, `sql` and the rest map to `code`, and `code` is bracket-checked by the
+TypeScript validator. That is **already** what a `.rs` file gets today; the declaration makes
+it reachable from stdin, it does not introduce it.
+
+### Measured
+
+Two corpora frozen in a scratch directory with `sha256` manifests, engine A/B'd as
+`dist-before` (`5b19394`) against `dist-after`, tokens counted with real `cl100k_base` rather
+than the engine's estimator, `--target-reduction-ratio 0.3`:
+
+| corpus | bare stdin | `--language` | file argument | `--input-name` |
+|---|---|---|---|---|
+| 64 repo TypeScript sources | 0.07% | **19.27%** | 19.27% | 19.27% |
+| 45 `pip` Python sources | 0.02% | **12.34%** | 12.34% | 12.34% |
+
+Output is **byte-identical to the file-argument route on all 109 files**. AST coverage goes
+from 0/109 items checked to 109/109. Determinism holds across 6/6 fresh processes in both
+languages. **Collateral is zero**: every undeclared run, file or stdin, is byte-identical
+before and after — the item hash spreads `language` in only when present, so no existing id
+moves.
+
+### The unplanned result: §28 did not reach the pathless route
+
+Six files across the two corpora **reduce under bare stdin and fall back once declared**.
+Every one is a barrel or constants file, and the mechanism is §28 arriving by the other door:
+its refusal is conditional on an AST validator covering the item, and nothing covers a
+pathless item. So the defect `5b19394` is recorded as closing was still live over stdin —
+`index.ts` went 135 → 18 tokens, `astCoverage.checked: 0`, `unwitnessedItems: []`,
+`fallbackUsed: false`. Declared, the same bytes produce `symbolBearingItems: 1` and
+`SEMANTIC_DRIFT_UNMEASURABLE`.
+
+Read the yield table with that in mind: the declared route is not uniformly additive. It
+gains 25 and 19 files respectively and gives back 6, and the 6 are ones that were only ever
+"reducing" by being deleted under a score that had measured nothing.
+
+### Not done here
+
+**No Gateway hint.** 4b.1 proposed one and it is deliberately unbuilt. A provider payload has
+no per-message language field, so the only available shape is a whole-request declaration —
+and a session is heterogeneous by nature: prose questions, JSON tool results, code fragments.
+Declaring `python` for a request would tag English prose as Python code and hand it to
+`PythonValidator`, whose indentation rule prose does not satisfy. That converts a declaration
+route into a fallback generator on exactly the traffic invariant 8 protects. If a Gateway
+declaration is ever wanted it must be per message, which means a header format that names
+message indices, and that is a design, not a flag.

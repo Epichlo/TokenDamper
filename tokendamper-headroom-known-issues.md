@@ -135,6 +135,17 @@ It is **not** closed for `tool_output.json` and `session.json`. Both still fall 
 on the path route, and the paragraph above about Headroom's timeout still stands — there is
 still no independent corroboration for those two. Do not read this update as retiring Issue 3.
 
+**Update 2026-08-05 (4b.1) — the harness was not the only caller taking that route.** 4b.0
+fixed the benchmark's invocation; it did not give the engine a way to know what pathless
+content is, and two of the three entry modes are pathless by construction. A caller can now
+declare: `--language` / `--input-name` on the CLI, `language` / `path` on the MCP
+`optimize_context` tool. Measured over frozen corpora in `cl100k`, the declared route matches
+the file-argument route **byte-for-byte on all 109 files** (repo TypeScript 0.07% → 19.27%,
+`pip` Python 0.02% → 12.34%). DECISIONS §29 and `docs/phase-4b-pathless-code-scope.md` §8.
+This changes nothing for `tool_output.json` or `session.json`: both are JSON, both are already
+classified as JSON without a declaration, and both fall back for reasons a language
+declaration does not touch.
+
 ---
 
 ## Issue 4 — Constraint-preservation correctly protected a planted "secret" (not a bug, confirms feature works)

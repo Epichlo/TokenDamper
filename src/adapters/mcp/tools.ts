@@ -1,7 +1,11 @@
 import type { McpToolDefinition, McpToolCallResult } from './types';
 import type { GatewaySessionStoreInterface } from '../../gateway/types';
 import type { ResolvedConfig, OptimizationTrace, ContextItemKind } from '../../core/model/types';
-import { createOptimizationRequest } from '../../core/model/constructors';
+import {
+  createOptimizationRequest,
+  declarableLanguages,
+  normalizeLanguage,
+} from '../../core/model/constructors';
 import { optimize } from '../../core/engine';
 import { TokenHasher } from '../../core/hashing/token-hasher';
 import { loadConfig } from '../../config';
@@ -20,6 +24,16 @@ export const TOOL_DEFINITIONS: ReadonlyArray<McpToolDefinition> = [
         rawInput: {
           type: 'string',
           description: 'Raw context text or file content to optimize',
+        },
+        language: {
+          type: 'string',
+          description:
+            'What the content is (typescript, python, json, markdown, …). An MCP call carries no filename, so without this the engine falls back to content heuristics and code goes unvalidated and uncompressed. Outranks `path`.',
+        },
+        path: {
+          type: 'string',
+          description:
+            'The filename this content has or would have. Never opened — used for classification, validator selection and topology only.',
         },
         maxInputTokens: {
           type: 'number',
@@ -108,6 +122,25 @@ export async function handleToolCall(
         };
       }
 
+      // Declared, not probed. This is the entry mode with the strongest case for a
+      // declaration and the weakest case for inference: the caller is a coding assistant
+      // that knows exactly which file it is sending, and the JSON-RPC frame carries no
+      // filename at all. Rejected rather than dropped when unrecognized — see
+      // `normalizeLanguage`.
+      const declaredLanguage = typeof args.language === 'string' ? args.language : undefined;
+      if (declaredLanguage !== undefined && !normalizeLanguage(declaredLanguage)) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Error: unsupported language "${declaredLanguage}". Accepted: ${declarableLanguages().join(', ')}.`,
+            },
+          ],
+          isError: true,
+        };
+      }
+      const declaredPath = typeof args.path === 'string' && args.path ? args.path : undefined;
+
       const baseConfig = context.config ?? loadConfig({ cwd: process.cwd() });
       let budget = baseConfig.budget;
 
@@ -135,6 +168,8 @@ export async function handleToolCall(
         adapterName: MCP_ADAPTER_NAME,
         adapterVersion: MCP_ADAPTER_VERSION,
         source: 'text',
+        ...(declaredPath ? { sourcePath: declaredPath } : {}),
+        ...(declaredLanguage ? { language: declaredLanguage } : {}),
       });
 
       const result = optimize(request, { tokenHasher: context.tokenHasher });

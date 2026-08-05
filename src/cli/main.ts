@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { format as formatCliOutput, parse } from '../adapters/cli';
 import { loadConfig } from '../config';
+import { declarableLanguages, normalizeLanguage } from '../core/model';
 import { optimize } from '../core/engine';
 import { runExecCommand } from '../gateway/exec';
 import { renderTerminalDiff } from './diff-renderer';
@@ -117,9 +118,14 @@ export function runCli(
       ...(parsed.configPath ? { configPath: parsed.configPath } : {}),
       ...(parsed.configOverrides ? { cliOverrides: parsed.configOverrides } : {}),
     });
+    // `--input-name` is a declared name, not a location: it is never resolved against `cwd`
+    // and never opened. Resolving it would put a fabricated absolute path on `item.path` and
+    // into the `filepath:` marker, asserting that a file exists where none does.
+    const declaredPath = inputPath ?? parsed.inputName;
     const request = parse(rawInput, config, {
       sourceKind: isStdin ? 'stdin' : 'file',
-      ...(inputPath ? { sourcePath: inputPath } : {}),
+      ...(declaredPath ? { sourcePath: declaredPath } : {}),
+      ...(parsed.language ? { language: parsed.language } : {}),
     });
 
     const result = optimize(request, {
@@ -170,6 +176,10 @@ export interface ParsedArguments {
   readonly diffHtmlPath?: string;
   readonly maxDebt?: number;
   readonly maxDrift?: number;
+  /** `--language`: what the content is, declared by the caller. */
+  readonly language?: string;
+  /** `--input-name`: the filename stdin content would have had. Never opened. */
+  readonly inputName?: string;
 }
 
 function parseArguments(argv: readonly string[], cwd: string): ParsedArguments {
@@ -229,6 +239,8 @@ function parseArguments(argv: readonly string[], cwd: string): ParsedArguments {
   let maxDrift: number | undefined;
   let reportJsonPath: string | undefined;
   let quiet = false;
+  let language: string | undefined;
+  let inputName: string | undefined;
 
   while (args.length > 0) {
     const flag = args.shift();
@@ -422,6 +434,32 @@ function parseArguments(argv: readonly string[], cwd: string): ParsedArguments {
       continue;
     }
 
+    if (flag === '--language') {
+      const value = args.shift();
+      if (!value) {
+        throw new Error('Missing value for --language.');
+      }
+      // Rejected here rather than dropped in the model. An unrecognized declaration that
+      // silently does nothing produces a run that looks declared, validates nothing, and
+      // reports a clean trace — invariant 10's shape.
+      if (!normalizeLanguage(value)) {
+        throw new Error(
+          `Invalid value for --language: ${value}. Accepted: ${declarableLanguages().join(', ')}.`,
+        );
+      }
+      language = value;
+      continue;
+    }
+
+    if (flag === '--input-name') {
+      const value = args.shift();
+      if (!value) {
+        throw new Error('Missing value for --input-name.');
+      }
+      inputName = value;
+      continue;
+    }
+
     throw new Error(`Unknown argument: ${flag ?? ''}`);
   }
 
@@ -445,10 +483,19 @@ function parseArguments(argv: readonly string[], cwd: string): ParsedArguments {
     };
   }
 
+  if (inputName !== undefined && inputPath !== '-') {
+    // Not merged, and not silently ignored: with a real file argument there are two
+    // candidate names for one item, and picking either leaves the other as a lie in the
+    // trace. The caller has to say which one they meant.
+    throw new Error('--input-name applies to stdin input only; pass `-` as the input file.');
+  }
+
   return {
     command: 'optimize',
     inputPath,
     execArgs: [],
+    ...(language ? { language } : {}),
+    ...(inputName ? { inputName } : {}),
     ...(configPath ? { configPath } : {}),
     ...(diff ? { diff } : {}),
     ...(diffHtmlPath ? { diffHtmlPath } : {}),

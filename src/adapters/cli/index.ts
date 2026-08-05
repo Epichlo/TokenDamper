@@ -27,6 +27,8 @@ export function parse(
     readonly requestId?: string;
     readonly sourceKind?: NormalizedInputSource;
     readonly sourcePath?: string;
+    /** `--language`. Canonicalized by `createContextBundle`; see its precedence note. */
+    readonly language?: string;
   } = {},
 ): OptimizationRequest {
   const requestId = options.requestId ?? randomUUID();
@@ -36,6 +38,7 @@ export function parse(
     adapterVersion: CLI_ADAPTER_VERSION,
     source: options.sourceKind ?? (options.sourcePath ? 'file' : 'text'),
     ...(options.sourcePath ? { sourcePath: options.sourcePath } : {}),
+    ...(options.language ? { language: options.language } : {}),
   });
 }
 
