@@ -1,7 +1,11 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createOptimizationRequest } from '../../core/model/constructors';
-import type { OptimizationBudget, OptimizationRequest, ResolvedConfig } from '../../core/model/types';
+import type {
+  OptimizationBudget,
+  OptimizationRequest,
+  ResolvedConfig,
+} from '../../core/model/types';
 import { loadConfig } from '../../config/load';
 import { TOKENDAMPER_VERSION } from '../../version';
 import { loadCodeXGLUEFixtures } from './codexglue';
@@ -67,17 +71,38 @@ export function fixtureToOptimizationRequest(
     ...config,
     budget: { ...baseConfig.budget, ...config?.budget },
     validation: { ...baseConfig.validation, ...config?.validation },
-    ...((baseConfig as unknown as Record<string, unknown>)?.limits || (config as unknown as Record<string, unknown>)?.limits
-      ? { limits: { ...((baseConfig as unknown as Record<string, unknown>)?.limits as object), ...((config as unknown as Record<string, unknown>)?.limits as object) } }
+    ...((baseConfig as unknown as Record<string, unknown>)?.limits ||
+    (config as unknown as Record<string, unknown>)?.limits
+      ? {
+          limits: {
+            ...((baseConfig as unknown as Record<string, unknown>)?.limits as object),
+            ...((config as unknown as Record<string, unknown>)?.limits as object),
+          },
+        }
       : {}),
   } as unknown as ResolvedConfig;
 
+  // `language` as well as `path` — the third construction site, and the one that was still
+  // guessing with the answer in hand. `BenchmarkFixture.language` is a *required* field, and
+  // this call dropped it and let `classifyContent` re-derive a content type from the filename.
+  // For a fixture whose path agrees with its language that is merely redundant; for a
+  // CodeXGLUE item with no `path` it is the 4b.1 defect inside the harness that publishes this
+  // project's numbers. `codexglue.ts` synthesizes `src/item_<id>.txt` for those, which
+  // classifies `text`, so a Python fixture reached the engine with no validator, no elision
+  // regions and a guaranteed fallback:
+  //
+  //   language "python"  path src/item_pathless-1.txt  contentType text
+  //   astCoverage {checked: 0, unchecked: 1}  fallback true  133 -> 133 tokens
+  //
+  // The bundled fixtures all carry paths that agree with their language, so declaring moves
+  // no published number — verified fixture-by-fixture, not assumed.
   const baseRequest = createOptimizationRequest(fixture.prompt, mergedConfig, {
     requestId: reqId,
     adapterName: 'bench',
     adapterVersion: TOKENDAMPER_VERSION,
     source: 'file',
     sourcePath: fixture.path,
+    language: fixture.language,
   });
 
   return Object.freeze({

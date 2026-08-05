@@ -349,3 +349,30 @@ prose and logs. Declaring `python` for that request tags English as Python and h
 route into a fallback generator on precisely the traffic invariant 8 exists to protect. A
 per-message declaration would need a header format naming message indices; that is a design
 with its own measurement, not a flag.
+
+### Addendum — the harness was a construction site too
+
+Filed after the initial 4b.1 commit, on the question "is anything left". There are exactly
+three `createOptimizationRequest` call sites: CLI, MCP, and `src/bench/fixtures/loader.ts`.
+The third passed `sourcePath` and dropped `fixture.language` — a **required** field on
+`BenchmarkFixture` — so the benchmark harness re-derived a content type from a filename it had
+sometimes synthesized itself. `codexglue.ts` writes `src/item_<id>.txt` for a fixture with no
+path, which classifies `text`, and that fixture then reached the engine with no validator and a
+guaranteed fallback: `checked: 0`, 133 → 133 tokens. Declared: 133 → 59.
+
+This matters beyond the one fixture. §1 of this document contrasts "the file argument route"
+with "the stdin route" as though the file route were sound. It is sound *when the filename
+carries the answer*. The harness demonstrates the third case — a path that exists but does not
+describe the content — and that case is invisible to the framing this document started with.
+
+Two consequences worth carrying into 4b.2:
+
+1. **A path is not a declaration.** `src/item_pathless-1.txt` is a real `sourcePath` and tells
+   the classifier something false. Any probe added in 4b.2 must not treat the presence of a
+   path as evidence that classification succeeded.
+2. **A false declaration fails closed, and cheaply.** Believing `language` broke
+   `test/integration/bench.test.ts` Test 2, whose fixtures were English prose labelled
+   `python`. §28 refuses the elision (no symbols in English), the input returns verbatim, and
+   the only casualty is the reduction. That is the failure direction 4b.2's probe should also
+   aim for — and it is the measured answer to §6's risk 5, which asked that the probe "fail to
+   today's behaviour rather than to a wrong answer".

@@ -50,6 +50,23 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
     `--language pyton` that quietly does nothing produces a run that looks declared, validates
     nothing, and reports a clean trace — invariant 10's shape.
 
+  The **benchmark loader** is the third `createOptimizationRequest` call site and was the last
+  one guessing with the answer in hand: `BenchmarkFixture.language` is a *required* field that
+  `fixtureToOptimizationRequest` dropped. Harmless where a fixture's path agrees with its
+  language; for a CodeXGLUE item with **no** path — `codexglue.ts` synthesizes
+  `src/item_<id>.txt`, which classifies `text` — it was 4b.1's defect inside the harness that
+  publishes this project's numbers (`checked: 0`, fallback, 133 → 133 tokens; declared, 133 →
+  59). All ten bundled fixtures are byte-identical before and after.
+
+- **A false declaration fails closed.** Found by the loader change breaking a bench test whose
+  fixtures were English prose carrying `language: 'python'` — it had passed only because the
+  loader ignored the field. Prose is exempt from §28's refusal *because no validator covers
+  it*; declaring a language drags it under one, no symbols are found in English, and drift
+  refuses. **The cost of a wrong declaration is the optimization, never the content** — the
+  input comes back verbatim. Pinned as a test, since someone will eventually run
+  `--language python` over a README. The bench fixtures are now Python, which is what they
+  always claimed to be, and still clear their 40% threshold at 58.8% with zero fallbacks.
+
 - **The pathless route inherits §28's protection.** Unplanned, and the strongest single
   result of 4b.1: §28 refuses to certify an unwitnessed elision only for items an AST
   validator covers, and nothing covers a pathless item — so over stdin a symbol-free barrel

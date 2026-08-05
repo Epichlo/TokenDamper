@@ -1491,6 +1491,45 @@ Read the yield table with that in mind: the declared route is not uniformly addi
 gains 25 and 19 files respectively and gives back 6, and the 6 are ones that were only ever
 "reducing" by being deleted under a score that had measured nothing.
 
+### The third construction site: the benchmark loader
+
+There are exactly three `createOptimizationRequest` call sites — CLI, MCP, and
+`src/bench/fixtures/loader.ts`. The third was still guessing **with the answer in hand**:
+`BenchmarkFixture.language` is a *required* field, and `fixtureToOptimizationRequest` dropped
+it and let `classifyContent` re-derive a content type from the filename.
+
+For a fixture whose path agrees with its language that is merely redundant. For a CodeXGLUE
+item with **no path** it is 4b.1's defect inside the harness that publishes this project's
+numbers — `codexglue.ts` synthesizes `src/item_<id>.txt` for those, which classifies `text`:
+
+```
+language "python"   path src/item_pathless-1.txt   contentType text
+astCoverage {checked: 0, unchecked: 1}   fallback true   133 -> 133 tokens
+```
+
+Declared, the same fixture is checked, is not refused, and goes 133 → 59 tokens. All ten
+bundled fixtures are byte-identical before and after (verified fixture-by-fixture, output
+hashes included) because their paths agree with their languages; the agreement itself is now a
+test rather than a recorded observation.
+
+### A false declaration fails closed, and that is how the fixture lie was found
+
+Making the loader believe `fixture.language` broke `test/integration/bench.test.ts` Test 2,
+whose two fixtures were **English prose carrying `language: 'python'`** and `.txt` paths. The
+test had passed only because the loader ignored the field.
+
+The mechanism is §28 doing its job: prose is exempt from the unwitnessed-elision refusal only
+because *no validator covers it*. A false declaration drags it under one, the extractor finds
+no Python symbols in English, and drift refuses to certify what it cannot witness —
+`SEMANTIC_DRIFT_UNMEASURABLE`, fallback, input returned verbatim.
+
+**So a wrong declaration costs the optimization and never the content.** That is the right
+failure direction for a flag a user will eventually point at a README, and it is pinned as a
+test in its own right rather than left as an incident. The fixtures are now Python, which is
+what they always claimed to be; the assertion is unchanged and still clears its 40% threshold
+(58.8%, zero fallbacks), now by eliding real function bodies instead of deleting unlabelled
+prose whole.
+
 ### Not done here
 
 **No Gateway hint.** 4b.1 proposed one and it is deliberately unbuilt. A provider payload has

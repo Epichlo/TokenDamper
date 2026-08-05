@@ -4,6 +4,11 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parse } from '../../src/adapters/cli';
 import { handleToolCall, TOOL_DEFINITIONS } from '../../src/adapters/mcp/tools';
+import {
+  fixtureToOptimizationRequest,
+  loadBenchmarkFixtures,
+} from '../../src/bench/fixtures/loader';
+import type { BenchmarkFixture } from '../../src/bench/fixtures/types';
 import { loadConfig } from '../../src/config/load';
 import { runCli } from '../../src/cli/main';
 import { optimize } from '../../src/core/engine';
@@ -14,6 +19,7 @@ import {
   createBundleFromItems,
   createContextBundle,
   createContextItem,
+  createOptimizationBudget,
   declarableLanguages,
   normalizeLanguage,
   type DeclaredLanguage,
@@ -301,6 +307,112 @@ describe('end to end: the declared route reaches what the file route reaches', (
     expect(declared.fallbackUsed).toBe(true);
     expect(declared.emittedOutput).toBe(content);
     expect(declared.validation.driftCoverage?.symbolBearingItems).toBe(1);
+  });
+});
+
+describe('the benchmark loader declares too', () => {
+  // The third `createOptimizationRequest` call site, and the last one that was still guessing
+  // with the answer in hand: `BenchmarkFixture.language` is a *required* field and
+  // `fixtureToOptimizationRequest` dropped it, leaving `classifyContent` to re-derive a type
+  // from the filename.
+  const budget = createOptimizationBudget({ targetReductionRatio: 0.3, preserveKinds: [] });
+
+  const fixture = (overrides: Partial<BenchmarkFixture>): BenchmarkFixture => ({
+    id: 'probe',
+    dataset: 'codexglue',
+    prompt: PY,
+    referenceCompletion: '',
+    language: 'python',
+    path: 'src/item_probe.txt',
+    metadata: {},
+    ...overrides,
+  });
+
+  it('covers a fixture whose synthesized path hides its language', () => {
+    // `codexglue.ts` synthesizes `src/item_<id>.txt` when a fixture carries no path. That
+    // classifies `text`, so a Python fixture reached the engine with no validator and a
+    // guaranteed fallback — the 4b.1 defect inside the harness that publishes the numbers.
+    const content = [
+      'import os',
+      '',
+      'def collect(paths):',
+      '    results = []',
+      '    for path in paths:',
+      '        stat = os.stat(path)',
+      '        results.append((path, stat.st_size, stat.st_mtime))',
+      '    return results',
+      '',
+    ].join('\n');
+
+    const request = fixtureToOptimizationRequest(fixture({ prompt: content }), budget);
+
+    expect(request.bundle.items[0]?.language).toBe('python');
+    expect(request.bundle.items[0]?.contentType).toBe('code');
+
+    const result = optimize(request);
+    expect(result.trace.astCoverage).toEqual({
+      checked: 1,
+      unchecked: 0,
+      uncheckedContentTypes: [],
+    });
+    expect(result.fallbackUsed).toBe(false);
+    expect(result.trace.tokenAfter).toBeLessThan(result.trace.tokenBefore);
+  });
+
+  it('agrees with the path on every bundled fixture, so no published number moves', () => {
+    // How "zero movement on the bench corpus" is held structurally rather than by a recorded
+    // number: for each bundled fixture the validator chosen from the declaration must be the
+    // one the extension would have chosen anyway. A fixture whose path and language disagree
+    // would change a published result, and this is where that shows up.
+    const fixtures = loadBenchmarkFixtures().fixtures;
+    expect(fixtures.length, 'no bundled fixtures loaded').toBeGreaterThan(5);
+
+    for (const entry of fixtures) {
+      const declared = fixtureToOptimizationRequest(entry, budget).bundle.items[0]!;
+      const pathOnly = createContextItem({
+        id: declared.id,
+        kind: declared.kind,
+        contentType: declared.contentType,
+        content: declared.content,
+        ...(declared.path ? { path: declared.path } : {}),
+      });
+
+      // Invariant 10: without this the comparison below is `pathOnly` against `pathOnly` and
+      // passes for the very build that does not declare at all.
+      expect(declared.language, `${entry.id}: loader dropped the declaration`).toBeDefined();
+
+      expect(
+        selectValidator(declared)?.language,
+        `${entry.id}: declaration and path disagree`,
+      ).toBe(selectValidator(pathOnly)?.language);
+    }
+  });
+
+  it('fails closed on a false declaration: prose called Python is refused, not mangled', () => {
+    // Found by this change breaking `test/integration/bench.test.ts` Test 2, whose fixtures
+    // were English prose carrying `language: 'python'`. Believing the declaration is correct
+    // behaviour and the fixture was wrong — but the failure mode is worth pinning, because a
+    // user will eventually run `--language python` over a README.
+    //
+    // §28 exempts prose only because *no validator covers it*. A false declaration drags it
+    // under one, the extractor finds no Python symbols in English, and drift refuses to
+    // certify. The cost is the optimization, never the content.
+    const prose =
+      'This is a long technical prompt context providing detailed background information, ' +
+      'architecture specifications, API schemas, and deployment guidelines.';
+
+    const result = optimize(
+      fixtureToOptimizationRequest(
+        fixture({ prompt: prose, path: 'bench_context1.txt' }),
+        createOptimizationBudget({ maxInputTokens: 50, targetReductionRatio: 0.3 }),
+      ),
+    );
+
+    expect(result.validation.issues.map((issue) => issue.code)).toContain(
+      'SEMANTIC_DRIFT_UNMEASURABLE',
+    );
+    expect(result.fallbackUsed).toBe(true);
+    expect(result.emittedOutput).toBe(prose);
   });
 });
 

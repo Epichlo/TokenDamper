@@ -78,6 +78,17 @@ describe('TokenDamper Regression Test Suite & Performance Baseline (R5)', () => 
     expect(report.environment.tokendamperVersion).toBeDefined();
   });
 
+  // These two fixtures used to be English prose carrying `language: 'python'` and `.txt`
+  // paths, and the test passed only because the loader ignored `language` entirely. Phase
+  // 4b.1 makes the loader declare it, so the lie became load-bearing: prose dragged under the
+  // Python validator yields no symbols, drift refuses to certify what it cannot witness
+  // (`SEMANTIC_DRIFT_UNMEASURABLE`, DECISIONS §28), and the ratio this test asserts went to 0.
+  //
+  // The fixtures are now Python, which is what they always claimed to be. The assertion is
+  // unchanged and still measures what it was written to measure — the runner producing a real
+  // reduction under a tight budget — except that the reduction is now sub-item body elision on
+  // actual code rather than whole-item deletion of unlabelled prose. Measured 58.8%, 0
+  // fallbacks, against the same 40% threshold.
   it('Test 2: Assert aggregate token reduction ratio >= baseline.thresholds.minTokenReductionRatio (>= 40%)', () => {
     const textFixtureSet: BenchmarkFixtureSet = {
       datasetName: 'bench_prompts',
@@ -87,18 +98,36 @@ describe('TokenDamper Regression Test Suite & Performance Baseline (R5)', () => 
           id: 'bench-1',
           dataset: 'humaneval',
           language: 'python',
-          prompt: 'This is a long technical prompt context providing detailed background information, architecture specifications, API schemas, and deployment guidelines.',
-          referenceCompletion: 'Context processed successfully.',
-          path: 'bench_context1.txt',
+          prompt: [
+            'def build_index(records):',
+            '    index = {}',
+            '    for record in records:',
+            '        key = record.get("id")',
+            '        if key is None:',
+            '            continue',
+            '        index.setdefault(key, []).append(record)',
+            '    return index',
+          ].join('\n'),
+          referenceCompletion: '    return index',
+          path: 'bench_context1.py',
           metadata: {},
         },
         {
           id: 'bench-2',
           dataset: 'humaneval',
           language: 'python',
-          prompt: 'Another extensive set of developer documentation describing internal module interfaces, error handling conventions, and performance optimization targets.',
-          referenceCompletion: 'Documentation verified.',
-          path: 'bench_context2.txt',
+          prompt: [
+            'def merge_settings(base, override):',
+            '    merged = dict(base)',
+            '    for key, value in override.items():',
+            '        if isinstance(value, dict) and isinstance(merged.get(key), dict):',
+            '            merged[key] = merge_settings(merged[key], value)',
+            '        else:',
+            '            merged[key] = value',
+            '    return merged',
+          ].join('\n'),
+          referenceCompletion: '    return merged',
+          path: 'bench_context2.py',
           metadata: {},
         },
       ],
