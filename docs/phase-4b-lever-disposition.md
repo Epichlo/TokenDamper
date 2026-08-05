@@ -1,6 +1,7 @@
 # Phase 4b — Disposition of the Three Levers Against DECISIONS §32
 
-> **Date:** 2026-08-06 · **Status: measured, nothing implemented, no remedy proposed.**
+> **Date:** 2026-08-06 · **Status: measured; no remedy implemented or proposed.** (§0's
+> finding — that the pin was nominal — *was* acted on; the defect itself remains open.)
 > Engine: `dist` built from `73177bd`. Corpus frozen under `sha256` manifests: 144 files —
 > 45 `pip` Python, 64 repo TypeScript, 9 shell scripts, 25 repo markdown, 1 log. Tokens are
 > `cl100k_base` where a corpus aggregate is quoted and the **engine estimator** where a CLI
@@ -39,12 +40,29 @@ is what forces the encounter.
 **Does that make the defect the de facto spec? Yes.** A green assertion is a specification; the
 only thing marking these as not-a-spec is the `describe` name and a docblock, which are prose
 and enforce nothing. A tool reading the suite — or a person skimming green output — sees
-`structMeasured: true` on a 99%-deleted shell script asserted as correct. `it.fails` is not the
-fix (it inverts to "the body must throw", which these bodies do not). The minimal honest remedy
-is an assertion that carries its own verdict, e.g. asserting the pair
-`(structMeasured: true, astCoverage.checked: 0)` is *contradictory* and marking the test
-`todo`-adjacent. **Not implemented here** — flagged, because it is the same shape as the defect
-it documents: a green result standing in for a judgement nobody made.
+`structMeasured: true` on a 99%-deleted shell script asserted as correct.
+
+**Fixed after this note was first written.** The block now states the *contract* and carries
+`it.fails`, which in this vitest inverts the verdict exactly as needed: green while the body
+throws, red with `Expect test to fail` once it stops. Verified in both directions — green today,
+and red under a simulated remedy (the allowlist temporarily emptied so `measured` goes false),
+then reverted.
+
+My earlier dismissal of `it.fails` here — "it inverts to 'the body must throw', which these
+bodies do not" — was wrong because it assumed the body keeps asserting the *defect*. Stating
+the **contract** instead makes the inversion exact.
+
+Three guards, because `it.fails` is satisfied by any throw and would otherwise be invariant
+10's shape inside the mechanism meant to fix invariant 10's shape: the pipeline result is
+computed at describe scope so a crash is a collection error rather than a swallowed pass; the
+preconditions live in a separate ordinary passing test that goes red if the fixture drifts; and
+the `it.fails` body holds exactly one assertion.
+
+The contract is remedy-agnostic and stated over the *input*, not over trace fields — §2 of this
+note showed `tclConfig.sh` and `CODE_OF_CONDUCT.md` are identical on every field the trace
+carries, so a field-level contract would condemn real prose too. Any of the four available
+remedies satisfies it: stop deleting the file, stop claiming measurement, stop classifying it
+as markdown, or stop harvesting its comments.
 
 ---
 
@@ -259,8 +277,9 @@ an alternative to it.
 3. **The 4b.3 stdin denominator was 132 and should be 144.** The A/B loop globbed
    `corpus-prose/*` at top level, covering 13 of 25 markdown files. Re-run over all 25:
    **0 changed.** The inert conclusion is unaffected; the number was understated.
-4. **The characterization test is a passing spec, not a pending one** (§0). Its status should be
-   made structural rather than nominal.
+4. **The characterization test was a passing spec, not a pending one** (§0). **Now fixed**:
+   inverted with `it.fails` so the suite records the violation instead of blessing it, verified
+   red under a simulated remedy.
 5. **A new datum for whoever takes up §28's question.** The prose casualties of lever 1 —
    `CODE_OF_CONDUCT.md` at 97.9% and `SECURITY.md` at 93.8%, both at `S_k = 0.400`, both
    `fallbackUsed: false` — are not a separate population from the shell scripts. They are the

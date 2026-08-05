@@ -10,6 +10,24 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
 `git log v1.1.0..HEAD` to confirm current scope before relying on this list.
 
 ### Added
+- **The §32 defect is pinned by inversion, not by assertion (DECISIONS §32)**: the
+  `KNOWN DEFECT` block in `test/unit/markdown-marker-allowlist.test.ts` asserted the wrong
+  behaviour and **passed**, which made the defect the suite's de facto specification — the
+  only thing marking it as wrong was a docblock, and a docblock enforces nothing. The suite
+  was asserting `structMeasured: true` on a 99%-deleted shell script as correct.
+
+  It now states the **contract** and carries `it.fails`: green while the contract is violated,
+  red with `Expect test to fail` the moment any remedy makes it hold. Verified in both
+  directions — green today, red under a temporarily simulated remedy, then reverted.
+
+  Three guards keep the inversion from going vacuous, since `it.fails` is satisfied by *any*
+  throw: the pipeline result is computed at describe scope so a crash is a collection error
+  rather than a swallowed pass; the preconditions live in a separate ordinary passing test
+  that goes red if the fixture drifts; and the `it.fails` body holds exactly one assertion.
+  The contract is remedy-agnostic and stated over the input rather than over trace fields,
+  because `tclConfig.sh` and `CODE_OF_CONDUCT.md` are identical on every field the trace
+  carries (`docs/phase-4b-lever-disposition.md` §1).
+
 - **`MARKDOWN_MARKER_TYPES` says what its docblock says — Phase 4b.3 (DECISIONS §32)**: the
   allowlist is now `markdown` alone. It held `text`, `html`, `logs` and `unknown` while its own
   docblock said a new `ContentType` "should default to *not* harvesting these". `text` and

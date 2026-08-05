@@ -1828,6 +1828,14 @@ Seam 3 is where this actually belongs, and the finding **reframes that deferred 
 AST-lite suite does not implement — shell, Ruby, Go, Rust, SQL. Deleting 99% of a shell script
 under a forged `measured: true` is not a product question about prose.
 
-Pinned as a characterization test in `test/unit/markdown-marker-allowlist.test.ts` under
-`KNOWN DEFECT`, so that whoever fixes it has to remove a failing assertion deliberately rather
-than discover the behaviour by accident.
+Pinned **by inversion** in `test/unit/markdown-marker-allowlist.test.ts` under
+`KNOWN DEFECT (pinned by inversion)`. The first version of that block asserted the wrong
+behaviour and passed, which made the defect the suite's de facto specification — the only thing
+marking it as wrong was a docblock, and a docblock enforces nothing. It now states the
+**contract** and carries `it.fails`: green while the contract is violated, red with
+`Expect test to fail` the moment any remedy makes it hold. Three guards keep the inversion from
+going vacuous — the pipeline result is computed at describe scope so a crash is a collection
+error rather than a swallowed pass, the preconditions live in a separate ordinary test, and the
+`it.fails` body holds exactly one assertion. The contract is remedy-agnostic and stated over the
+input rather than over trace fields, because `tclConfig.sh` and `CODE_OF_CONDUCT.md` are
+identical on every field the trace carries.
