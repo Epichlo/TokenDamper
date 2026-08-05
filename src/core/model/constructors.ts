@@ -21,6 +21,9 @@ import {
   estimateTokens,
   type TokenizerAdapter,
 } from '../hashing/tokenizer';
+// A leaf module: `python-validator` imports types only, so this adds no runtime cycle. Used as
+// the confirming half of the Python content probe — see `isPython`.
+import { PythonValidator } from '../validation/ast/python-validator';
 
 /**
  * The normalized source kind used when parsing CLI input.
@@ -101,10 +104,14 @@ export function createContextBundle(
   tokenizer: TokenizerAdapter = DEFAULT_TOKENIZER,
   declaredLanguage?: string,
 ): ContextBundle {
-  const language = normalizeLanguage(declaredLanguage);
-  const contentType =
-    (language ? contentTypeForLanguage(language) : undefined) ??
-    classifyContent(rawInput, source, sourcePath);
+  const declared = normalizeLanguage(declaredLanguage);
+  // Declared wins outright; otherwise classification answers with both fields at once, and a
+  // probe-detected language rides along exactly as a declared one would (4b.2).
+  const shape = declared
+    ? { contentType: contentTypeForLanguage(declared), language: declared }
+    : classifyContentShape(rawInput, source, sourcePath);
+  const language = shape.language;
+  const contentType = shape.contentType;
   const kind: ContextItemKind = source === 'file' ? 'file' : 'prompt';
   const metadata: Readonly<Record<string, string | number | boolean | null>> = freeze({
     source,
@@ -435,6 +442,29 @@ export function freeze<T>(value: T): Readonly<T> {
 }
 
 /**
+ * What classification concluded about a piece of content: its type, and — only when a probe
+ * positively identified a language — that language.
+ *
+ * The two travel together because they have to. §29 established this for declarations; the
+ * same argument holds for detections, and one half of it is sharper here. Setting only
+ * `contentType: 'code'` sends the item to `CONTENT_TYPE_VALIDATORS.code`, which is the
+ * **TypeScript** validator, so detected Python would be checked by the wrong checker. Setting
+ * only `language` leaves the tag at `text` or `markdown`, both of which are in `DriftTracker`'s
+ * `MARKDOWN_MARKER_TYPES`, so the file's `#` comment leaders would be harvested as markdown
+ * headings and then "destroyed" by the very elision the detection just enabled — measured at
+ * 1,025 fabricated markers across 43 pathless Python files
+ * (`docs/phase-4b-pathless-code-scope.md` §2, D2).
+ *
+ * An extension never sets `language`. It does not need to — `selectValidator` consults `path`
+ * on its own — and doing so would put a `language` on every file-route item, moving every
+ * item hash in the project for no behavioural gain.
+ */
+export interface ContentShape {
+  readonly contentType: ContentType;
+  readonly language?: DeclaredLanguage;
+}
+
+/**
  * Classifies raw content deterministically.
  *
  * **Extension first, content probes second.** The two used to be interleaved, with each
@@ -452,61 +482,84 @@ export function freeze<T>(value: T): Readonly<T> {
  */
 export function classifyContent(
   rawInput: string,
-  _source: NormalizedInputSource,
+  source: NormalizedInputSource,
   sourcePath?: string,
 ): ContentType {
+  return classifyContentShape(rawInput, source, sourcePath).contentType;
+}
+
+/**
+ * Classification, including a language when a probe identified one. See `ContentShape`.
+ */
+export function classifyContentShape(
+  rawInput: string,
+  _source: NormalizedInputSource,
+  sourcePath?: string,
+): ContentShape {
   const text = rawInput.trim();
   const extension = sourcePath ? sourcePath.split('.').pop()?.toLowerCase() ?? '' : '';
 
   if (extension === 'json') {
-    return 'json';
+    return { contentType: 'json' };
   }
 
   if (extension === 'yml' || extension === 'yaml') {
-    return 'yaml';
+    return { contentType: 'yaml' };
   }
 
   if (extension === 'html' || extension === 'htm') {
-    return 'html';
+    return { contentType: 'html' };
   }
 
   if (extension === 'log') {
-    return 'logs';
+    return { contentType: 'logs' };
   }
 
   if (extension === 'md' || extension === 'markdown') {
-    return 'markdown';
+    return { contentType: 'markdown' };
   }
 
   if (isCodeExtension(extension)) {
-    return 'code';
+    return { contentType: 'code' };
   }
 
   if (looksLikeJson(text)) {
-    return 'json';
+    return { contentType: 'json' };
   }
 
   if (looksLikeYaml(text)) {
-    return 'yaml';
+    return { contentType: 'yaml' };
   }
 
   if (looksLikeHtml(text)) {
-    return 'html';
+    return { contentType: 'html' };
   }
 
   if (looksLikeLogs(text)) {
-    return 'logs';
+    return { contentType: 'logs' };
+  }
+
+  // Behind json/yaml/html/logs and ahead of markdown — the narrowest position that does the
+  // job. Ahead of markdown because that is what it has to beat: measured pathless, 19 of 39
+  // `pip` Python files classify `markdown` and the other 20 `text`, since `# NOTE: …` is both
+  // a Python comment and a markdown heading. Behind the other four because each is a
+  // decisive-shape detector that no Python file in either frozen corpus triggers, so moving
+  // ahead of them would add blast radius and buy nothing. `looksLikeJson` in particular must
+  // stay in front: §4 measured a JSON tool result scoring 0.67 on a brace-and-semicolon code
+  // signal, and only the JSON check standing first saved it.
+  if (isPython(text)) {
+    return { contentType: 'code', language: 'python' };
   }
 
   if (looksLikeMarkdown(text)) {
-    return 'markdown';
+    return { contentType: 'markdown' };
   }
 
   if (text.length > 0) {
-    return 'text';
+    return { contentType: 'text' };
   }
 
-  return 'unknown';
+  return { contentType: 'unknown' };
 }
 
 /**
@@ -864,6 +917,104 @@ function looksLikeLogs(text: string): boolean {
   }
 
   return nonEmpty > 0 && logLines / nonEmpty >= 0.5;
+}
+
+/** `def f(…)` / `class C(…)`, with or without `async`. Python-only as a line opener. */
+const PY_DEFINITION = /^[ \t]*(?:async[ \t]+)?(?:def|class)[ \t]+[A-Za-z_]\w*[ \t]*[(:]/;
+/**
+ * `import os`, `import os.path as p`, `from x import y`.
+ *
+ * The bare-`import` arm requires the line to *end* after the module list, which is what keeps
+ * `import express from "express"` and `import { readFileSync } from 'node:fs'` out: both
+ * continue past the module name.
+ */
+const PY_IMPORT =
+  /^[ \t]*(?:import[ \t]+[A-Za-z_][\w.]*(?:[ \t]+as[ \t]+\w+)?(?:[ \t]*,[ \t]*[A-Za-z_][\w.]*(?:[ \t]+as[ \t]+\w+)?)*[ \t]*$|from[ \t]+[.A-Za-z_][\w.]*[ \t]+import[ \t]+\S)/;
+/** A decorator on its own line. */
+const PY_DECORATOR = /^[ \t]*@[A-Za-z_][\w.]*(?:\([^)]*\))?[ \t]*$/;
+/** A block header: a Python keyword whose line ends in a colon. */
+const PY_BLOCK_HEADER =
+  /^[ \t]*(?:if|elif|else|for|while|try|except|finally|with|match|case)\b[^:]*:[ \t]*(?:#.*)?$/;
+/** Statement keywords that open a line. Weak — most are shared with C-family languages. */
+const PY_STATEMENT =
+  /^[ \t]*(?:return|raise|pass|yield|assert|global|nonlocal|del|continue|break)\b/;
+/**
+ * Shapes Python does not have. A line carrying one of these is not evidence *for* Python and
+ * is counted against it, which is what separates `return x` from `return x;`.
+ */
+const PY_DISQUALIFIER = /(?:[;{][ \t]*$|=>|\bfunction\b[ \t]*\w*[ \t]*\(|\b(?:const|let|var)[ \t]+\w+[ \t]*[:=])/;
+
+const pythonConfirmingValidator = new PythonValidator();
+
+/**
+ * Detects Python by structure, then **confirms it by parsing**. Phase 4b.2.
+ *
+ * The structural half is `docs/phase-4b-pathless-code-scope.md` §4's measured rule:
+ * `strong >= 2 && (strong + weak) / counted >= 0.15 && disqualified / counted < 0.10`, where
+ * comment lines are neutral — excluded from the numerator *and* the denominator, since `#` is
+ * a Python comment and a markdown heading and cannot be evidence either way.
+ *
+ * The confirming half is not in that document, and it is what disposes of its §6 risk 2
+ * ("new validation means new fallbacks are possible", raised because the Gateway carries
+ * fragments and a fragment can fail the indentation rule). The rule here:
+ *
+ *   **A probe may only claim content the validator for that language already accepts.**
+ *
+ * A declaration is the caller's assertion and failing on it is right — if they said Python and
+ * it does not parse, something is wrong and they should hear about it (§29). A detection is
+ * *our* guess, and content that does not parse is far likelier to mean the guess was wrong than
+ * that the user's data is broken. Failing closed on our own guess would turn a heuristic into a
+ * fallback generator on live traffic, which is the trade §17 refused when it removed
+ * fence-based code detection.
+ *
+ * So a detected item is one `PythonValidator` has already accepted, and detection can never
+ * make an item *less* valid than leaving it as `text` would have. A fragment that fails
+ * indentation is simply not Python as far as this is concerned, and behaviour is exactly
+ * today's — §4's "misses fail to today's behaviour, which is the safe direction".
+ *
+ * `PythonValidator` is a leaf: it imports types only, so consulting it here adds no runtime
+ * dependency and no cycle. It runs only for candidates the cheap regex pass already accepted.
+ */
+function isPython(text: string): boolean {
+  let counted = 0;
+  let strong = 0;
+  let weak = 0;
+  let disqualified = 0;
+
+  for (const raw of text.split('\n')) {
+    const line = raw.replace(/\r$/, '');
+    if (line.trim().length === 0) {
+      continue;
+    }
+    // Neutral: `# …` is a Python comment and a markdown heading. Counting it either way makes
+    // the score track comment density instead of structure.
+    if (/^[ \t]*#/.test(line)) {
+      continue;
+    }
+
+    counted += 1;
+
+    if (PY_DISQUALIFIER.test(line)) {
+      disqualified += 1;
+      continue;
+    }
+
+    if (PY_DEFINITION.test(line) || PY_IMPORT.test(line) || PY_DECORATOR.test(line)) {
+      strong += 1;
+    } else if (PY_BLOCK_HEADER.test(line) || PY_STATEMENT.test(line)) {
+      weak += 1;
+    }
+  }
+
+  if (counted === 0 || strong < 2) {
+    return false;
+  }
+
+  if ((strong + weak) / counted < 0.15 || disqualified / counted >= 0.1) {
+    return false;
+  }
+
+  return pythonConfirmingValidator.validate(text).valid;
 }
 
 function looksLikeMarkdown(text: string): boolean {

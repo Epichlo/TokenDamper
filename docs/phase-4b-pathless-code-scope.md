@@ -4,10 +4,10 @@
 > called the work "4b". One label, and it is **4b** — filename, heading and steps now agree.
 > Renamed 2026-08-04, before anything else came to reference the old name.
 >
-> **Status: 4b.0 landed 2026-08-04 (harness only — no engine change). 4b.1 landed 2026-08-05
-> — see §8 for what it measured and where this document was wrong. 4b.2 and 4b.3 remain
-> scoping only, nothing implemented, nothing approved.** This document exists to be
-> argued with before any code is written. Measured 2026-08-04 against `dist/` at `04ce2a3`,
+> **Status: 4b.0 landed 2026-08-04 (harness only). 4b.1 landed 2026-08-05 — see §8. 4b.2
+> landed 2026-08-06 — see §9, and note that its §6 risk 2 was disposed of by a mechanism this
+> document does not contain. 4b.3 remains scoping only, nothing implemented, nothing
+> approved.** This document exists to be argued with before any code is written. Measured 2026-08-04 against `dist/` at `04ce2a3`,
 > over corpora frozen in a scratch directory (`CLAUDE.md`, Gotchas — freeze before measuring).
 >
 > **Headline:** the obvious narrow fix — resolve a language inside `selectValidator` and leave
@@ -224,7 +224,8 @@ property on the MCP `optimize_context` schema, and an optional Gateway hint. Zer
 zero blast radius, and it is strictly better than a probe wherever the caller knows the answer
 — which on the MCP path is always.
 
-**4b.2 — a Python-only content probe, setting language *and* content type together.** Runs
+**4b.2 — a Python-only content probe, setting language *and* content type together. — LANDED
+2026-08-06, DECISIONS §31. See §9.** Runs
 only when `path` and a declared `language` are both absent, and only behind the JSON check.
 Sets `language: 'python'` **and** `contentType: 'code'` atomically. Both, because §3 shows the
 language alone leaves the marker fabrication in place — and because
@@ -376,3 +377,74 @@ Two consequences worth carrying into 4b.2:
    the only casualty is the reduction. That is the failure direction 4b.2's probe should also
    aim for — and it is the measured answer to §6's risk 5, which asked that the probe "fail to
    today's behaviour rather than to a wrong answer".
+
+---
+
+## 9. 4b.2 as landed — the probe, and the step this document did not specify
+
+**Date:** 2026-08-06. Implemented: DECISIONS §31, `test/unit/python-content-probe.test.ts`.
+
+### What shipped
+
+`classifyContent` became a wrapper over `classifyContentShape`, which returns
+`{ contentType, language? }`. The Python probe sits behind json/yaml/html/logs and ahead of
+markdown, and sets both fields at once — §3's finding, implemented rather than argued.
+
+### The addition: the probe proposes, the parser confirms
+
+§6's risk 2 asked whether a fragment that fails the indentation rule should fall back or be
+reported as uncheckable. The answer turned out to be neither, and it is a third option this
+document did not consider:
+
+> **A probe may only claim content the validator for that language already accepts.**
+
+A declaration is the caller's assertion — failing on it is right, and §29 pins that case. A
+detection is *our* guess, and content that does not parse is far likelier to mean the guess was
+wrong than that the user's data is broken. Failing closed on our own guess is how a heuristic
+becomes a fallback generator, which is precisely the trade §17 refused.
+
+`PythonValidator` imports types only, so the model layer can consult it with no cycle, and it
+runs only for candidates the regex pass already accepted.
+
+Two measurements make this more than a nicety. The confirmation **fires**: a bad indent level,
+an unterminated string and a call truncated mid-argument each clear the structural rule and are
+each rejected by the parser. And it **costs nothing**: all six `pip` files the probe declines
+parse fine, so the structural rule — not the validator — is what turned them down.
+
+### Measured
+
+| | detected | false positives |
+|---|---|---|
+| 45 `pip` Python (positive) | **39 (86.7%)** | — |
+| 64 repo TypeScript | — | **0** |
+| 25 repo markdown | — | **0** |
+| repo YAML, `sample_logs.txt` | — | **0** |
+
+| route | before | after |
+|---|---|---|
+| `pip` over stdin, undeclared | 0.02%, 1 file, 0/45 checked | **12.27%, 19 files, 39/45 checked** |
+| `pip` as a file argument | 12.34% | 12.34% — **0 collateral** |
+| repo TS over stdin | 0.07% | 0.07% — **0 files changed** |
+
+99.4% of the filename route's yield, recovered without a filename. Gateway turn 1: no fallback,
+byte-identical output. Turn 2: byte-identical before and after. Deterministic 6/6.
+
+### Correction to §7's expected value
+
+§7 projected `2.42% → up to 14.11%` for this corpus. The landed figure is `0.02% → 12.27%`, but
+the two are not comparable in either direction: §7 used the engine's own estimator (24% MAE)
+over a 39-file selection, and this uses `cl100k_base` over a 45-file selection re-frozen on
+2026-08-05. The comparable pair is the one in the table above — the same corpus, the same
+tokenizer, stdin against the filename route.
+
+### What 4b.2 does not close, and 4b.3
+
+An **undetected** pathless Python file is not merely unoptimized — §8's addendum said a path is
+not a declaration, and the same holds for a non-detection. `pip`'s `status_codes.py` is a
+symbol-free constants file the probe declines; over stdin nothing covers it, §28's refusal
+cannot fire, and it is elided whole and unwitnessed (44 → 27 tokens) while the file route
+correctly refuses it. Detection narrows that population, it does not close it.
+
+**4b.3 is unchanged and still wanted.** Undetected Python and pathless code in every other
+language still harvest `#` and `- ` lines as structural markers from the `text` and `unknown`
+buckets. 4b.2 fixed the fabrication for *detected* Python only, exactly as §5 said it would.

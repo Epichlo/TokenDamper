@@ -10,6 +10,46 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
 `git log v1.1.0..HEAD` to confirm current scope before relying on this list.
 
 ### Added
+- **A Python content probe — Phase 4b.2 (DECISIONS §31)**: pathless content that is
+  structurally Python is now classified `code` with `language: 'python'`, without a
+  declaration. `classifyContent` wraps a new `classifyContentShape`, which answers with both
+  fields; the Gateway builds its items from that shape.
+
+  4b.1 let the caller say what pathless content is, and on the MCP path the caller always
+  knows. The **Gateway** is the case that cannot be closed that way — a provider payload has no
+  language field anywhere in its schema — which is why §29 declined a Gateway declaration. For
+  the traffic the proxy carries, a probe is the only route there is.
+
+  **The probe proposes; the parser confirms.** The structural half is the scope document's
+  measured rule (`strong >= 2`, density `>= 0.15`, disqualifiers `< 0.10`, comment lines
+  neutral). The half that is not in that document is the answer to its own §6 risk 2: a probe
+  may only claim content the validator for that language **already accepts**. A declaration is
+  the caller's assertion and failing on it is right; a detection is our guess, and content that
+  does not parse means the guess was wrong. So detection can never make an item less valid than
+  leaving it alone would — a bad indent level, an unterminated string and a call truncated
+  mid-argument are each rejected and land exactly where they landed before.
+
+  | | detected | false positives |
+  |---|---|---|
+  | 45 `pip` Python (positive) | **39 (86.7%)** | — |
+  | 64 repo TypeScript / 25 markdown / YAML / logs | — | **0** |
+
+  Over **stdin with no declaration**, the `pip` corpus goes **0.02% → 12.27%** (1 → 19 files
+  reducing, 0/45 → 39/45 items AST-checked) against the file-argument route's 12.34% — **99.4%
+  of the achievable yield**. Collateral on the file route: **zero**. TypeScript over stdin is
+  **unchanged**, deliberately: §4 measured TS positives at 0.283–1.000 against prose negatives
+  reaching 0.333, so no threshold orders them, and no TS probe is proposed now or later.
+  `--language` remains the route for it.
+
+  Gateway measured as §6 requires — turn 1, where `session-dedup` cannot elide and any fallback
+  would be a false positive by construction: no fallback, output byte-identical. Turn 2
+  byte-identical before and after. **Zero new fallbacks on live traffic.** Deterministic 6/6.
+
+  **Still open, and the yield table hides it:** an *undetected* pathless Python file is not just
+  unoptimized but unprotected. `pip`'s `status_codes.py` is symbol-free, the probe declines it,
+  nothing covers it, §28's refusal cannot fire, and it is elided whole and unwitnessed over
+  stdin (44 → 27 tokens) while the file route correctly refuses it.
+
 - **The caller can declare what the content is — Phase 4b.1 (DECISIONS §29)**: new CLI
   `--language` and `--input-name` flags, and new `language` and `path` properties on the MCP
   `optimize_context` tool schema. `item.language` already existed, was already **first** in

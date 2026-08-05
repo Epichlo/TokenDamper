@@ -1607,3 +1607,122 @@ table and the loop agree — a flag listed as supported but unrecognized by the 
 `runCli` would mean starting an MCP server to discover whether `--config` was read, and the
 `mcp` defect is invisible from the outside precisely because `loadConfig` swallows a missing
 file. A parser is testable directly.
+
+---
+
+## 31. A Probe May Only Claim Content Its Validator Already Accepts
+
+**Date:** 2026-08-06
+**Status:** implemented (Phase 4b.2)
+**Scope:** `docs/phase-4b-pathless-code-scope.md` §4–§6. 4b.3 (the `MARKDOWN_MARKER_TYPES`
+allowlist) remains scoping only.
+
+### Why a probe at all, after §17 removed one
+
+§29 gave the caller a way to say what pathless content is, and on the MCP path the caller
+always knows. The Gateway is the case that cannot be closed that way: a provider payload has
+**no language field anywhere in its schema**, per message or per request, which is why §29
+declined a Gateway declaration outright. For the traffic the proxy actually carries, a probe is
+the only route that exists.
+
+§17 removed the previous content-only code detection because its single signal was a markdown
+fence and the verdict flipped on apostrophe parity in the surrounding prose. That is an
+argument against *that* probe, not against probes. The replacement is a majority-of-lines rule
+— the shape §22 and §27 already use for logs and YAML — scoped to the one language where the
+measurement supports it.
+
+### Python only, and that is not a staging decision
+
+§4 measured both. Python separates with a factor-of-seven margin. TypeScript does not separate
+at all: positives span 0.283–1.000 and prose negatives reach 0.333, because this repository's
+prose is documentation *about* TypeScript, dense with fenced TypeScript. No threshold orders
+them. **A TypeScript probe is not proposed, now or later, without a different kind of signal**
+— `--language` is what TypeScript over stdin gets.
+
+### The rule, and the half that is not in the scope document
+
+Structural: `strong >= 2 && (strong + weak) / counted >= 0.15 && disqualified / counted < 0.10`,
+with comment lines excluded from numerator *and* denominator — `#` is a Python comment and a
+markdown heading and cannot be evidence either way.
+
+Then, and this is the addition:
+
+> **A probe may only claim content the validator for that language already accepts.**
+
+§6's risk 2 asked whether a fragment that fails the indentation rule should fall back or be
+reported as uncheckable. Neither. It should not be detected. A declaration is the caller's
+assertion, and failing on it is right — they said Python, it does not parse, they should hear
+about it (§29's false-declaration case). A detection is *our* guess, and content that does not
+parse is far likelier to mean the guess was wrong than that the user's data is broken. Failing
+closed on our own guess turns a heuristic into a fallback generator on live traffic, which is
+exactly the trade §17 refused.
+
+So a detected item is one `PythonValidator` has already accepted, and detection can never make
+an item *less* valid than leaving it as `text` would have. `PythonValidator` imports types
+only, so consulting it from the model layer adds no cycle, and it runs only for candidates the
+cheap regex pass already accepted.
+
+The confirmation is load-bearing, not decorative: three malformed inputs that clear the
+structural rule — a bad indent level, an unterminated string, a call truncated mid-argument —
+are each rejected by it and land exactly where they landed before the probe existed.
+
+### Both fields, atomically
+
+`classifyContent` now wraps `classifyContentShape`, which returns `{ contentType, language? }`.
+A detection sets both for the reasons §29 gives for declarations, one of them sharper here:
+`contentType: 'code'` alone routes to the **TypeScript** validator, and `language` alone leaves
+the tag at `text`/`markdown`, both on `MARKDOWN_MARKER_TYPES`, so the file's `#` comments would
+be harvested as markdown headings and then destroyed by the very elision the detection just
+enabled. §3 measured that half-fix pushing drift up on 14 of 20 files and over the gate on one.
+
+An **extension** still never sets `language`. It does not need to — `selectValidator` consults
+`path` itself — and doing so would put a `language` on every file-route item, moving every item
+hash in the project for nothing.
+
+### Position in the probe order
+
+Behind json/yaml/html/logs, ahead of markdown. Ahead of markdown because that is what it has to
+beat: measured pathless, 13 of 45 `pip` files classify `markdown` and the rest `text`. Behind
+the other four because each is a decisive-shape detector that no Python file in either frozen
+corpus triggers, so moving ahead of them adds blast radius and buys nothing. `looksLikeJson`
+must stay first regardless — §4 measured a JSON tool result scoring 0.67 on a
+brace-and-semicolon code signal, saved only by the JSON check standing in front.
+
+### Measured
+
+Corpora frozen under `sha256` manifests, engine A/B'd `dist-4b1` (`bdea1f0`) against
+`dist-4b2`, `cl100k_base` tokens, `--target-reduction-ratio 0.3`:
+
+| | detected | false positives |
+|---|---|---|
+| 45 `pip` Python (positive) | **39 (86.7%)** | — |
+| 64 repo TypeScript | — | **0** |
+| 25 repo markdown | — | **0** |
+| repo YAML, `sample_logs.txt` | — | **0** |
+
+| route | before | after |
+|---|---|---|
+| `pip` corpus over **stdin, undeclared** | 0.02%, 1 file reduces, 0/45 items checked | **12.27%, 19 files, 39/45 checked** |
+| the same bytes as a **file argument** | 12.34% | 12.34% (**0 collateral**) |
+| 64 TS sources over stdin | 0.07% | 0.07% (**0 files changed** — no TS probe) |
+
+The probe recovers **99.4%** of the yield the filename route achieves. All six misses **parse
+fine** — the structural rule declined them, not the validator — so the confirmation step costs
+zero detections on this corpus while still rejecting every malformed fragment above.
+
+**Gateway, measured as §6 requires.** Turn 1 of a real session, where `cleanup:session-dedup`
+has no previous hashes and cannot elide, so any fallback is a false positive by construction:
+no fallback, output byte-identical to input. Turn 2: byte-identical before and after, same
+fallback, same token counts. The Python tool-result message is now `code`/`python`; prose and
+log messages are untouched. **Zero new fallbacks on live traffic.** Output byte-identical
+across 6/6 fresh processes.
+
+### What is still open, stated because the yield table hides it
+
+An **undetected** pathless Python file is not merely unoptimized — it is unprotected, and
+§29's addendum predicted this. `pip`'s `status_codes.py` is a symbol-free constants file the
+probe declines: over stdin it stays `text`, no validator covers it, §28's refusal cannot fire,
+and it is elided whole and unwitnessed — 44 → 27 tokens — while the *file* route correctly
+refuses it. Detection narrows that population; it does not close it. Closing it means either
+detecting everything, which no probe does, or deciding what drift owes an item nothing covers,
+which is §28's deferred prose question.

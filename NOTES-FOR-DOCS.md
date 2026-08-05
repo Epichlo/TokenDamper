@@ -592,3 +592,45 @@ other. `2.42% → 14.11%` is the engine's own estimator (24% MAE, CLAUDE.md) ove
 selection; the landed `0.02% → 12.34%` is `cl100k_base` over a 45-file selection re-frozen on
 2026-08-05 because the earlier scratch corpus was gone. Quote §8's table, which names its
 tokenizer and its manifest.
+
+---
+
+## `docs/phase-4b-pathless-code-scope.md` §6 risk 2 — disposed of by a third option it did not list
+
+**Date:** 2026-08-06
+**Status of the correction:** measured, implemented (DECISIONS §31). Full record: that
+document's §9.
+
+**What the document says.** §6's risk 2: *"Enabling `PythonValidator` on pathless fragments
+will reject some of them… Needs its own before/after count on the session corpus, and a
+decision about whether a fragment that fails indentation should fall back or be reported as
+uncheckable."*
+
+**What is actually true.** Neither branch of that question is the answer. A fragment that fails
+the indentation rule should not be **detected**:
+
+> A probe may only claim content the validator for that language already accepts.
+
+The asymmetry that makes this right is the one §29 established from the other side. A
+declaration is the caller's assertion, so failing on content that does not parse is correct and
+informative. A detection is our own guess, so content that does not parse is evidence *against
+the guess*, not against the content. Failing closed on a guess converts a heuristic into a
+fallback generator on live traffic — the exact trade §17 refused when it removed fence-based
+detection.
+
+Consequently the before/after fallback count risk 2 asked for is **zero by construction**, and
+measured zero: Gateway turn 1 and turn 2 are byte-identical before and after, and the file
+route is unchanged on all 45 frozen `pip` files.
+
+**Two numbers worth carrying.** The confirmation step **fires** — bad indentation, an
+unterminated string and a truncation mid-argument each clear the structural rule and are each
+rejected by the parser — and it **costs nothing**: all six `pip` files the probe declines parse
+fine, so the structural rule turned them down, not the validator. A check that never fires and
+a check that changes every outcome are both suspicious; this one is neither, and both halves
+were measured rather than assumed (invariant 10).
+
+**Also: the residual hole is a safety hole, not a yield hole.** An undetected pathless Python
+file is unprotected, not merely unoptimized — `pip`'s `status_codes.py` is elided whole and
+unwitnessed over stdin at 44 → 27 tokens while the file route refuses it. Anyone scoping 4b.3
+or a wider probe from the yield tables is again reading the weaker half of the argument, which
+is the same mistake §8 recorded for 4b.2.

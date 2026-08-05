@@ -138,8 +138,12 @@ MCP tools: `optimize_context`, `rehydrate_context`, `get_session_metrics`,
     A third part was found and closed by Phase 4b.1 (DECISIONS §29): "validator-covered" is
     itself route-dependent, so **the same barrel file was still being deleted unwitnessed over
     stdin** — nothing covers a pathless item, so the refusal never fired. Declaring the
-    language brings it under a validator and it does. An **undeclared** pathless item is still
-    unprotected; that is the safety argument for 4b.2, and it is larger than the yield one.
+    language brings it under a validator and it does. Phase 4b.2 narrowed the remainder by
+    detecting Python, but **did not close it**: an item the probe declines is still
+    unprotected, measured on `pip`'s symbol-free `status_codes.py` (elided whole over stdin at
+    44 → 27 tokens; the file route refuses it). Read the yield tables in
+    `docs/phase-4b-pathless-code-scope.md` with that in mind — the safety argument is the
+    larger one and the numbers hide it.
 
 ## Known bugs — highest-priority work
 
@@ -174,11 +178,16 @@ Full detail in `tokendamper-headroom-known-issues.md`; proposed fixes in
     vacuity Phase 1a is recorded as having closed, arriving by a different route. Fixed in
     Phase 1.5: DECISIONS §22 (the classifier) and §23 (an unvalidated item now reports
     `validated: false` and shows on `trace.astCoverage` instead of reading as a pass).
-    Pathless code is still unchecked *when nothing is declared* — §17 removed content-only
-    code detection on purpose — but it is visible rather than silent, and since Phase 4b.1
-    (DECISIONS §29) a caller can close it per invocation with `--language` / `--input-name`
-    or the MCP `language` / `path` properties. Inference for the undeclared case is 4b.2,
-    still unbuilt.
+    Pathless code is closed for **Python** and for anything **declared**. Phase 4b.1
+    (DECISIONS §29) added `--language` / `--input-name` and the MCP `language` / `path`
+    properties; Phase 4b.2 (§31) added a Python content probe that sets `contentType` and
+    `language` together and **only claims content `PythonValidator` already accepts**, so a
+    detection can never make an item less valid than leaving it alone. Undeclared, undetected
+    pathless code — every non-Python language over stdin, the Gateway and MCP — is still
+    unchecked and still visible on `trace.astCoverage`. There is deliberately **no TypeScript
+    probe**: §4 measured TS positives (0.283–1.000) overlapping prose negatives (to 0.333),
+    because this repo's prose is documentation *about* TypeScript. `--language` is what TS
+    over stdin gets.
   - The load-bearing mechanism is **correct-by-construction rendering**, not the
     post-condition check. Only `JsonValidator` rejects a bare placeholder; the TS and
     Python AST-lite validators accept it, so `post_condition_rejected` is unreachable

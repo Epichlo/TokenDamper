@@ -1,7 +1,8 @@
 import type { IncomingHttpHeaders } from 'node:http';
 import { loadConfig } from '../config';
 import {
-  classifyContent,
+  classifyContentShape,
+  type ContentShape,
   createBundleStatistics,
   createContextItem,
   createOptimizationBudget,
@@ -9,7 +10,6 @@ import {
   hashContent,
 } from '../core/model/constructors';
 import type {
-  ContentType,
   ContextBundle,
   ContextItem,
   ContextItemKind,
@@ -442,9 +442,16 @@ function runGatewayOptimization(
  * There is deliberately no `sourcePath` argument: a provider message has no filename, so
  * classification is by content alone. Do not invent one from `origin` — the extension
  * branch of `classifyContent` would then trust a synthesized path over real content.
+ *
+ * **Returns a shape, not a type, since 4b.2.** A message the Python probe identifies carries
+ * `language: 'python'` as well as `contentType: 'code'`, and both are needed: the tag alone
+ * would route it to the TypeScript validator, and the language alone would leave `#` comments
+ * being harvested as markdown headings. This is the only place a Gateway item can acquire a
+ * language — there is no per-message language field in any provider payload, which is why
+ * §29 declined a Gateway *declaration* and why a probe is the only route available here.
  */
-function classifyGatewayContent(content: string): ContentType {
-  return classifyContent(content, 'text');
+function classifyGatewayContent(content: string): ContentShape {
+  return classifyContentShape(content, 'text');
 }
 
 function processOpenAiRequest(
@@ -490,7 +497,7 @@ function processOpenAiRequest(
         id: `msg-${i}-${contentHash.slice(0, 8)}`,
         kind,
         // Classified, not hardcoded — see the note above `classifyGatewayContent`.
-        contentType: classifyGatewayContent(textContent),
+        ...classifyGatewayContent(textContent),
         content: textContent,
         origin: `openai:messages[${i}]`,
         contentHash,
@@ -596,7 +603,7 @@ function processAnthropicRequest(
       createContextItem({
         id: `sys-${contentHash.slice(0, 8)}`,
         kind: 'prompt',
-        contentType: classifyGatewayContent(systemText),
+        ...classifyGatewayContent(systemText),
         content: systemText,
         origin: 'anthropic:system',
         contentHash,
@@ -618,7 +625,7 @@ function processAnthropicRequest(
       createContextItem({
         id: `msg-${i}-${contentHash.slice(0, 8)}`,
         kind: 'conversation',
-        contentType: classifyGatewayContent(textContent),
+        ...classifyGatewayContent(textContent),
         content: textContent,
         origin: `anthropic:messages[${i}]`,
         contentHash,

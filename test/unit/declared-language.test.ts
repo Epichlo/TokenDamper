@@ -211,19 +211,27 @@ describe('an undeclared bundle is unchanged', () => {
 
   it('ignores an unrecognized declaration rather than half-applying it', () => {
     // The adapters reject this before it gets here (see the CLI and MCP cases below). If one
-    // ever stops, the model must not invent a content type from a language it cannot resolve.
+    // ever stops, the model must not invent a content type from a language it cannot resolve —
+    // it must fall through to classification exactly as if nothing had been declared. Since
+    // 4b.2 that fall-through may itself detect a language, so the assertion is equality with
+    // the undeclared result rather than a literal `text`.
     const declared = createContextBundle(PY, 'stdin', undefined, undefined, 'kotlin');
+    const undeclared = createContextBundle(PY, 'stdin');
 
-    expect(declared.items[0]?.contentType).toBe('text');
-    expect('language' in declared.items[0]!).toBe(false);
-    expect(declared.id).toBe(createContextBundle(PY, 'stdin').id);
+    expect(declared.items[0]?.contentType).toBe(undeclared.items[0]?.contentType);
+    expect(declared.items[0]?.language).toBe(undeclared.items[0]?.language);
+    expect(declared.id).toBe(undeclared.id);
+    expect(declared.items[0]?.language).not.toBe('kotlin');
   });
 });
 
 describe('end to end: the declared route reaches what the file route reaches', () => {
   const config = loadConfig();
 
-  it('reduces pathless Python that the probe route falls back on', () => {
+  const withBudget = (request: ReturnType<typeof parse>) =>
+    optimize({ ...request, budget: { ...request.budget, targetReductionRatio: 0.3 } });
+
+  it('reduces pathless Python, and agrees with the file route byte for byte', () => {
     const content = [
       'import os',
       '',
@@ -243,10 +251,6 @@ describe('end to end: the declared route reaches what the file route reaches', (
       '',
     ].join('\n');
 
-    const withBudget = (request: ReturnType<typeof parse>) =>
-      optimize({ ...request, budget: { ...request.budget, targetReductionRatio: 0.3 } });
-
-    const probed = withBudget(parse(content, config, { sourceKind: 'stdin' }));
     const declared = withBudget(
       parse(content, config, { sourceKind: 'stdin', language: 'python' }),
     );
@@ -254,8 +258,54 @@ describe('end to end: the declared route reaches what the file route reaches', (
       parse(content, config, { sourceKind: 'file', sourcePath: 'collect.py' }),
     );
 
-    // The reproduction: no validator looked, no region could be selected, whole-item hashing
-    // pinned `S_k` at 0.60 and the input came back verbatim.
+    expect(declared.trace.astCoverage).toEqual({
+      checked: 1,
+      unchecked: 0,
+      uncheckedContentTypes: [],
+    });
+    expect(declared.fallbackUsed).toBe(false);
+    expect(declared.trace.tokenAfter).toBeLessThan(declared.trace.tokenBefore);
+
+    // The claim 4b.1 is actually making — parity with the one route that works. Measured
+    // byte-identical on all 45 files of a frozen pip corpus and all 64 of this repo's.
+    expect(declared.emittedOutput).toBe(viaPath.emittedOutput);
+
+    // Since 4b.2 the undeclared route reaches the same place *for Python*, by detection
+    // rather than declaration. Declaring is still not redundant — see the TypeScript case.
+    const probed = withBudget(parse(content, config, { sourceKind: 'stdin' }));
+    expect(probed.emittedOutput).toBe(viaPath.emittedOutput);
+  });
+
+  it('still needs the declaration for TypeScript, which is deliberately never probed', () => {
+    // §4 of the scope doc: TypeScript positives and prose negatives overlap on this corpus —
+    // the repository's own prose is documentation *about* TypeScript, dense with fenced
+    // TypeScript — so no threshold orders them and no TS probe is proposed, now or later.
+    const content = [
+      'export function collect(paths: string[]): Array<[string, number]> {',
+      '  const results: Array<[string, number]> = [];',
+      '  for (const path of paths) {',
+      '    results.push([path, path.length]);',
+      '  }',
+      '  results.sort((left, right) => left[1] - right[1]);',
+      '  return results;',
+      '}',
+      '',
+      'export function summarize(paths: string[]): number {',
+      '  const collected = collect(paths);',
+      '  let total = 0;',
+      '  for (const entry of collected) {',
+      '    total += entry[1];',
+      '  }',
+      '  return total;',
+      '}',
+      '',
+    ].join('\n');
+
+    const probed = withBudget(parse(content, config, { sourceKind: 'stdin' }));
+    const declared = withBudget(
+      parse(content, config, { sourceKind: 'stdin', language: 'typescript' }),
+    );
+
     expect(probed.trace.astCoverage).toEqual({
       checked: 0,
       unchecked: 1,
@@ -271,10 +321,6 @@ describe('end to end: the declared route reaches what the file route reaches', (
     });
     expect(declared.fallbackUsed).toBe(false);
     expect(declared.trace.tokenAfter).toBeLessThan(declared.trace.tokenBefore);
-
-    // The claim 4b.1 is actually making — parity with the one route that works. Measured
-    // byte-identical on all 45 files of a frozen pip corpus and all 64 of this repo's.
-    expect(declared.emittedOutput).toBe(viaPath.emittedOutput);
   });
 
   it('extends §28 to the pathless route: a barrel is refused instead of deleted', () => {
@@ -462,16 +508,19 @@ describe('CLI', () => {
   it('applies --language over the extension of the file it was given', () => {
     // A `.txt` extension is unrecognized by `classifyContent`, so this file is probe-classified
     // and unchecked without the flag — the same hole as stdin, reachable without one.
+    //
+    // The content is TypeScript on purpose. Python would be *detected* since 4b.2, which would
+    // leave this test asserting the probe rather than the precedence rule it is named for.
     const dir = mkdtempSync(join(tmpdir(), 'td-declared-'));
     const file = join(dir, 'snippet.txt');
-    writeFileSync(file, PY, 'utf8');
+    writeFileSync(file, TS, 'utf8');
 
     const probed = io();
     expect(runCli(['optimize', file], probed.streams, process.cwd())).toBe(0);
     expect(JSON.parse(probed.stderr.join('')).astCoverage.checked).toBe(0);
 
     const declared = io();
-    expect(runCli(['optimize', file, '--language', 'py'], declared.streams, process.cwd())).toBe(0);
+    expect(runCli(['optimize', file, '--language', 'ts'], declared.streams, process.cwd())).toBe(0);
     const trace = JSON.parse(declared.stderr.join(''));
     expect(trace.astCoverage).toEqual({ checked: 1, unchecked: 0, uncheckedContentTypes: [] });
   });
