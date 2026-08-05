@@ -634,3 +634,42 @@ file is unprotected, not merely unoptimized — `pip`'s `status_codes.py` is eli
 unwitnessed over stdin at 44 → 27 tokens while the file route refuses it. Anyone scoping 4b.3
 or a wider probe from the yield tables is again reading the weaker half of the argument, which
 is the same mistake §8 recorded for 4b.2.
+
+---
+
+## `docs/phase-4b-pathless-code-scope.md` §5 — 4b.3 names the wrong buckets, and one marker kind that does not exist
+
+**Date:** 2026-08-06
+**Status of the correction:** measured, implemented (DECISIONS §32). Full record: that
+document's §10.
+
+**What the document says.** §5's 4b.3: *"Undetected Python, and pathless code in any other
+language, still harvest `#` and `- ` lines as structural markers from the `text` and `unknown`
+buckets."*
+
+**What is actually true.**
+
+`- ` lines are **not harvested at all**, and never were. `collectMarkers` gates exactly three
+kinds: `heading:`, `fence:` and `section:`. There is no bullet branch.
+
+And the fabrication is not in `text` or `unknown`. Measured pathless over five frozen corpora:
+62 `text`-classified files, one `html` and one `logs` yield **zero** gated markers between
+them, while **591** fabricated headings come from 9 shell scripts and **45** more from the 4
+`pip` files 4b.2 declines — all of them classified **`markdown`**, because `looksLikeMarkdown`
+fires on a single `#` heading and a shell script's first `# Copyright …` line is one.
+
+§2's original `py/text 23 files 308 headings` was measured before §22's classifier fix and
+4b.2's probe moved that population. What is left sits where an allowlist edit cannot reach it
+without gutting the 25 real documents that yield 477 genuine headings.
+
+**The consequence is worse than a mis-scoped step.** On a frozen `tclConfig.sh` the fabricated
+markers put `S_k` at exactly `0.400` — passing, since the gate is `> 0.40` — and the file is
+deleted whole, 1,877 → 19 tokens, `fallbackUsed: false`, `astCoverage.checked: 0`, while
+`DriftCoverage` reports `structMeasured: true` and `measured: true` on 79 comment lines. The
+markers do not merely inflate the score; **they forge the evidence that the score measured
+anything**, which is the reporting §28 added specifically so this class would be visible.
+
+**Carry this into any successor of §28.** That decision deferred "should drift certify an item
+nothing covers?" as a product question about prose. The population is not prose — it is every
+language the AST-lite suite does not implement. Pinned as a `KNOWN DEFECT` characterization
+test so the behaviour cannot be changed by accident.

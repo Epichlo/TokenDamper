@@ -10,6 +10,39 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
 `git log v1.1.0..HEAD` to confirm current scope before relying on this list.
 
 ### Added
+- **`MARKDOWN_MARKER_TYPES` says what its docblock says — Phase 4b.3 (DECISIONS §32)**: the
+  allowlist is now `markdown` alone. It held `text`, `html`, `logs` and `unknown` while its own
+  docblock said a new `ContentType` "should default to *not* harvesting these". `text` and
+  `unknown` are the two **we could not tell** buckets, and a bucket meaning *we do not know
+  what this is* cannot also mean *its `#` lines are headings*.
+
+  **Measured inert, and that is the honest headline.** The four removed members yielded **zero**
+  gated markers across five frozen corpora, and 132 files over stdin, 40 over the file route
+  and both Gateway turns are byte-identical before and after. Worth having because the trap is
+  latent — anything that starts classifying code as `text` gets the fabrication back for free —
+  not because it moves a number.
+
+  **It uncovered a larger defect that is deliberately not fixed here.** The fabrication 4b.3
+  was scoped to remove is not in those buckets at all: `looksLikeMarkdown` fires on a single
+  `#` heading, so every hash-commented shell script is classified `markdown` — 591 fabricated
+  headings across 9 frozen scripts, 45 more across the 4 `pip` files 4b.2's probe declines,
+  against 0 from the 62 `text`-classified files. Measured end to end on `tclConfig.sh`:
+
+  ```
+  1,877 -> 19 tokens (99.0% deleted)   fallbackUsed false   driftScore 0.4
+  astCoverage    {checked: 0, unchecked: 1, uncheckedContentTypes: ["markdown"]}
+  driftCoverage  {structMeasured: true, measured: true, contentMarkersBefore: 79, …}
+  ```
+
+  Deleted whole, nothing validated it, and drift reports `measured: true` on 79 markers that
+  are every one of them a comment line. The fabricated markers do not merely inflate a score —
+  **they forge the evidence that the score measured anything**, defeating the `DriftCoverage`
+  reporting §28 added so this class would be visible. Pinned as a `KNOWN DEFECT`
+  characterization test. §32 explains why none of the three available seams belongs to 4b.3,
+  and how the finding reframes §28's deferred question: the population is not prose, it is
+  everything no validator covers — including real code in every language the AST-lite suite
+  does not implement.
+
 - **A Python content probe — Phase 4b.2 (DECISIONS §31)**: pathless content that is
   structurally Python is now classified `code` with `language: 'python'`, without a
   declaration. `classifyContent` wraps a new `classifyContentShape`, which answers with both

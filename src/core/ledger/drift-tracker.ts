@@ -8,14 +8,25 @@ import type { ContentType, ContextBundle, ContextItem } from '../model';
  * default to *not* harvesting these — an absent marker costs a little discrimination, an
  * invented one actively inflates drift, and the second failure is the one that has
  * actually bitten (DECISIONS.md §18, `docs/phase-1d-drift-investigation.md` §7).
+ *
+ * **`markdown` alone, since Phase 4b.3 (DECISIONS §32).** The list used to also hold `text`,
+ * `html`, `logs` and `unknown`, which contradicted the paragraph above: `text` and `unknown`
+ * are the two "we could not tell" buckets, and a bucket that means *we do not know what this
+ * is* cannot also mean *its `#` lines are headings*. `#`, ``` and `---` are not HTML or log
+ * syntax either.
+ *
+ * Measured over five frozen corpora before the change, the four removed members yielded
+ * **zero** gated markers between them — 62 `text` files, one `html`, one `logs`, and
+ * `unknown` is only ever returned for empty content. So this is a consistency fix with no
+ * measured behavioural change, and it is worth having only because the trap is latent:
+ * anything that starts classifying code as `text` gets the fabrication back for free.
+ *
+ * **Where the fabrication actually lives is `markdown`, and removing it from this list is not
+ * the answer** — see DECISIONS §32. `looksLikeMarkdown` fires on a single `#` heading, so
+ * every hash-commented shell script is markdown, and its comment lines are harvested as
+ * headings by construction. That is recorded, measured and deliberately not fixed here.
  */
-const MARKDOWN_MARKER_TYPES: ReadonlySet<ContentType> = new Set<ContentType>([
-  'markdown',
-  'text',
-  'html',
-  'logs',
-  'unknown',
-]);
+const MARKDOWN_MARKER_TYPES: ReadonlySet<ContentType> = new Set<ContentType>(['markdown']);
 
 /**
  * Substitutes the pre-optimization content back in for items elided into a

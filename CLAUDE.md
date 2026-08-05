@@ -135,6 +135,15 @@ MCP tools: `optimize_context`, `rehydrate_context`, `get_session_metrics`,
     plain prose is unwitnessed by both components and still passes at `S_k = 0.00` (enforcing
     there would make prose incompressible and end Gateway dedup), and a symbol-free code file
     the *pruner* removes is still invisible to drift.
+    **The tenth instance is open and measured (DECISIONS §32):** fabricated markdown markers
+    make `DriftCoverage` report `structMeasured: true` on content nothing validated. A frozen
+    `tclConfig.sh` goes 1,877 → 19 tokens (99%), `fallbackUsed: false`, `astCoverage.checked: 0`,
+    on the strength of 79 "headings" that are all `#` shell comments — `looksLikeMarkdown` fires
+    on one `#` line, so hash-commented code is markdown. This is the first instance where **the
+    coverage report itself is the thing that lies**. Pinned as a `KNOWN DEFECT` test in
+    `test/unit/markdown-marker-allowlist.test.ts`; not fixed, because the fix is §28's deferred
+    question and that question needs re-framing first (the population is not prose, it is every
+    language the AST-lite suite does not implement).
     A third part was found and closed by Phase 4b.1 (DECISIONS §29): "validator-covered" is
     itself route-dependent, so **the same barrel file was still being deleted unwitnessed over
     stdin** — nothing covers a pathless item, so the refusal never fired. Declaring the

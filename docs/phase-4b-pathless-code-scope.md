@@ -6,8 +6,9 @@
 >
 > **Status: 4b.0 landed 2026-08-04 (harness only). 4b.1 landed 2026-08-05 — see §8. 4b.2
 > landed 2026-08-06 — see §9, and note that its §6 risk 2 was disposed of by a mechanism this
-> document does not contain. 4b.3 remains scoping only, nothing implemented, nothing
-> approved.** This document exists to be argued with before any code is written. Measured 2026-08-04 against `dist/` at `04ce2a3`,
+> document does not contain. 4b.3 landed 2026-08-06 — see §10, and read it before quoting §5's
+> description of it: the fabrication it names is not in the buckets it names. All four steps
+> are now implemented.** This document exists to be argued with before any code is written. Measured 2026-08-04 against `dist/` at `04ce2a3`,
 > over corpora frozen in a scratch directory (`CLAUDE.md`, Gotchas — freeze before measuring).
 >
 > **Headline:** the obvious narrow fix — resolve a language inside `selectValidator` and leave
@@ -232,7 +233,8 @@ language alone leaves the marker fabrication in place — and because
 `CONTENT_TYPE_VALIDATORS.code` maps to the **TypeScript** validator, so a `code` tag without a
 language sends Python to the wrong checker. That coupling deserves a test, not a comment.
 
-**4b.3 — the `MARKDOWN_MARKER_TYPES` allowlist, separately.** 4b.2 fixes the fabrication for
+**4b.3 — the `MARKDOWN_MARKER_TYPES` allowlist, separately. — LANDED 2026-08-06, DECISIONS
+§32. The paragraph below is wrong about where the fabrication lives; see §10.** 4b.2 fixes the fabrication for
 *detected* Python only. Undetected Python, and pathless code in any other language, still
 harvest `#` and `- ` lines as structural markers from the `text` and `unknown` buckets. This is
 its own decision with its own blast radius over every prose item in every bundle, and it should
@@ -448,3 +450,78 @@ correctly refuses it. Detection narrows that population, it does not close it.
 **4b.3 is unchanged and still wanted.** Undetected Python and pathless code in every other
 language still harvest `#` and `- ` lines as structural markers from the `text` and `unknown`
 buckets. 4b.2 fixed the fabrication for *detected* Python only, exactly as §5 said it would.
+
+---
+
+## 10. 4b.3 as landed — the allowlist was not where the fabrication was
+
+**Date:** 2026-08-06. Implemented: DECISIONS §32,
+`test/unit/markdown-marker-allowlist.test.ts`.
+
+### What §5 said, and what is true
+
+§5: *"Undetected Python, and pathless code in any other language, still harvest `#` and `- `
+lines as structural markers from the `text` and `unknown` buckets."*
+
+Two errors, one small and one that changes what the step is.
+
+**Small: `- ` lines are not harvested at all.** `collectMarkers` gates exactly three kinds —
+`heading:` (`#{1,6}\s+`), `fence:` (` ``` `) and `section:` (`---`/`===`/`System:`/`User:`/
+`Assistant:`/`[Context]`/`[Instructions]`). There is no bullet branch and never was.
+
+**Large: the fabrication is not in `text` or `unknown`.** Measured pathless across five frozen
+corpora:
+
+| bucket | files | gated markers |
+|---|---|---|
+| `text` (60 TS + 2 py) | 62 | **0** |
+| `html`, `logs` | 2 | **0** |
+| `unknown` | — | only returned for empty content |
+| `markdown` — **9 shell scripts** | 9 | **591**, every one a `#` comment |
+| `markdown` — **4 undetected `pip` files** | 4 | **45**, every one a `#` comment |
+| `markdown` — 25 real documents | 25 | 477 headings + 47 fences + 23 sections, genuine |
+
+`looksLikeMarkdown` fires on a single `#` heading, so a shell script's first `# Copyright …`
+line makes the whole file markdown. §2's original table (`py/text 23 files 308 headings`) was
+taken before §22's classifier fix and 4b.2's probe moved that population; what is left sits in
+`markdown`, where no allowlist edit can reach it without gutting the 25 real documents.
+
+### So 4b.3 landed as scoped, and is inert
+
+The list is now `markdown` alone — `text`, `html`, `logs` and `unknown` removed, because the
+docblock's own rule says a type should default to not harvesting and the two "we could not
+tell" buckets are the worst possible exceptions to it. 132 files over stdin, 40 over the file
+route and both Gateway turns are byte-identical before and after. A latent-trap fix, stated as
+such.
+
+### The finding, which is worth more than the fix
+
+`tclConfig.sh`, frozen, through the real CLI over stdin:
+
+```
+1,877 -> 19 tokens (99.0% deleted)   fallbackUsed false   driftScore 0.4
+astCoverage    {checked: 0, unchecked: 1, uncheckedContentTypes: ["markdown"]}
+driftCoverage  {structMeasured: true, measured: true, contentMarkersBefore: 79, …}
+```
+
+`S_k` lands on exactly `0.400` — `1 - (0.6·1 + 0.4·0)`, every fabricated marker destroyed —
+and passes because the gate is `> 0.40` rather than `>=`. §3 predicted files sitting at exactly
+0.400 in the abstract; this is one, and it is being deleted whole.
+
+The harm is not the score. It is that `structMeasured: true` and `measured: true` are reported
+on 79 comment lines, so the `DriftCoverage` reporting §28 added **so that this class would be
+visible** says the item was witnessed. The fabricated markers forge the evidence that anything
+was measured.
+
+### Where it belongs, and how it reframes §28
+
+Not in the allowlist (`# Copyright …` and `# A heading` are the same bytes). Not obviously in
+`looksLikeMarkdown` either — that is a classifier change with blast radius over every prose
+item, the gotcha CLAUDE.md states outright and the way §17 was found. It belongs in drift, in
+the question §28 deferred: what does drift owe an item no validator covers?
+
+§28 deferred that as a product question about **prose**. It is not. The population is
+**everything no validator covers**, and that includes real source code in every language the
+AST-lite suite does not implement — shell, Ruby, Go, Rust, SQL. "May TokenDamper compress
+prose" and "may TokenDamper delete 99% of a shell script under a forged `measured: true`" are
+not the same question, and the second one does not need a product decision.

@@ -1726,3 +1726,95 @@ and it is elided whole and unwitnessed — 44 → 27 tokens — while the *file*
 refuses it. Detection narrows that population; it does not close it. Closing it means either
 detecting everything, which no probe does, or deciding what drift owes an item nothing covers,
 which is §28's deferred prose question.
+
+---
+
+## 32. The "We Could Not Tell" Buckets Do Not Get to Assert Structure
+
+**Date:** 2026-08-06
+**Status:** implemented (Phase 4b.3). **Read the second half — the defect this uncovered is
+larger than the change, and is deliberately not fixed here.**
+
+### The change
+
+`MARKDOWN_MARKER_TYPES` held `markdown`, `text`, `html`, `logs` and `unknown` while its own
+docblock said a new `ContentType` "should default to *not* harvesting these — an absent marker
+costs a little discrimination, an invented one actively inflates drift". The list and the rule
+disagreed, and the disagreement was in the worst possible place: `text` and `unknown` are the
+two **we could not tell** buckets. A bucket meaning *we do not know what this is* cannot also
+mean *its `#` lines are headings*. `#`, ``` and `---` are not HTML or log syntax either.
+
+The list is now `markdown` alone.
+
+### Measured: inert, and that is the honest headline
+
+| corpus | files | gated markers from the removed types |
+|---|---|---|
+| 64 repo TypeScript (60 land in `text`, 1 `html`) | 64 | **0** |
+| 45 `pip` Python (2 land in `text`) | 45 | **0** |
+| `sample_logs.txt` (`logs`) | 1 | **0** |
+| `unknown` | — | only ever returned for empty content |
+
+132 files over stdin, 40 over the file-argument route, and both Gateway turns are
+**byte-identical** before and after. This is a consistency fix with no measured behavioural
+change. It is worth having because the trap is latent — anything that starts classifying code
+as `text` gets the fabrication back for free — not because it moves a number today.
+
+### The defect it uncovered, which is not in those buckets at all
+
+`docs/phase-4b-pathless-code-scope.md` §5 scoped 4b.3 as removing the fabrication for
+"undetected Python, and pathless code in any other language". Measured, **the fabrication is
+not in `text` or `unknown`. It is in `markdown`,** and no allowlist edit can remove it without
+gutting real prose:
+
+```
+9 frozen shell scripts   -> classified markdown, 591 headings harvested, all `#` comments
+4 undetected pip files   -> classified markdown,  45 headings harvested, all `#` comments
+62 `text`-classified     ->                        0
+```
+
+`looksLikeMarkdown` fires on a single `#` heading (`/(^|\n)#{1,6}\s+\S/`), so a shell script's
+first `# Copyright …` line makes the whole file markdown.
+
+**And the harm is not the inflated drift.** Measured end to end on a frozen `tclConfig.sh`:
+
+```
+1,877 -> 19 tokens (99.0% deleted)   fallbackUsed false   driftScore 0.4
+astCoverage    {checked: 0, unchecked: 1, uncheckedContentTypes: ["markdown"]}
+driftCoverage  {structMeasured: true, measured: true, contentMarkersBefore: 79,
+                symbolsBefore: 0, unwitnessedItems: []}
+```
+
+The file is deleted whole, nothing validated it, and drift reports **`measured: true`** on the
+strength of 79 markers that are every one of them a comment line. `S_k` lands on exactly
+`0.400` — `1 - (0.6·1 + 0.4·0)`, every fabricated marker destroyed — and passes only because
+the gate is `> 0.40` rather than `>=`, which §3 of the scope document predicted in the
+abstract and is here in the concrete.
+
+So the fabricated markers do not merely inflate a score. **They forge the evidence that the
+score measured anything**, defeating the `DriftCoverage` reporting §28 added precisely so this
+class would be visible. That is invariant 10 again, and it is the first instance where the
+report itself is the thing that lies.
+
+### Why it is not fixed here
+
+Three seams, none of them 4b.3's:
+
+1. **The allowlist** cannot separate them: `# Copyright …` and `# A heading` are the same
+   bytes, and `markdown` must keep harvesting for the 25 real documents that yield 477
+   headings, 47 fences and 23 sections.
+2. **`looksLikeMarkdown`** could require more than one `#` line, but that is a classifier
+   change with blast radius over every prose item in every bundle — the gotcha CLAUDE.md
+   states outright, and how §17 was found.
+3. **Drift** could refuse to certify an item nothing covers, which is exactly the prose
+   question §28 deferred as a product decision.
+
+Seam 3 is where this actually belongs, and the finding **reframes that deferred question**.
+§28 deferred it as "may TokenDamper compress prose at all". The population is not prose. It is
+**everything no validator covers**, which includes real source code in every language the
+AST-lite suite does not implement — shell, Ruby, Go, Rust, SQL. Deleting 99% of a shell script
+under a forged `measured: true` is not a product question about prose.
+
+Pinned as a characterization test in `test/unit/markdown-marker-allowlist.test.ts` under
+`KNOWN DEFECT`, so that whoever fixes it has to remove a failing assertion deliberately rather
+than discover the behaviour by accident.
