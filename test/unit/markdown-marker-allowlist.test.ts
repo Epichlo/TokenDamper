@@ -84,9 +84,17 @@ describe('only markdown yields markdown markers', () => {
 });
 
 /**
- * A characterization test, not a specification. It pins behaviour that is **wrong** so the
- * next person to touch this meets it deliberately rather than by surprise, in the same shape
- * as the "reproduction" block in `drift-unwitnessed-elision.test.ts`.
+ * A characterization test. Read this before trusting it: **these assertions pass, and a
+ * passing assertion is a specification.** Nothing in the harness marks them as pending —
+ * no `.skip`, no `.fails`, no `.todo` — so the only thing distinguishing "this is wrong" from
+ * "this is the contract" is the name of this block and the paragraph you are reading.
+ *
+ * The mechanism is that they will *begin* failing the moment someone fixes the defect, which
+ * forces the encounter. That is real, but it is the opposite of the "deliberately failing
+ * assertion" the 4b.3 commit message described, and the difference matters: right now the
+ * suite asserts `structMeasured: true` on a 99%-deleted shell script as correct behaviour.
+ * Making that structural rather than nominal is open work — see
+ * `docs/phase-4b-lever-disposition.md` §0.
  *
  * Found while measuring 4b.3, which is scoped to `text`/`unknown` and therefore cannot fix it:
  * `looksLikeMarkdown` fires on a single `#` heading, so **every hash-commented shell script is

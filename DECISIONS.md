@@ -1809,6 +1809,19 @@ Three seams, none of them 4b.3's:
 3. **Drift** could refuse to certify an item nothing covers, which is exactly the prose
    question §28 deferred as a product decision.
 
+**All three were measured on 2026-08-06 and the deferral survives with better evidence:
+`docs/phase-4b-lever-disposition.md`.** Seam 1 (a coverage gate prohibiting whole-item elision
+where `astCoverage.checked == 0`) is dead twice over — `tclConfig.sh` and `CODE_OF_CONDUCT.md`
+are identical on every trace field the gate could key on, and *every* Gateway dedup elision is
+`checked == 0`, so the gate makes the proxy a pass-through. A fourth lever, non-content
+discriminators, is also dead: a shebang catches one of the four destroyed files, and the
+extension and executable bit do not exist on any pathless route. Seam 2 was not re-measured.
+Seam 3 survives and is the deferral itself.
+
+One correction to the sentence above, from that measurement: "the only identified fix" should
+read "the only fix that does not either destroy the Gateway or reduce to §28's open question".
+Three fixes are identified; the conclusion is unchanged.
+
 Seam 3 is where this actually belongs, and the finding **reframes that deferred question**.
 §28 deferred it as "may TokenDamper compress prose at all". The population is not prose. It is
 **everything no validator covers**, which includes real source code in every language the
