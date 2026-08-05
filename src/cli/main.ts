@@ -182,22 +182,81 @@ export interface ParsedArguments {
   readonly inputName?: string;
 }
 
-function parseArguments(argv: readonly string[], cwd: string): ParsedArguments {
+/**
+ * The flags each command actually reads, keyed by what `runCli` consumes — not by what the
+ * parse loop happens to recognize.
+ *
+ * The two used to be different, silently. Every flag below was accepted by the loop for every
+ * command and then dropped by the command that had no field for it: `bench --diff`,
+ * `optimize --report-json`, and worst of all `mcp --config`, which the MCP branch *reads*
+ * (`parsed.configPath`) while the parser returned before ever setting it — so pointing the
+ * server at a config file silently ran it on defaults. Each exited 0 and looked configured.
+ *
+ * That is the shape DECISIONS §29 rejects for `--language`, and it was never specific to
+ * `--language`. An unsupported flag is now an error naming where it *is* supported.
+ */
+const COMMON_FLAGS = [
+  '--config',
+  '--mode',
+  '--trace-output',
+  '--planner-mode',
+  '--minimum-confidence',
+  '--log-level',
+  '--max-input-tokens',
+  '--max-output-tokens',
+  '--target-reduction-ratio',
+  '--max-latency-ms',
+  '--risk-tolerance',
+  '--preserve-kinds',
+] as const;
+
+export const SUPPORTED_FLAGS: Readonly<Record<'optimize' | 'bench' | 'mcp', ReadonlySet<string>>> = {
+  optimize: new Set([
+    ...COMMON_FLAGS,
+    '--diff',
+    '--diff-html',
+    '--max-debt',
+    '--max-drift',
+    '--language',
+    '--input-name',
+  ]),
+  bench: new Set([...COMMON_FLAGS, '--report-json', '--quiet']),
+  mcp: new Set(COMMON_FLAGS),
+};
+
+function rejectUnsupportedFlags(command: 'optimize' | 'bench' | 'mcp', seen: ReadonlySet<string>): void {
+  const unsupported = [...seen].filter((flag) => !SUPPORTED_FLAGS[command].has(flag));
+  if (unsupported.length === 0) {
+    return;
+  }
+
+  const detail = unsupported
+    .map((flag) => {
+      const elsewhere = (Object.keys(SUPPORTED_FLAGS) as Array<keyof typeof SUPPORTED_FLAGS>)
+        .filter((other) => SUPPORTED_FLAGS[other].has(flag))
+        .join(', ');
+      return elsewhere ? `${flag} (applies to: ${elsewhere})` : flag;
+    })
+    .join('; ');
+
+  throw new Error(`Unsupported for \`tokendamper ${command}\`: ${detail}.`);
+}
+
+/**
+ * Exported for `test/unit/cli/flag-support.test.ts`, which checks the flag table against the
+ * parse loop it governs. A parser is testable directly; asserting on it through `runCli` would
+ * mean starting an MCP server to find out whether `--config` was read.
+ */
+export function parseArguments(argv: readonly string[], cwd: string): ParsedArguments {
   void cwd;
 
   const args = [...argv];
   let command = args.shift();
 
-  if (command === 'mcp') {
-    return {
-      command: 'mcp',
-      inputPath: '',
-      execArgs: [],
-    };
-  }
-
   if (command === 'exec') {
-    // Drop optional '--' separator if present
+    // Drop optional '--' separator if present. Everything after it belongs to the child
+    // process, so `exec` is deliberately outside the flag table above — it forwards rather
+    // than consumes.
     if (args[0] === '--') {
       args.shift();
     }
@@ -221,7 +280,7 @@ function parseArguments(argv: readonly string[], cwd: string): ParsedArguments {
     } else {
       throw new Error('Missing input file path.');
     }
-  } else {
+  } else if (command !== 'mcp') {
     return {
       command: 'unknown',
       inputPath: '',
@@ -241,9 +300,15 @@ function parseArguments(argv: readonly string[], cwd: string): ParsedArguments {
   let quiet = false;
   let language: string | undefined;
   let inputName: string | undefined;
+  // Recorded as encountered, checked against the command once parsing is done — `--mode bench`
+  // can still change `command` from inside this loop, so the verdict cannot be reached early.
+  const seenFlags = new Set<string>();
 
   while (args.length > 0) {
     const flag = args.shift();
+    if (flag !== undefined) {
+      seenFlags.add(flag);
+    }
     if (flag === '--config') {
       configPath = args.shift();
       if (!configPath) {
@@ -463,7 +528,30 @@ function parseArguments(argv: readonly string[], cwd: string): ParsedArguments {
     throw new Error(`Unknown argument: ${flag ?? ''}`);
   }
 
+  const resolvedOverrides: Partial<ConfigOverrides> =
+    minimumConfidence === undefined && budgetOverrides === undefined
+      ? configOverrides
+      : {
+          ...configOverrides,
+          ...(minimumConfidence === undefined ? {} : { minimumConfidence }),
+          ...(budgetOverrides === undefined ? {} : { budget: budgetOverrides }),
+        };
+
+  if (command === 'mcp') {
+    rejectUnsupportedFlags('mcp', seenFlags);
+    return {
+      command: 'mcp',
+      inputPath: '',
+      execArgs: [],
+      // Populated, at last. The MCP branch of `runCli` has always read these two; the parser
+      // returned before the loop that sets them, so `mcp --config custom.json` ran on defaults.
+      ...(configPath ? { configPath } : {}),
+      configOverrides: resolvedOverrides,
+    };
+  }
+
   if (command === 'bench') {
+    rejectUnsupportedFlags('bench', seenFlags);
     return {
       command: 'bench',
       inputPath: inputPath || datasetPath || '',
@@ -472,16 +560,11 @@ function parseArguments(argv: readonly string[], cwd: string): ParsedArguments {
       ...(quiet ? { quiet } : {}),
       execArgs: [],
       ...(configPath ? { configPath } : {}),
-      configOverrides:
-        minimumConfidence === undefined && budgetOverrides === undefined
-          ? configOverrides
-          : {
-              ...configOverrides,
-              ...(minimumConfidence === undefined ? {} : { minimumConfidence }),
-              ...(budgetOverrides === undefined ? {} : { budget: budgetOverrides }),
-            },
+      configOverrides: resolvedOverrides,
     };
   }
+
+  rejectUnsupportedFlags('optimize', seenFlags);
 
   if (inputName !== undefined && inputPath !== '-') {
     // Not merged, and not silently ignored: with a real file argument there are two
@@ -501,16 +584,7 @@ function parseArguments(argv: readonly string[], cwd: string): ParsedArguments {
     ...(diffHtmlPath ? { diffHtmlPath } : {}),
     ...(maxDebt !== undefined ? { maxDebt } : {}),
     ...(maxDrift !== undefined ? { maxDrift } : {}),
-    ...(reportJsonPath ? { reportJsonPath } : {}),
-    ...(quiet ? { quiet } : {}),
-    configOverrides:
-      minimumConfidence === undefined && budgetOverrides === undefined
-        ? configOverrides
-        : {
-            ...configOverrides,
-            ...(minimumConfidence === undefined ? {} : { minimumConfidence }),
-            ...(budgetOverrides === undefined ? {} : { budget: budgetOverrides }),
-          },
+    configOverrides: resolvedOverrides,
   };
 }
 

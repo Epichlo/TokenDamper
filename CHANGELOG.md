@@ -140,6 +140,28 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
   dense with imperative directives, which is a property of the corpus. See §24.
 
 ### Fixed
+- **A flag the command does not read is now an error (DECISIONS §30)**: `parseArguments` ran
+  one flag loop for every subcommand and each subcommand's return object picked out the fields
+  it cared about, dropping the rest **in silence**. `tokendamper bench --diff --language python`
+  and `tokendamper optimize x --report-json r.json` both parsed, discarded and exited 0.
+
+  Worst of the three: `tokendamper mcp --config custom.json` was never parsed at all. The MCP
+  branch of `runCli` **reads** `parsed.configPath`, but the parser returned for `mcp` before the
+  loop that sets it, so it was permanently `undefined` — and `loadConfig` ignores a config file
+  that does not exist rather than failing, so the server started on defaults with no signal in
+  the exit code, on stderr, or in the config it reported. `mcp` now takes `--config` and every
+  config/budget override, as its own branch always assumed.
+
+  One `SUPPORTED_FLAGS` table keyed by what `runCli` actually consumes. An unsupported flag is
+  a parse error naming every offender **and where each one applies**
+  (``Unsupported for `tokendamper bench`: --diff (applies to: optimize).``), checked after the
+  loop because `--mode bench` can change the command from inside it. `exec` stays outside the
+  table — its arguments belong to the child process.
+
+  This generalizes §29, which made the same argument for `--language` and then left the shape
+  in place for eight other flags. **Breaking:** invocations relying on a silently ignored flag
+  now exit 1.
+
 - **An empty before-set is "nothing to measure", not "perfectly retained" (DECISIONS §28)**:
   `R_AST` and `R_struct` each default to `1.0` when their pre-optimization set is empty, so an
   item the extractors found nothing in scored as perfectly retained. That is invariant 10's

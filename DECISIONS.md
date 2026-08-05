@@ -1540,3 +1540,70 @@ Declaring `python` for a request would tag English prose as Python code and hand
 route into a fallback generator on exactly the traffic invariant 8 protects. If a Gateway
 declaration is ever wanted it must be per message, which means a header format that names
 message indices, and that is a design, not a flag.
+
+---
+
+## 30. A Flag the Command Does Not Read Is an Error, Not a No-Op
+
+**Date:** 2026-08-06
+**Status:** implemented
+**Generalizes:** §29, which made this argument for `--language` alone.
+
+### The defect
+
+`parseArguments` ran one flag loop for every subcommand, and each subcommand's return object
+picked out the fields it cared about. Everything else was **dropped in silence**. Three
+instances shipped, all exiting 0:
+
+```
+tokendamper bench --diff --language python     parsed, discarded
+tokendamper optimize x --report-json r.json    parsed, discarded
+tokendamper mcp --config custom.json           never parsed at all
+```
+
+The third is the worst and was not a mere omission. `runCli`'s MCP branch **reads**
+`parsed.configPath` and `parsed.configOverrides` and hands them to `loadConfig` — but the
+parser returned for `mcp` *before* the loop that sets them, so both were permanently
+`undefined`. And `loadConfig` ignores a config file that does not exist rather than failing, so
+`tokendamper mcp --config custom.json` started a server on defaults with no signal anywhere:
+not in the exit code, not on stderr, not in the config it reported.
+
+§29 rejected exactly this shape for `--language` — "a declaration that quietly does nothing
+produces a run that looks configured and is not" — and then left the same shape in place for
+eight other flags, because the argument had been framed around declarations rather than around
+silence. The property is about silence.
+
+### The decision
+
+A single table, `SUPPORTED_FLAGS`, keyed by what `runCli` actually consumes rather than by what
+the loop happens to recognize. Anything outside a command's set is a parse error naming the
+offending flags **and where each one does apply**:
+
+```
+Unsupported for `tokendamper bench`: --diff (applies to: optimize).
+```
+
+Named rather than merely refused, because every one of these flags is real; the user has the
+right command for the wrong verb. All offenders are reported at once — fixing an invocation one
+error at a time is its own small punishment.
+
+The check runs **after** the parse loop, not inside it: `--mode bench` can change the command
+from within the loop, so the verdict cannot be reached until parsing is finished.
+
+`exec` is deliberately outside the table. Its arguments belong to the child process, so
+forwarding them unexamined is the contract, not a leak.
+
+### Consequences accepted
+
+`bench --diff` and `optimize --quiet` used to exit 0. They now exit 1. That is a breaking change
+for any script relying on a flag that never did anything, which is the population this is meant
+to inform. Nothing that was doing work stops doing it: every flag each command actually reads
+is still accepted, and `test/unit/cli/flag-support.test.ts` walks the whole table to prove the
+table and the loop agree — a flag listed as supported but unrecognized by the loop fails there.
+
+### Why the parser is exported for the test
+
+`parseArguments` and `SUPPORTED_FLAGS` are exported for that suite. Asserting this through
+`runCli` would mean starting an MCP server to discover whether `--config` was read, and the
+`mcp` defect is invisible from the outside precisely because `loadConfig` swallows a missing
+file. A parser is testable directly.

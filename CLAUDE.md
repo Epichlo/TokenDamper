@@ -41,6 +41,12 @@ Key `optimize` flags: `--max-input-tokens`, `--max-output-tokens`,
 `--diff`, `--diff-html <path>`, `--report-json <path>`, `--config <path>`, `--quiet`,
 `--language <name>`, `--input-name <name>`.
 
+**Flags are command-scoped and enforced (DECISIONS §30).** `SUPPORTED_FLAGS` in
+`src/cli/main.ts` is keyed by what `runCli` actually consumes; anything else is a parse error
+naming where it does apply. `bench` takes the config/budget flags plus `--report-json` and
+`--quiet`; `mcp` takes the config/budget flags (it silently took **none** before — its branch
+read `parsed.configPath` and the parser never set it); `exec` forwards everything to the child.
+
 **Second critical flag, for stdin:** `--language`. Without it a piped payload has no filename,
 classification falls to content probes, no validator covers the item and reduction is ~0%
 (0.07% on this repo's TypeScript vs 19.27% with it, cl100k, DECISIONS §29). `--input-name`
