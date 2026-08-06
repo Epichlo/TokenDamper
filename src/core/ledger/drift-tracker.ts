@@ -106,11 +106,30 @@ export interface DriftReport {
   readonly structMeasured: boolean;
   readonly measured: boolean;
   readonly contentChanged: boolean;
-  /** Items that changed, expected a symbol witness, and produced none. */
+  /** Items that changed and produced no witness of any kind. */
   readonly unwitnessedItemIds: ReadonlyArray<string>;
+  /**
+   * The two gates, separately, because one scalar cannot express both.
+   *
+   * `S_k = 1 - (0.6·R_AST + 0.4·R_struct)` answers two questions at once — *did anything
+   * witness this?* and *did enough of it survive?* — and `0.400` is reachable from two
+   * structurally opposite configurations: `R_AST = 1` as an empty-set default with
+   * `R_struct = 0` (nothing measured, everything destroyed), and `R_AST = 1/3` with
+   * `R_struct = 1` (a third of the symbols retained, structure intact). A single
+   * comparison decides both together, so `>` versus `>=` silently arbitrates a question
+   * nobody asked. Reported apart, they can be answered apart.
+   *
+   * `measurement` refuses when an item changed and left no evidence it was retained.
+   * `retention` refuses when evidence exists and too little of it survived.
+   * `shouldFallback` is their disjunction and is kept for callers that only need the verdict.
+   */
+  readonly measurementGate: GateVerdict;
+  readonly retentionGate: GateVerdict;
   readonly shouldFallback: boolean;
   readonly reason?: string | undefined;
 }
+
+export type GateVerdict = 'pass' | 'refuse';
 
 export interface DriftTrackerOptions {
   readonly maxDriftThreshold?: number | undefined; // Default: 0.40
@@ -142,23 +161,10 @@ export class DriftTracker {
     afterBundle: ContextBundle,
     options?: {
       weights?: { ast?: number; struct?: number };
-      /**
-       * Ids of items an AST validator covers, and therefore ones for which extracted
-       * symbols are the expected evidence of retention. Supplied by `validate()` from the
-       * coverage it already computed, rather than re-deriving validator selection here —
-       * duplicating that precedence (`language` → path → `contentType`) is how the check
-       * and the transform came to disagree in Issue 2.
-       *
-       * Omitted means "caller does not know", which disables the unwitnessed-item rule
-       * rather than guessing. `DriftCoverage.symbolBearingItems` reports the count so a
-       * caller that forgot shows up as 0 instead of passing silently.
-       */
-      symbolBearingItemIds?: ReadonlySet<string> | undefined;
     },
   ): DriftReport {
     const wAst = options?.weights?.ast ?? this.weightAst;
     const wStruct = options?.weights?.struct ?? this.weightStruct;
-    const symbolBearing = options?.symbolBearingItemIds ?? new Set<string>();
 
     const totalWeight = wAst + wStruct;
     const normAst = totalWeight > 0 ? wAst / totalWeight : 0.60;
@@ -211,27 +217,40 @@ export class DriftTracker {
 
     // Which items were destroyed without leaving any evidence they were retained?
     //
-    // Scoped deliberately to items an AST validator covers, and the distinction is the whole
-    // design. For structured content, symbols are the *expected* witness: a TypeScript file
-    // that yields none means the extractor found nothing where something should have been —
-    // the user's "the extractor failed, so this is not elidable". For prose there was never
-    // a witness to lose; `R_AST = 1.0` there is not a failed measurement but an inapplicable
-    // one, and enforcing on it would make every prose bundle incompressible, ending
-    // `cleanup:session-dedup` on exactly the conversational traffic the Gateway carries.
+    // **No longer scoped to validator-covered items (Phase A).** §28 scoped it that way and
+    // gave a reason: for prose `R_AST = 1.0` is an inapplicable metric rather than a failed
+    // one, and enforcing there "would make every prose bundle incompressible, ending
+    // `cleanup:session-dedup` on exactly the conversational traffic the Gateway carries".
+    // Measured on 2026-08-06, that reason is half true and the half that is false was doing
+    // all the work:
     //
-    // That gap is real and stays open: plain prose is unwitnessed by both components and
-    // still passes at `S_k = 0.00`. It is now *reported* (`DriftCoverage`) rather than
-    // enforced, because closing it is a product decision about whether TokenDamper may
-    // compress prose at all — not a bug fix.
-    const unwitnessedItemIds = this.findUnwitnessedItems(beforeBundle, effectiveAfter, symbolBearing);
-    const unmeasurable = unwitnessedItemIds.length > 0;
+    //   - Real documents are unaffected. All 25 markdown files in the frozen corpus carry
+    //     content markers, so they are witnessed and this rule never reaches them.
+    //   - The Gateway keeps within-payload deduplication. `resolveRecoverableElisions` above
+    //     substitutes the original content for `recoverable` elisions *before* any of this
+    //     runs, so a recoverable elision reads as unchanged and is skipped structurally.
+    //     Measured end to end: within-payload dedup saves 44 of 129 tokens with and without
+    //     this rule. Only cross-turn sole-copy elision is refused — the case the §9 addendum
+    //     already described as sending the model a marker it has no way to resolve.
+    //   - What the old scope was actually protecting was uncovered *code*. A 57,037-token
+    //     Perl file was elided whole to 19 tokens on the file-argument route, `S_k = 0`,
+    //     `measured: false`, no fallback, because no validator covers `.pl` and the rule
+    //     therefore never looked. That is the defect, not prose.
+    //
+    // See `docs/phase-0-measurement-baseline.md` §5 and DECISIONS §33.
+    const unwitnessedItemIds = this.findUnwitnessedItems(beforeBundle, effectiveAfter);
 
-    const shouldFallback = unmeasurable || driftScore > this.maxDriftThreshold;
-    const reason = unmeasurable
-      ? `Semantic drift is unmeasurable for ${unwitnessedItemIds.length} item(s) [${unwitnessedItemIds.join(', ')}]: content changed, an AST validator covers the item, and it yielded no symbols and no content-derived structural markers — so retention cannot be evidenced (S_k would default to ${driftScore.toFixed(2)}).`
-      : driftScore > this.maxDriftThreshold
-        ? `Semantic drift metric (${driftScore.toFixed(2)}) exceeds maximum threshold (${this.maxDriftThreshold.toFixed(2)}).`
-        : undefined;
+    // The two gates, decided separately. See `DriftReport.measurementGate`.
+    const measurementGate: GateVerdict = unwitnessedItemIds.length > 0 ? 'refuse' : 'pass';
+    const retentionGate: GateVerdict = driftScore > this.maxDriftThreshold ? 'refuse' : 'pass';
+    const shouldFallback = measurementGate === 'refuse' || retentionGate === 'refuse';
+
+    const reason =
+      measurementGate === 'refuse'
+        ? `Semantic drift is unmeasurable for ${unwitnessedItemIds.length} item(s) [${unwitnessedItemIds.join(', ')}]: content changed and the item yielded no symbols and no content-derived structural markers, so retention cannot be evidenced (S_k would default to ${driftScore.toFixed(2)}).`
+        : retentionGate === 'refuse'
+          ? `Semantic drift metric (${driftScore.toFixed(2)}) exceeds maximum threshold (${this.maxDriftThreshold.toFixed(2)}).`
+          : undefined;
 
     return {
       driftScore,
@@ -247,29 +266,31 @@ export class DriftTracker {
       measured,
       contentChanged,
       unwitnessedItemIds: Object.freeze(unwitnessedItemIds),
+      measurementGate,
+      retentionGate,
       shouldFallback,
       ...(reason ? { reason } : {}),
     };
   }
 
   /**
-   * Items that changed, are covered by an AST validator, and left no evidence of retention.
+   * Items that changed and left no evidence of retention.
    *
    * Per item rather than per bundle on purpose: the bundle-level ratios are set comparisons
    * with no attribution, so a bundle holding one richly-symbolled file and one symbol-free
    * barrel file measures `astMeasured: true` while the barrel is deleted unwitnessed. That
    * is the same granularity mismatch that produced Issue 2 — the transform is per item, so
    * the evidence check has to be too.
+   *
+   * The witness may be **either** symbols or content-derived markers. Requiring symbols
+   * specifically would refuse every document; requiring neither is what let a 57,037-token
+   * Perl file be deleted whole. "Some evidence, of either kind" is the line, and the three
+   * exemptions below (untouched, pruned, measurable) are what keep it off everything else.
    */
   private findUnwitnessedItems(
     beforeBundle: ContextBundle,
     effectiveAfter: ContextBundle,
-    symbolBearing: ReadonlySet<string>,
   ): string[] {
-    if (symbolBearing.size === 0) {
-      return [];
-    }
-
     const afterById = new Map<string, ContextItem>();
     for (const item of effectiveAfter.items) {
       afterById.set(item.id, item);
@@ -277,9 +298,6 @@ export class DriftTracker {
 
     const unwitnessed: string[] = [];
     for (const item of beforeBundle.items) {
-      if (!symbolBearing.has(item.id)) {
-        continue;
-      }
       const after = afterById.get(item.id);
       if (!after) {
         // Dropped from the bundle entirely — a selection decision, not an elision. The

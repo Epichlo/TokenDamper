@@ -9,6 +9,49 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or released; run
 `git log v1.1.0..HEAD` to confirm current scope before relying on this list.
 
+### Changed
+- **The measurement gate is no longer scoped to validator-covered items — Phase A
+  (DECISIONS §33)**: an item that changed, was not pruned away, and yields neither symbols nor
+  content-derived markers is now refused whatever language it is in. §28 scoped this rule to
+  covered items to protect prose; measured over the Phase 0 corpus, the scope protected the
+  wrong population. All 25 real markdown files carry content markers and were never in reach
+  of the rule, while what the scope excluded was uncovered **code** —
+  `Unicode_Collate_Locale_ja.pl` at **57,037 → 19 tokens (100%)** on the *file-argument* route,
+  `S_k = 0`, `measured: false`, `fallbackUsed: false`, because nothing covers `.pl`.
+
+  **The Gateway keeps within-payload deduplication.** `resolveRecoverableElisions` substitutes
+  original content for `recoverable` elisions before the gate runs, so they are structurally
+  invisible to it — measured, within-payload dedup saves 44 of 129 tokens with and without the
+  change. This is what separates it from lever 1, which keyed on `astCoverage.checked == 0`, a
+  condition every dedup elision meets, and would have made the proxy a pass-through. What the
+  Gateway does lose is cross-turn dedup of a **sole copy** — the population
+  `docs/phase-1-stabilization-summary.md` §9 already described as sending the model a marker it
+  cannot resolve.
+
+  Measured cost: **62 of 578 corpus runs change** (perl 81.91% → 5.61% on both routes, css and
+  c over stdin to 0.00%). Every AST-covered bucket, all 25 prose files, shell and tcl are
+  **byte-identical**.
+
+- **`DriftReport` carries `measurementGate` and `retentionGate` as separate verdicts
+  (DECISIONS §33)**: `S_k` answered two questions with one scalar — *did anything witness this?*
+  and *did enough survive?* — and `0.400` is reachable from two opposite configurations
+  (`R_AST = 1` empty-set default with `R_struct = 0`, and `R_AST = 1/3` with `R_struct = 1`), so
+  `>` versus `>=` arbitrated both together. `validate()` now reads `measurementGate` rather than
+  re-deriving the distinction, so `SEMANTIC_DRIFT_UNMEASURABLE` and `SEMANTIC_DRIFT_EXCEEDED`
+  are driven by the gate that fired. `calculateDrift`'s `symbolBearingItemIds` option is
+  **removed** rather than left inert (§30).
+
+  **This does not close the forged half.** Shell and Tcl are untouched: they classify `markdown`
+  on one `#` comment, so their comment leaders are harvested as headings and they report
+  `structMeasured: true` — fabricating exactly the evidence this gate checks. That is the
+  classifier seam, and it is why Phase A is two changes.
+
+- **Three tests were passing on the empty-set default and are corrected**: `engine.test.ts`'s
+  emit-path fixture elided a witness-free `text` item and asserted `fallbackUsed: false`, which
+  held only because drift measured nothing; two Gateway tests deduplicated a sole cross-turn
+  copy. `declared-language.test.ts` asserted the pathless hole was still open on the undeclared
+  route — it is now closed, and the test asserts that instead.
+
 ### Added
 - **A frozen-corpus measurement harness — Phase 0 (`tools/corpus-harness/`)**: `collect.js`
   freezes a corpus by `sha256` manifest and pins the engine (commit, a hash over all

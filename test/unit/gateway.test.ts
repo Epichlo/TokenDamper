@@ -226,10 +226,18 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
     const res1Json = JSON.parse(res1.body);
     expect(res1Json.messages[0].content).toBe(repeatedContext);
 
-    // Turn 2 repeats the context along with a new prompt
+    // Turn 2 repeats the context **twice**, so the first copy is preserved as a referent and
+    // the second is elided recoverably.
+    //
+    // Phase A: the single-copy version of this payload no longer deduplicates. A sole copy
+    // elided across turns is `recoverable: false`, carries no symbols and no content markers,
+    // and the measurement gate now refuses to certify it — see the companion test below.
+    // Within-payload duplication is unaffected because `resolveRecoverableElisions`
+    // substitutes the original content back before the gate runs.
     const turn2Payload = {
       model: 'gpt-4o',
       messages: [
+        { role: 'user', content: repeatedContext },
         { role: 'user', content: repeatedContext },
         { role: 'user', content: 'What does this code do?' },
       ],
@@ -246,11 +254,60 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
     expect(res2.statusCode).toBe(200);
     const res2Json = JSON.parse(res2.body);
 
-    // Message 0 should be elided
-    expect(res2Json.messages[0].content).toContain('[TokenDamper Elided: ref=');
-    expect(sessionStore.getContent('test-openai-session', res2Json.messages[0].content)).toBe(repeatedContext);
-    // Message 1 should remain unchanged
-    expect(res2Json.messages[1].content).toBe('What does this code do?');
+    // Message 0 is preserved as the referent; message 1 is the elided copy.
+    expect(res2Json.messages[0].content).toBe(repeatedContext);
+    expect(res2Json.messages[1].content).toContain('[TokenDamper Elided: ref=');
+    expect(sessionStore.getContent('test-openai-session', res2Json.messages[1].content)).toBe(repeatedContext);
+    // The new prompt remains unchanged
+    expect(res2Json.messages[2].content).toBe('What does this code do?');
+  });
+
+  it('refuses cross-turn dedup of a sole copy, which nothing witnesses (Phase A)', async () => {
+    // The cost of the measurement gate, stated as a test rather than left to be discovered.
+    //
+    // A sole copy elided across turns is `recoverable: false`: the marker is not a pointer,
+    // because the consumer is a stateless provider API that never calls `rehydrate_context`.
+    // The content is deleted, and conversational prose carries neither symbols nor content
+    // markers — so the elision cannot be evidenced and drift refuses it. The §9 addendum in
+    // docs/phase-1-stabilization-summary.md already described this population as sending the
+    // model a marker it has no way to resolve.
+    const sessionStore = server.getSessionStore();
+    const soleContext = 'A paragraph of ordinary conversational context that appears exactly once per turn';
+
+    await handleProxyRequest(
+      'POST',
+      '/v1/chat/completions',
+      { 'x-session-id': 'sole-copy-session' },
+      JSON.stringify({ model: 'gpt-4o', messages: [{ role: 'user', content: soleContext }] }),
+      { sessionStore },
+    );
+
+    const turn2Body = JSON.stringify({
+      model: 'gpt-4o',
+      messages: [
+        { role: 'user', content: soleContext },
+        { role: 'user', content: 'And now a follow-up question.' },
+      ],
+    });
+
+    const res2 = await handleProxyRequest(
+      'POST',
+      '/v1/chat/completions',
+      { 'x-session-id': 'sole-copy-session' },
+      turn2Body,
+      { sessionStore },
+    );
+
+    expect(res2.statusCode).toBe(200);
+    const res2Json = JSON.parse(res2.body);
+
+    // Nothing elided, and the caller's payload comes back intact.
+    expect(res2Json.messages[0].content).toBe(soleContext);
+    expect(res2Json.messages[1].content).toBe('And now a follow-up question.');
+
+    const turn = sessionStore.getOrCreateSession('sole-copy-session').turns[1];
+    expect(turn?.fallbackUsed).toBe(true);
+    expect(turn?.optimizedTokens).toBe(turn?.rawTokens);
   });
 
   it('reports a computed fallbackUsed now that the proxy runs the engine (1.0b)', async () => {
@@ -612,11 +669,13 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
 
     expect(res1.statusCode).toBe(200);
 
-    // Turn 2 repeats context
+    // Turn 2 repeats context twice — the first copy is the referent, the second is elided
+    // recoverably. A sole copy is refused since Phase A; see the OpenAI companion test.
     const turn2Payload = {
       model: 'claude-3-5-sonnet-20241022',
       system: systemPrompt,
       messages: [
+        { role: 'user', content: repeatedContext },
         { role: 'user', content: repeatedContext },
         { role: 'user', content: 'Fix the bug in this file' },
       ],
@@ -635,10 +694,11 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
 
     // System prompt must remain unchanged
     expect(res2Json.system).toBe(systemPrompt);
-    // Repeated context message should be elided
-    expect(res2Json.messages[0].content).toContain('[TokenDamper Elided: ref=');
+    // First copy preserved as referent, second elided
+    expect(res2Json.messages[0].content).toBe(repeatedContext);
+    expect(res2Json.messages[1].content).toContain('[TokenDamper Elided: ref=');
     // New turn message remains intact
-    expect(res2Json.messages[1].content).toBe('Fix the bug in this file');
+    expect(res2Json.messages[2].content).toBe('Fix the bug in this file');
   });
 
   it('returns 400 when invalid JSON is sent', async () => {

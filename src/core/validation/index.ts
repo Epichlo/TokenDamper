@@ -73,9 +73,13 @@ export function validate(
   // carries `id`, `path`, `language` and `contentType` through unchanged, so an item covered
   // after was covered before — no second AST pass, and no second copy of the validator
   // precedence rules to drift out of sync.
+  //
+  // This is now **reporting only**. Until Phase A it also scoped the unwitnessed-item rule,
+  // so the rule could not fire on anything no validator covered — which is precisely the
+  // population that was being deleted unwitnessed. `calculateDrift` no longer takes it.
   const symbolBearingItemIds = new Set(after.items.filter((item) => !unchecked.has(item.id)).map((item) => item.id));
 
-  const driftReport = driftTracker.calculateDrift(before, after, { symbolBearingItemIds });
+  const driftReport = driftTracker.calculateDrift(before, after);
 
   const driftCoverage: DriftCoverage = {
     astMeasured: driftReport.astMeasured,
@@ -95,7 +99,7 @@ export function validate(
     // symbols and no content-derived markers, so `S_k` is its empty-set default rather than
     // a measurement. Collapsing them into one code would report a threshold breach for a
     // score of 0.00, which reads as a contradiction and hides which defect fired.
-    const unmeasurable = driftReport.unwitnessedItemIds.length > 0;
+    const unmeasurable = driftReport.measurementGate === 'refuse';
     issues.push({
       code: unmeasurable ? 'SEMANTIC_DRIFT_UNMEASURABLE' : 'SEMANTIC_DRIFT_EXCEEDED',
       message:

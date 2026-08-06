@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { parse } from '../../src/adapters/cli';
 import { optimize } from '../../src/core/engine';
 import { loadConfig } from '../../src/config';
-import { createContextBundle, createOptimizationBudget } from '../../src/core/model/constructors';
+import {
+  createBundleFromItems,
+  createContextItem,
+  createOptimizationBudget,
+} from '../../src/core/model/constructors';
 
 describe('engine', () => {
   it('runs the no-op pipeline end to end', () => {
@@ -43,27 +47,35 @@ describe('engine', () => {
     expect(result.validation.issues.some((i) => i.code === 'BUDGET_EXCEEDED')).toBe(true);
   });
 
-  it('emits optimized output when fallback is not used', () => {
+  it('emits the rendered bundle, not the raw input, when fallback is not used', () => {
+    // **Fixture replaced in Phase A, and the reason matters.**
+    //
+    // This used to elide a 2,300-character `text` item under `maxInputTokens: 50` and assert
+    // the content had vanished with `fallbackUsed: false`. It passed only because the item
+    // carried no symbols and no content markers, so `R_AST` and `R_struct` both sat at their
+    // empty-set default of 1.0 and `S_k` was 0.00 — a clean score produced by measuring
+    // nothing. That is the exact vacuity the measurement gate now refuses, so the old fixture
+    // asserted the defect.
+    //
+    // What this test is *for* is the emit path: a successful run renders the bundle rather
+    // than echoing `rawInput` (the fallback branch does the echoing). That is what it asserts
+    // now. Reduction-with-no-fallback is covered on real content, where drift genuinely has
+    // something to measure, by `declared-language.test.ts` and `python-content-probe.test.ts`.
     const config = loadConfig();
-    // Use manual request to bypass CLI parsing and force 'auto' mode
-    const bundle = {
-      ...createContextBundle('test', 'text'),
-      items: [
-        { id: '1', kind: 'prompt', content: 'system prompt', contentHash: 'h1', contentType: 'text', origin: 'prompt', role: 'system', metadata: {} },
-        { id: '2', kind: 'file', content: 'very long file content '.repeat(100), contentHash: 'h2', contentType: 'text', origin: 'file', role: 'user', metadata: {} },
+    const bundle = createBundleFromItems(
+      [
+        createContextItem({ id: '1', kind: 'prompt', content: 'system prompt', role: 'system' }),
+        createContextItem({ id: '2', kind: 'file', content: 'file body line one', role: 'user' }),
       ],
-      summary: { itemCount: 2, tokenEstimate: 500, preview: '' },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      statistics: { itemCount: 2, totalCharacters: 5000, contentTypeCounts: {} as any, kindCounts: {} as any },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any;
+      'text',
+    );
 
     const request = {
       rawInput: 'original input',
       config,
-      budget: { ...createOptimizationBudget(config.budget), maxInputTokens: 50, preserveKinds: ['prompt'] },
+      budget: createOptimizationBudget(config.budget),
       trace: { planMode: 'auto' as const, requestId: 'test' },
-      bundle: bundle,
+      bundle,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
 
@@ -72,6 +84,6 @@ describe('engine', () => {
     expect(result.fallbackUsed).toBe(false);
     expect(result.emittedOutput).not.toBe('original input');
     expect(result.emittedOutput).toContain('system prompt');
-    expect(result.emittedOutput).not.toContain('very long file content');
+    expect(result.emittedOutput).toContain('file body line one');
   });
 });

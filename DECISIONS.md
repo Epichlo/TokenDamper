@@ -1855,3 +1855,99 @@ error rather than a swallowed pass, the preconditions live in a separate ordinar
 `it.fails` body holds exactly one assertion. The contract is remedy-agnostic and stated over the
 input rather than over trace fields, because `tclConfig.sh` and `CODE_OF_CONDUCT.md` are
 identical on every field the trace carries.
+
+---
+
+## 33. The Measurement Gate and the Retention Gate Are Two Gates
+
+**Date:** 2026-08-06
+**Status:** implemented (Phase A, part 1 of 2). Part 2 is the classifier seam — see §34.
+
+### The defect
+
+`S_k = 1 − (0.6·R_AST + 0.4·R_struct)` answers two questions with one scalar: *did anything
+witness this item?* and *did enough of it survive?* Both ratios default to `1.0` on an empty
+before-set, so "nothing to compare" and "perfectly retained" produce the same number, and
+`0.400` is reachable from two structurally opposite configurations —
+`R_AST = 1` (empty-set default) with `R_struct = 0`, and `R_AST = 1/3` with `R_struct = 1`.
+One comparison arbitrates both, so `>` versus `>=` silently decides a question nobody asked.
+
+§28 added the missing distinction but **scoped it to validator-covered items**, on the
+grounds that enforcing on prose "would make every prose bundle incompressible, ending
+`cleanup:session-dedup` on exactly the conversational traffic the Gateway carries".
+
+### The measurement that overturned the scope
+
+Phase 0 froze a 289-file corpus covering languages the AST-lite suite does not implement
+(`docs/phase-0-measurement-baseline.md`). Measured, the scope was protecting the wrong
+population:
+
+- **Real documents were never in reach.** All 25 markdown files carry content markers and
+  are witnessed. Widening the rule moves **none** of them.
+- **The Gateway keeps within-payload deduplication.** `resolveRecoverableElisions` substitutes
+  the original content for `recoverable` elisions *before* the rule runs, so a recoverable
+  elision reads as unchanged and is skipped structurally. Measured end to end on the proxy:
+  within-payload dedup saves 44 of 129 tokens with and without the gate. This is the decisive
+  difference from lever 1 in `docs/phase-4b-lever-disposition.md`, which keyed on
+  `astCoverage.checked == 0` — a condition *every* dedup elision satisfies — and therefore
+  made the proxy a pass-through.
+- **What the scope actually excluded was uncovered code.** `Unicode_Collate_Locale_ja.pl`
+  went **57,037 → 19 tokens (100%)** on the *file-argument* route at `S_k = 0`,
+  `measured: false`, `fallbackUsed: false`, because nothing covers `.pl` and the rule
+  therefore never looked.
+
+### The decision
+
+Two changes, both in `src/core/ledger/drift-tracker.ts`:
+
+1. **The unwitnessed-item rule no longer keys on validator coverage.** Any item that changed,
+   was not pruned away, and yields neither symbols nor content-derived markers is refused.
+   The witness may be of **either** kind — requiring symbols specifically would refuse every
+   document; requiring neither is what permitted the Perl deletion.
+2. **`DriftReport` carries `measurementGate` and `retentionGate` as separate verdicts.**
+   `shouldFallback` remains their disjunction. `validate()` now reads `measurementGate`
+   instead of re-deriving the distinction from `unwitnessedItemIds.length`, so the two
+   existing issue codes (`SEMANTIC_DRIFT_UNMEASURABLE`, `SEMANTIC_DRIFT_EXCEEDED`) are driven
+   by the gate that actually fired rather than by a second inference of it.
+
+`calculateDrift`'s `symbolBearingItemIds` option is **removed**, not left inert — §30's rule.
+`validate()` still computes the set for `DriftCoverage.symbolBearingItems`, which is reporting.
+
+### Measured cost
+
+62 of 578 corpus runs change, and nothing else moves byte-for-byte:
+
+| bucket | route | before | after |
+|---|---|---|---|
+| perl | file + stdin | 34 reduce, **81.91%** | 7 reduce, **5.61%** |
+| css | stdin | 6 reduce, 11.13% | 0 reduce, 0.00% |
+| c | stdin | 2 reduce, 0.80% | 0 reduce, 0.00% |
+| python / typescript / rust / prose / shell / tcl | both | — | **byte-identical** |
+
+On the Gateway, cross-turn deduplication of a **sole copy** now falls back. That population is
+the one `docs/phase-1-stabilization-summary.md` §9 already described as sending the model a
+marker it has no way to resolve; refusing it is consistent with that entry, not a new position.
+
+### What this does not fix, and why it needs §34
+
+**Shell and Tcl are untouched by this change** — 20 shell files still reduce 17.28% over
+stdin. They classify `markdown` because `looksLikeMarkdown` fires on a single `#` comment, so
+`extractContentMarkers` harvests their comment leaders as headings and they report
+`structMeasured: true`. The fabricated markers **forge exactly the evidence this gate checks**.
+
+That is why Phase A is two changes and not one. The measurement gate closes the honest half
+(`text`-classified, `measured: false`); the classifier seam closes the forged half. Measured
+together they take every uncovered-language bucket to 0.00% while every AST-covered bucket and
+all 25 prose files keep their full yield.
+
+### Tests
+
+`test/unit/drift-unwitnessed-elision.test.ts` gains an uncovered-language refusal (the Perl
+case in miniature) and two gate-separation tests. Two existing tests were **inverted**, both
+because they encoded the old scope: the prose exemption, and the coverage escape hatch.
+
+Three tests elsewhere were passing on the empty-set default and are corrected rather than
+deleted — `engine.test.ts`'s emit-path fixture elided a witness-free `text` item and asserted
+`fallbackUsed: false`, which only held because drift measured nothing; and two Gateway dedup
+tests used a sole cross-turn copy. `declared-language.test.ts`'s pathless-barrel test
+asserted that the hole was still open on the undeclared route, and now asserts it is closed.

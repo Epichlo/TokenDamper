@@ -124,6 +124,10 @@ function flatten(file, route, run) {
     exitCode: run.exitCode,
     inputBytes: file.bytes,
     outputBytes: run.outputBytes,
+    // Recorded so an A/B diff can compare emitted bytes directly. It was missing until a
+    // comparison script keyed on it, found `undefined === undefined` across 578 rows, and
+    // reported "0 changed" against a summary table that plainly differed.
+    outputSha: run.outputSha,
     byteIdentical: run.byteIdentical,
     contentType: t ? soleContentType(t) : null,
     planMode: t?.planMode ?? null,

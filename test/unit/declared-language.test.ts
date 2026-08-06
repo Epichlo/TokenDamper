@@ -324,9 +324,15 @@ describe('end to end: the declared route reaches what the file route reaches', (
   });
 
   it('extends §28 to the pathless route: a barrel is refused instead of deleted', () => {
-    // The live instance from `5b19394` arriving by the other door. §28 refuses to certify an
-    // elision only when an AST validator covers the item — and nothing covers a pathless one,
+    // The live instance from `5b19394` arriving by the other door. §28 refused to certify an
+    // elision only when an AST validator covered the item — and nothing covers a pathless one,
     // so over stdin the same barrel was still elided whole, unwitnessed, at S_k = 0.00.
+    //
+    // **Phase A closed the undeclared half too.** The measurement gate no longer keys on
+    // validator coverage, so the barrel is refused over stdin whether or not a language is
+    // declared. Both arms below now assert a refusal; before Phase A the first asserted the
+    // hole. What the declaration still changes is *coverage* — `symbolBearingItems` goes
+    // 0 -> 1 — which is what §29 was actually for.
     const content =
       Array.from({ length: 14 }, (_, i) => `export * from './module-number-${i}';`).join('\n') +
       '\n';
@@ -337,10 +343,13 @@ describe('end to end: the declared route reaches what the file route reaches', (
     });
 
     expect(probed.trace.stageCount).toBeGreaterThan(0);
-    expect(probed.fallbackUsed).toBe(false);
-    expect(probed.trace.tokenAfter).toBeLessThan(probed.trace.tokenBefore);
+    expect(probed.fallbackUsed).toBe(true);
+    expect(probed.emittedOutput).toBe(content);
+    expect(probed.validation.issues.map((issue) => issue.code)).toContain(
+      'SEMANTIC_DRIFT_UNMEASURABLE',
+    );
+    // Still uncovered — the refusal no longer depends on coverage.
     expect(probed.validation.driftCoverage?.symbolBearingItems).toBe(0);
-    expect(probed.validation.driftCoverage?.unwitnessedItems).toEqual([]);
 
     const declared = optimize({
       ...parse(content, config, { sourceKind: 'stdin', language: 'typescript' }),
