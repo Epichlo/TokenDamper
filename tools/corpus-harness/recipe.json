@@ -1,0 +1,106 @@
+{
+  "$comment": [
+    "Declarative corpus spec. `collect.js` reads this, walks each root recursively, and",
+    "selects deterministically (sort by relative path, take the first `limit`).",
+    "",
+    "Roots are machine-specific by nature — this corpus is third-party source found on a",
+    "developer machine, not vendored bytes. That is deliberate: vendoring GPL/BSD source into",
+    "this repo to measure a classifier would be a licensing problem for a measurement.",
+    "The recipe is the reproducible artifact; `manifest.json` records what a given machine",
+    "actually produced, so two runs on the same machine are comparable and a run on a",
+    "different machine is visibly a different corpus rather than silently one.",
+    "",
+    "`expect` is asserted after selection. It exists because the 4b.3 A/B loop globbed one",
+    "directory level and measured 132 of 144 files without noticing (see",
+    "docs/phase-4b-lever-disposition.md finding 3). A count that is not asserted is a count",
+    "that will be wrong eventually."
+  ],
+  "buckets": [
+    {
+      "name": "shell",
+      "roots": ["C:/msys64", "C:/Program Files/Git"],
+      "extensions": ["sh"],
+      "limit": 40,
+      "expect": 40,
+      "why": "extension IS in isCodeExtension -> `code` on the file route, `markdown` over stdin"
+    },
+    {
+      "name": "perl",
+      "roots": ["C:/msys64"],
+      "extensions": ["pl"],
+      "limit": 40,
+      "expect": 40,
+      "why": "extension NOT in isCodeExtension -> `markdown` on BOTH routes"
+    },
+    {
+      "name": "tcl",
+      "roots": ["C:/msys64"],
+      "extensions": ["tcl"],
+      "limit": 40,
+      "expect": 40,
+      "why": "extension NOT in isCodeExtension -> `markdown` on BOTH routes"
+    },
+    {
+      "name": "c",
+      "roots": ["C:/msys64/ucrt64/include"],
+      "extensions": ["c", "h"],
+      "limit": 30,
+      "expect": 30,
+      "why": "isCodeExtension -> `code` -> handed to the TypeScript validator"
+    },
+    {
+      "name": "rust",
+      "roots": ["C:/msys64/usr/share/git"],
+      "extensions": ["rs"],
+      "limit": 40,
+      "expect": 3,
+      "why": "isCodeExtension; only three real .rs files exist on this machine"
+    },
+    {
+      "name": "css",
+      "roots": ["C:/msys64"],
+      "extensions": ["css"],
+      "limit": 15,
+      "expect": 10,
+      "why": "isCodeExtension; brace-bearing but symbol-free under extractSymbols"
+    },
+    {
+      "name": "python",
+      "roots": [
+        "C:/Users/ojass/AppData/Local/Programs/Python/Python312/Lib/site-packages/pip/_internal"
+      ],
+      "extensions": ["py"],
+      "limit": 45,
+      "expect": 45,
+      "why": "AST-lite COVERS this - the positive control"
+    },
+    {
+      "name": "typescript",
+      "roots": ["src"],
+      "extensions": ["ts"],
+      "limit": 64,
+      "expect": 56,
+      "why": "AST-lite COVERS this - the positive control, and the repo's own corpus. NOTE: 56, not the 64 quoted in docs/phase-4b-*.md - 8 of the 64 sources are under minBytes and are excluded here. Aggregates are not directly comparable to those documents."
+    },
+    {
+      "name": "prose",
+      "roots": [".", "docs"],
+      "extensions": ["md"],
+      "limit": 40,
+      "expect": 25,
+      "why": "real markdown - the negative set any looksLikeMarkdown change must not break. `.agents` is excluded below: it holds prior agent scratchpads, and because sort-then-take is alphabetical they filled all 40 slots on the first run and pushed out every hand-written document. Deterministic is not the same as representative."
+    }
+  ],
+  "minBytes": 1024,
+  "maxBytes": 204800,
+  "excludeDirs": [
+    "node_modules",
+    "dist",
+    ".git",
+    ".agents",
+    ".claude",
+    ".github",
+    "scratch",
+    "tokendamper-benchmark"
+  ]
+}
