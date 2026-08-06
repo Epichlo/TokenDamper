@@ -10,6 +10,36 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
 `git log v1.1.0..HEAD` to confirm current scope before relying on this list.
 
 ### Changed
+- **Fail-open now returns the caller's bytes — Phase B (DECISIONS §35)**: `resolveFallback`
+  returns `request.rawInput`, which reads like a byte-identical echo and is not one —
+  `rawInput` is a string the CLI decoded with `readFileSync(path, 'utf8')`, and that call turns
+  every invalid byte into U+FFFD, which re-encodes to three bytes. Found by the Phase 0 harness:
+  of 504 fallback runs, 502 were byte-identical and two were not. `vimspell.sh`, a Latin-1 file
+  containing "Fernández-Sanguino_Peña", came back **1,462 → 1,466 bytes with
+  `fallbackUsed: true`** — invariant 3 failing silently on the path whose purpose is safety.
+
+  The CLI now reads bytes and decodes second, writing the `Buffer` on fallback. Input that does
+  not survive a UTF-8 round-trip forces a fallback via a new
+  `EngineOptimizationOptions.inputNotRepresentable`, because every stage and estimator
+  downstream reasons about the decoded string — a reduction measured against corrupted input is
+  worse than none. The check is a round-trip, not a BOM or charset sniff; valid UTF-8 with
+  multi-byte characters is unaffected and pinned by test.
+
+  **The refusal goes through the engine, not the adapter.** The first implementation returned
+  early with the right bytes and *no trace at all*, and the harness immediately recorded two
+  rows it could not parse — from outside, indistinguishable from a crash.
+
+  Measured: fallback byte-identity **502/504 → 504/504**, 2 corpus rows changed, 0 unparsable
+  traces.
+
+- **The multi-item render is latent, and now checked rather than assumed (DECISIONS §35)**: the
+  success branch joins item contents with `\n`, which CLAUDE.md described as the live half of
+  1b. It has **no live consumer** — CLI, MCP and bench all build single-item bundles through
+  `createContextBundle`, and the only multi-item producer (the Gateway) bypasses
+  `emittedOutput` per invariant 9. Pinned by `test/unit/fallback-render.test.ts`, which asserts
+  the flattening and that the render is not injective (two different bundles produce identical
+  output), so making any consumer multi-item changes a test rather than a payload.
+
 - **Markdown needs a marker that is not a `#` line — Phase A part 2 (DECISIONS §34, closes
   §32)**: `looksLikeMarkdown` accepted a single `#` heading, and `#` is the comment leader in
   shell, Perl, Tcl, Ruby, R, YAML and Python — so one `# Copyright …` line made a whole shell

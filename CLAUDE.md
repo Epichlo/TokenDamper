@@ -231,6 +231,15 @@ Full detail in `tokendamper-headroom-known-issues.md`; proposed fixes in
   for multi-item bundles, which is why the Gateway must map `finalBundle` positionally
   (invariant 9) — but it is a **different defect with different evidence**. Do not scope
   Phase 1b from the -1.39%. See `NOTES-FOR-DOCS.md`.
+  **Phase B settled both halves (DECISIONS §35).** The live one was neither: `rawInput` is a
+  *decoded string*, so `readFileSync(path, 'utf8')` turned invalid bytes into U+FFFD before any
+  stage ran and the fallback echo could not restore them — a Latin-1 `vimspell.sh` came back
+  **1,462 → 1,466 bytes with `fallbackUsed: true`**. The CLI now keeps the `Buffer`, writes it
+  on fallback, and forces a fallback when input fails a UTF-8 round-trip. Fallback
+  byte-identity went **502/504 → 504/504**. The newline join turned out to have **no live
+  consumer** — CLI, MCP and bench are all single-item via `createContextBundle`, and the
+  Gateway bypasses `emittedOutput` — so it is pinned by `test/unit/fallback-render.test.ts`
+  rather than fixed.
 - **Issue 3 / Phase 1d — investigated 2026-08-03, threshold unchanged, remedy undesigned.**
   Full record: `docs/phase-1d-drift-investigation.md`; read §10 and §12 before citing any
   benchmark number from it. **The threshold is not the defect; do not tune it.**
@@ -292,12 +301,15 @@ The agreed direction is three scoped changes (no rewrite):
    turn 1 with nothing transformed). Constraint retention and drift are also bundle-scoped
    set comparisons with no per-stage attribution. Establish attribution first. See
    `NOTES-FOR-DOCS.md` and `docs/phase-1-stabilization-summary.md` §8.
-3. Split fallback into **raw passthrough** (byte-identical echo, bypasses the bundle
-   render model) vs. **bundle rendering** (success path only). Make byte-identity
-   structural, not test-enforced. (**Phase 1b, not started — and re-scope it before
-   starting.** The fallback branch already returns `request.rawInput`; the lossy join is on
-   the **success** branch. The Issue 5 figure this was scoped from is a harness artifact.
-   See the Issue 5 entry above and `NOTES-FOR-DOCS.md`.)
+3. ~~Split fallback into **raw passthrough** vs. **bundle rendering**.~~ **DONE (Phase B,
+   DECISIONS §35)** — though the live defect was not the one this item names. The fallback
+   branch already returned `request.rawInput`; what made that *not* byte-identical was that
+   `rawInput` is a decoded string, so non-UTF-8 input was corrupted at read time. The CLI now
+   keeps the `Buffer` and writes it on fallback, and input failing a UTF-8 round-trip forces a
+   fallback through the engine (`EngineOptimizationOptions.inputNotRepresentable`) — through
+   the engine, because an adapter that returns early emits no trace, which is indistinguishable
+   from a crash. Byte-identity **502/504 → 504/504**. The success-path newline join has no live
+   consumer and is pinned, not fixed; see §35's last two sections before changing it.
 
 Do this before roadmap feature work. `tokendamper-roadmap-v1.1-v2.0.md` schedules BM25
 scoring, MMR, AST folding and Prometheus metrics on top of a pipeline that currently

@@ -31,6 +31,22 @@ export interface EngineOptimizationOptions {
   readonly maxDriftThreshold?: number;
   readonly deltaOptions?: DeltaCompressionOptions;
   readonly currentTurn?: number;
+  /**
+   * Set by an adapter that holds the original bytes and has determined the string model cannot
+   * represent them — currently only the CLI, which is the only adapter that reads from disk.
+   *
+   * The engine cannot detect this itself: by the time a request exists, `rawInput` is already a
+   * decoded string and the evidence is gone. `readFileSync(path, 'utf8')` turns any invalid
+   * byte into U+FFFD, which re-encodes to three bytes, so the fallback promise of "the caller
+   * gets their input back" silently did not hold for a Latin-1 shell script (1,462 -> 1,466
+   * bytes, `fallbackUsed: true`).
+   *
+   * Supplied as a reason rather than a boolean so the trace says *why* nothing ran. Forcing
+   * fallback here rather than short-circuiting in the adapter is deliberate: an adapter that
+   * returns early emits no trace at all, and a run with no trace is indistinguishable from a
+   * silent crash to anything consuming the output — invariant 10's shape.
+   */
+  readonly inputNotRepresentable?: string;
 }
 
 /**
@@ -232,6 +248,30 @@ export function optimize(
         issues: combinedIssues,
         shouldFallback: true,
         reason: failureReason ?? 'Stage execution failed',
+        ...(validation.driftReport ? { driftReport: validation.driftReport } : {}),
+        ...(validation.astCoverage ? { astCoverage: validation.astCoverage } : {}),
+        ...(validation.driftCoverage ? { driftCoverage: validation.driftCoverage } : {}),
+      });
+    }
+
+    // Last, so it cannot be overwritten by a later `createValidationReport` above, and so the
+    // trace still records everything the stages and validators actually found on the decoded
+    // string. The verdict is not negotiable — no threshold overrides it — because the question
+    // is not how much was lost but whether the pipeline was ever looking at the caller's input.
+    if (options?.inputNotRepresentable) {
+      validation = createValidationReport({
+        passed: false,
+        confidence: 0,
+        issues: [
+          ...validation.issues,
+          {
+            code: 'INPUT_NOT_REPRESENTABLE',
+            message: options.inputNotRepresentable,
+            severity: 'error' as const,
+          },
+        ],
+        shouldFallback: true,
+        reason: options.inputNotRepresentable,
         ...(validation.driftReport ? { driftReport: validation.driftReport } : {}),
         ...(validation.astCoverage ? { astCoverage: validation.astCoverage } : {}),
         ...(validation.driftCoverage ? { driftCoverage: validation.driftCoverage } : {}),

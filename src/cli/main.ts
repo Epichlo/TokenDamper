@@ -112,7 +112,20 @@ export function runCli(
 
     const isStdin = parsed.inputPath === '-';
     const inputPath = isStdin ? undefined : resolve(cwd, parsed.inputPath);
-    const rawInput = inputPath ? readFileSync(inputPath, 'utf8') : readFileSync(0, 'utf8');
+
+    // Read bytes, decode second, and keep the bytes.
+    //
+    // This used to be `readFileSync(path, 'utf8')`, which is lossy before the pipeline starts:
+    // any byte that is not valid UTF-8 becomes U+FFFD, and U+FFFD re-encodes to three bytes.
+    // The fallback path returns `request.rawInput`, so "fail-open hands the caller their input
+    // back" was true only for input that happened to be valid UTF-8. Measured on a frozen
+    // corpus, `vimspell.sh` — Latin-1, containing "Fernández-Sanguino_Peña" — came back
+    // 1,462 -> 1,466 bytes with `fallbackUsed: true`. That is invariant 3 failing quietly.
+    const rawBuffer = inputPath ? readFileSync(inputPath) : readFileSync(0);
+    const rawInput = rawBuffer.toString('utf8');
+    // Round-trip, not a BOM or charset sniff: the only question that matters is whether these
+    // exact bytes survive the string model the whole pipeline is built on.
+    const inputSurvivesDecoding = Buffer.from(rawInput, 'utf8').equals(rawBuffer);
     const config = loadConfig({
       cwd,
       ...(parsed.configPath ? { configPath: parsed.configPath } : {}),
@@ -128,13 +141,34 @@ export function runCli(
       ...(parsed.language ? { language: parsed.language } : {}),
     });
 
+    // Input the string model cannot represent forces a fallback rather than short-circuiting.
+    //
+    // Falling back is the honest outcome, not a conservative one: every stage, validator and
+    // token estimate downstream operates on the decoded string, so for these bytes they would
+    // all be reasoning about content the caller never sent, and a "reduction" measured against
+    // corrupted input is worse than none. It goes through the engine so the run still produces
+    // a trace — returning early here emitted no trace at all, which a consumer cannot tell
+    // apart from a silent crash.
     const result = optimize(request, {
       ...(parsed.maxDebt !== undefined ? { maxDebtThreshold: parsed.maxDebt } : {}),
       ...(parsed.maxDrift !== undefined ? { maxDriftThreshold: parsed.maxDrift } : {}),
+      ...(inputSurvivesDecoding
+        ? {}
+        : {
+            inputNotRepresentable: `Input is not valid UTF-8 (${rawBuffer.length} bytes); it cannot be represented losslessly as a string, so no stage output can be trusted against it. Emitted verbatim.`,
+          }),
     });
 
-    const output = formatCliOutput(result);
-    io.stdout.write(output);
+    // On fallback, write the bytes that were read rather than the string that was decoded from
+    // them. `resolveFallback` returns `request.rawInput`, so for valid UTF-8 this is the same
+    // output byte for byte; for anything else it is the difference between the caller's file
+    // and a lossy re-encoding of it. The guard above means this branch is currently reached
+    // only by round-trippable input — it is here so the guarantee does not depend on that.
+    if (result.fallbackUsed) {
+      io.stdout.write(rawBuffer);
+    } else {
+      io.stdout.write(formatCliOutput(result));
+    }
 
     if (parsed.diff) {
       const diffStr = renderTerminalDiff(request.bundle, result.finalBundle);

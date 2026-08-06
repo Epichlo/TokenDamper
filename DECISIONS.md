@@ -2050,3 +2050,80 @@ file asserts the closure rather than the defect.
 whether a real source file is validated at all. Phase 0 §4 measured that `.pl` and `.tcl` fall
 outside it on the *file* route. Nothing here changes that; what changes is that falling outside
 it now yields a refusal instead of a silent deletion.
+
+---
+
+## 35. Fail-Open Means the Caller's Bytes, Not a Re-encoding of Them
+
+**Date:** 2026-08-06
+**Status:** implemented (Phase B). Re-scopes 1b; the Issue 5 premise stays retracted.
+
+### The defect, and how it was found
+
+`resolveFallback` returns `request.rawInput` on the fallback branch, which reads like a
+byte-identical echo. It is not one. `rawInput` is a string the CLI produced with
+`readFileSync(path, 'utf8')`, and that call replaces every invalid byte with U+FFFD, which
+re-encodes to three bytes. The guarantee held only for input that happened to be valid UTF-8,
+and nothing in the code or the docs said so.
+
+Found by the Phase 0 harness, not by reading: of 504 fallback runs, **502 were byte-identical
+and two were not.** `vimspell.sh` — a Latin-1 file containing "Fernández-Sanguino_Peña" — came
+back **1,462 → 1,466 bytes with `fallbackUsed: true`**. Two characters, four bytes, and a
+silent violation of invariant 3 on the path whose entire purpose is to be safe.
+
+This is the Issue 5 *class* — output larger than input on fallback — arriving by a mechanism
+nobody had proposed. It is not the retracted −1.39%, which remains a harness artifact.
+
+### The decision
+
+1. **The CLI reads bytes and decodes second.** `readFileSync(path)` then `.toString('utf8')`,
+   keeping the `Buffer`. On fallback it writes the buffer, not the string.
+2. **Input that does not survive a UTF-8 round-trip forces a fallback**, via a new
+   `EngineOptimizationOptions.inputNotRepresentable` reason. Every stage, validator and token
+   estimate operates on the decoded string, so for such bytes they are all reasoning about
+   content the caller never sent; a reduction measured against corrupted input is worse than
+   none.
+3. The test is a **round-trip**, not a BOM or charset sniff. The only question that matters is
+   whether these exact bytes survive the string model the pipeline is built on. Valid UTF-8
+   with multi-byte characters is unaffected, which is pinned by test — otherwise the guard
+   would refuse most of the world's source comments.
+
+### Why the refusal goes through the engine
+
+The first implementation short-circuited in the adapter: correct bytes, and **no trace at
+all**. The corpus harness immediately recorded two rows it could not parse, which from outside
+is indistinguishable from the process having died. That is invariant 10's shape — a run that
+reports nothing is not a safe run, it is an unobservable one — so the refusal is routed through
+`optimize()` and produces an ordinary trace with `fallbackUsed: true` and a stated reason.
+
+### Measured
+
+| | before | after |
+|---|---|---|
+| fallback runs byte-identical | 502 / 504 | **504 / 504** |
+| corpus rows changed | — | 2 (both `vimspell.sh`) |
+| rows with unparsable traces | — | **0** |
+
+### The other half of 1b: the multi-item join is latent, and that is now checked
+
+`resolveFallback`'s **success** branch renders with `items.map(i => i.content).join('\n')`,
+which is correct for one item and destroys boundaries, roles and enclosing structure for more.
+CLAUDE.md has described this as the live half of 1b. Measured, it has **no live consumer**:
+
+- Every route that reads `emittedOutput` — CLI, MCP, bench — builds its bundle through
+  `createOptimizationRequest` → `createContextBundle`, which produces exactly **one** item.
+- The only multi-item producer is the Gateway, which maps `finalBundle` positionally and never
+  touches `emittedOutput` (invariant 9).
+
+So it is a latent defect held latent by a convention in two other files. Rather than add model
+surface for a hypothetical consumer, it is **pinned**: `test/unit/fallback-render.test.ts`
+asserts the flattening explicitly, including that the render is not injective — two different
+bundles produce byte-identical output — so making any `emittedOutput` consumer multi-item
+changes a test rather than a payload.
+
+### Not done here
+
+The pipeline remains string-based, and that is the frozen architecture. A file that is not
+valid UTF-8 is therefore never optimized, only echoed. Making the model byte-oriented would
+touch every stage, validator and estimator, and is not justified by one file in 289 — but the
+refusal is now explicit and traced instead of silent and lossy.
