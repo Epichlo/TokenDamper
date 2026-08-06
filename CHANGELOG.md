@@ -10,7 +10,35 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
 `git log v1.1.0..HEAD` to confirm current scope before relying on this list.
 
 ### Changed
-- **The measurement gate is no longer scoped to validator-covered items — Phase A
+- **Markdown needs a marker that is not a `#` line — Phase A part 2 (DECISIONS §34, closes
+  §32)**: `looksLikeMarkdown` accepted a single `#` heading, and `#` is the comment leader in
+  shell, Perl, Tcl, Ruby, R, YAML and Python — so one `# Copyright …` line made a whole shell
+  script a document, its comments were harvested as structural markers, and drift reported
+  `structMeasured: true` on content nothing had examined.
+
+  §32 deferred this seam as "requiring more than one `#` line… a classifier change with blast
+  radius over every prose item". That is a **count** threshold, and counts point the wrong way —
+  `tclConfig.sh` carries 79 markers to `CODE_OF_CONDUCT.md`'s 12. The discriminator that works
+  is **shape**: code misclassified as markdown falls from **114 of 264 files to 12**, and **all
+  25** real documents are retained. Blast radius over prose: zero files.
+
+  The markdown list regex is repaired in the same change, and that is what makes the first half
+  safe: `/(^|\n)(- |\* |\d+\.)\s+\S/` consumed the space after the bullet and then demanded
+  another, so `- item` and `* item` never matched. 21 of 25 corpus documents tripped the old
+  rule against 25 of 25 repaired — the difference between losing `CODE_OF_CONDUCT.md` and not.
+
+  **Neither half of Phase A closes the defect alone.** The measurement gate left shell over
+  stdin untouched at 17.28%, because the fabricated headings *were* the witness it checks;
+  seam 2 alone would have moved those files from the forged failure to the honest one. Together:
+  every uncovered-language bucket goes to **0.00%**, while **258 of 258** rows in the AST-covered
+  buckets and the prose bucket stay **byte-identical**. The combined result was predicted by an
+  A/B patch before implementation and matched on all 578 rows.
+
+  `test/unit/markdown-marker-allowlist.test.ts` is no longer a defect pinned by inversion. The
+  `it.fails` contract went red with "Expected test to fail" the moment the remedy landed —
+  exactly as §32 designed it — and now states the closure positively.
+
+- **The measurement gate is no longer scoped to validator-covered items — Phase A part 1
   (DECISIONS §33)**: an item that changed, was not pruned away, and yields neither symbols nor
   content-derived markers is now refused whatever language it is in. §28 scoped this rule to
   covered items to protect prose; measured over the Phase 0 corpus, the scope protected the

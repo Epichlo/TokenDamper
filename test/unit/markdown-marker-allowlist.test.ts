@@ -85,50 +85,35 @@ describe('only markdown yields markdown markers', () => {
 });
 
 /**
- * A **structurally** pinned defect, not a nominal one.
+ * **Closed by Phase A.** This block was a defect pinned by inversion; it is now an ordinary
+ * regression guard, and the history is worth keeping because of how it was closed.
  *
- * This block used to assert the wrong behaviour and pass, which made the defect the suite's de
- * facto specification — the only thing marking it as wrong was this paragraph, and a paragraph
- * enforces nothing. `docs/phase-4b-lever-disposition.md` §0.
+ * The defect: `looksLikeMarkdown` fired on a single `#` heading, so every hash-commented shell
+ * script was classified `markdown` and its comment lines were harvested as headings by
+ * construction — 591 across 9 frozen shell scripts. The harm was not the inflated drift but
+ * that the fabricated markers **forged the evidence that drift had measured anything**,
+ * defeating the §28 reporting added so this class would be visible. `tclConfig.sh` went
+ * 1,877 → 19 tokens with `fallbackUsed: false` and `driftCoverage.measured: true`.
  *
- * It is now inverted. The contract below states what must be true, and carries `it.fails`, so:
+ * It took **both** halves of Phase A, and neither alone was enough:
  *
- *   - **today** the body throws, the harness records the contract as violated, suite green;
- *   - **the moment anyone fixes it** the body stops throwing and the harness fails the test
- *     with "Expected test to fail", pointing here.
+ *   - The **measurement gate** (§33) refuses an item that changed and left no witness — but it
+ *     was powerless here, because the fabricated headings *were* the witness it checks.
+ *     Measured: shell over stdin was byte-identical before and after that change.
+ *   - **Seam 2** (§34) stopped a bare `#` line from making a document, so shell now classifies
+ *     `text`, harvests zero headings, and lands in the measurement gate's reach.
  *
- * The suite therefore never asserts the defect as correct, and the defect still cannot change
- * silently in either direction.
+ * §32 deferred seam 2 on the belief that it meant "require more than one `#` line" — a *count*
+ * threshold, which `docs/phase-4b-lever-disposition.md` had already shown points the wrong way,
+ * since `tclConfig.sh` carries 79 markers to `CODE_OF_CONDUCT.md`'s 12. The discriminator that
+ * works is *shape*, and its measured cost to prose is zero files.
  *
- * **Three guards against the obvious hazard**, which is that `it.fails` is satisfied by *any*
- * throw and would happily go green on an unrelated crash — invariant 10's shape inside the
- * mechanism meant to fix invariant 10's shape:
- *
- *   1. `result` is computed at describe scope, so a crash is a collection error rather than a
- *      swallowed pass.
- *   2. The preconditions live in a separate, ordinary, passing test. If the fixture drifts —
- *      the shell script stops classifying as markdown, the pipeline stops running — that test
- *      goes red for the right reason instead of the contract silently going vacuous.
- *   3. The `it.fails` body holds exactly one assertion, so the only reachable throw is the
- *      defect itself.
- *
- * **The contract is deliberately remedy-agnostic.** §32 measured three candidate levers and
- * `docs/phase-4b-lever-disposition.md` killed two of them, so nothing here may presume a fix.
- * It also may not be stated on trace fields alone: lever 1's measurement showed that
- * `tclConfig.sh` and `CODE_OF_CONDUCT.md` are identical on every field the trace carries, so a
- * field-level contract would condemn real prose too. It is therefore stated over *this input*,
- * which the test knows is shell script source: this must not be deleted wholesale under a
- * report that retention was measured. Stop deleting it, stop claiming measurement, stop
- * classifying it as markdown, or stop harvesting its comments — any of the four satisfies it.
- *
- * The defect itself: `looksLikeMarkdown` fires on a single `#` heading, so every hash-commented
- * shell script is classified `markdown` and its comment lines are harvested as headings by
- * construction — 591 across 9 frozen shell scripts, 45 more across the 4 `pip` files 4b.2's
- * probe declines. The harm is not the inflated drift but that the fabricated markers **forge
- * the evidence that drift was measured at all**, defeating the §28 reporting added so this
- * class would be visible.
+ * The `it.fails` inversion did its job exactly as designed: the contract went red with
+ * "Expected test to fail" the moment the remedy landed, and the preconditions test went red
+ * alongside it because the fix arrived from a direction the contract could not see. Both are
+ * now stated positively.
  */
-describe('KNOWN DEFECT (pinned by inversion): hash-commented code is markdown, and its comments forge the evidence', () => {
+describe('hash-commented code is not markdown, and is not deleted under a claim of measurement', () => {
   const SHELL = [
     '#!/bin/sh',
     '# Copyright 2004-2023 Free Software Foundation, Inc.',
@@ -148,9 +133,8 @@ describe('KNOWN DEFECT (pinned by inversion): hash-commented code is markdown, a
     '',
   ].join('\n');
 
-  // Guard 1: computed here, not inside the `it.fails` body. A throw at describe scope is a
-  // collection error the runner reports; a throw inside that body would be indistinguishable
-  // from the contract being violated, and would turn the pin green for the wrong reason.
+  // Still computed at describe scope: a crash here is a collection error the runner reports,
+  // rather than something an individual assertion could swallow.
   const request = parse(SHELL, loadConfig(), { sourceKind: 'stdin' });
   const bundle = request.bundle;
   const result = optimize({
@@ -158,56 +142,53 @@ describe('KNOWN DEFECT (pinned by inversion): hash-commented code is markdown, a
     budget: { ...request.budget, targetReductionRatio: 0.3 },
   });
 
-  // Guard 2: an ordinary, passing test over the preconditions. These are facts about the
-  // fixture and the pipeline, not about the defect. If one of them goes red, the reproduction
-  // has drifted — or has been fixed from a direction the contract below cannot see — and
-  // either way the right response is to read both tests, not to adjust this one.
-  it('the reproduction is still reachable: shell source, classified markdown, nothing validated', () => {
+  it('classifies shell source as text, and harvests no headings from its comments', () => {
     expect(
       result.trace.stageCount,
       'no stage ran, so nothing below observes anything',
     ).toBeGreaterThan(0);
 
-    expect(bundle.items[0]?.contentType, 'shell source no longer classifies as markdown').toBe(
-      'markdown',
-    );
+    // Was `markdown` before seam 2, on the strength of one `# Copyright …` line.
+    expect(bundle.items[0]?.contentType).toBe('text');
 
-    // Nothing looked at it — there is no shell validator, and §17 declines to guess.
+    // Still nothing looked at it — there is no shell validator, and §17 declines to guess.
+    // That has not changed and is not the fix; the fix is that drift no longer pretends
+    // otherwise.
     expect(result.trace.astCoverage).toEqual({
       checked: 0,
       unchecked: 1,
-      uncheckedContentTypes: ['markdown'],
+      uncheckedContentTypes: ['text'],
     });
 
-    // The fabrication is present: these "headings" are `#` comment lines in a shell script.
+    // The fabrication is gone. These were 4 "headings", every one a `#` comment line.
     const headings = [...tracker.extractContentMarkers(bundle)].filter((marker) =>
       marker.startsWith('heading:'),
     );
-    expect(headings.length).toBeGreaterThan(0);
-    expect(headings.some((heading) => heading.includes('Copyright'))).toBe(true);
+    expect(headings).toEqual([]);
   });
 
-  // Guard 3: exactly one assertion, so the only reachable throw is the contract itself.
-  //
-  // `it.fails` inverts the verdict — this is green while the contract is violated and red the
-  // moment it holds. Read that as: the project has not decided how to fix this (§32,
-  // `docs/phase-4b-lever-disposition.md`), and until it does, the suite records the violation
-  // rather than blessing it.
-  //
-  // **If this test just failed with "Expected test to fail": that is the good outcome.** Some
-  // change made hash-commented shell source stop being deleted wholesale under a claim of
-  // measurement. Delete the `.fails`, keep the assertion, and update §32 — it is no longer a
-  // deferral.
-  it.fails(
-    'CONTRACT (violated today): shell source is not deleted wholesale under a claim that retention was measured',
-    () => {
-      const deletedWholesale = result.trace.tokenAfter < result.trace.tokenBefore * 0.2;
-      const claimedMeasured = result.validation.driftCoverage?.measured === true;
+  it('is not deleted wholesale under a claim that retention was measured', () => {
+    // The former CONTRACT, stated positively. Kept over the *input* rather than over trace
+    // fields, for the reason lever 1's measurement established: `tclConfig.sh` and
+    // `CODE_OF_CONDUCT.md` were identical on every field the trace carries, so a field-level
+    // assertion would condemn real prose too.
+    const deletedWholesale = result.trace.tokenAfter < result.trace.tokenBefore * 0.2;
+    const claimedMeasured = result.validation.driftCoverage?.measured === true;
 
-      expect(
-        deletedWholesale && claimedMeasured,
-        `${result.trace.tokenBefore} -> ${result.trace.tokenAfter} tokens with driftCoverage.measured=${claimedMeasured}`,
-      ).toBe(false);
-    },
-  );
+    expect(
+      deletedWholesale && claimedMeasured,
+      `${result.trace.tokenBefore} -> ${result.trace.tokenAfter} tokens with driftCoverage.measured=${claimedMeasured}`,
+    ).toBe(false);
+  });
+
+  it('refuses it outright, because nothing witnesses it', () => {
+    // Both halves of Phase A in one assertion: seam 2 removed the forged markers, so the
+    // measurement gate can see there is no witness, so the caller gets their bytes back.
+    expect(result.validation.driftCoverage?.measured).toBe(false);
+    expect(result.validation.issues.map((issue) => issue.code)).toContain(
+      'SEMANTIC_DRIFT_UNMEASURABLE',
+    );
+    expect(result.fallbackUsed).toBe(true);
+    expect(result.trace.tokenAfter).toBe(result.trace.tokenBefore);
+  });
 });

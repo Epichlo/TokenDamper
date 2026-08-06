@@ -1017,13 +1017,41 @@ function isPython(text: string): boolean {
   return pythonConfirmingValidator.validate(text).valid;
 }
 
+/**
+ * Markdown needs a marker that is **not** a `#` line.
+ *
+ * A `#` heading used to be sufficient on its own, and `#` is the comment leader in shell,
+ * Perl, Tcl, Ruby, R, YAML and Python — so one `# Copyright …` line made a whole shell script
+ * a document. That is not a cosmetic misfiling: `DriftTracker`'s `MARKDOWN_MARKER_TYPES`
+ * harvests markdown headings for `markdown`-tagged items, so those comment leaders became
+ * *structural markers*, `structMeasured` went `true`, and drift certified an item nothing had
+ * looked at. Measured, `tclConfig.sh` reported 79 "headings", every one a comment, and was
+ * deleted 99% whole with `fallbackUsed: false` (DECISIONS §32).
+ *
+ * **The discriminator is shape, not count.** A threshold on how many `#` lines a file has
+ * points the wrong way — `tclConfig.sh` carries 79 to `CODE_OF_CONDUCT.md`'s 12, so any count
+ * rule protects the shell script *less* (`docs/phase-4b-lever-disposition.md` §1). What
+ * separates them is that a real document also has fences, lists or links, and a commented
+ * config fragment has none. Measured over the 289-file Phase 0 corpus: code misclassified as
+ * markdown falls from **114 of 264 files to 12**, while **all 25** real documents are
+ * retained. See `docs/phase-0-measurement-baseline.md` §6.
+ *
+ * The 12 residual leaks are honest rather than spurious — two shell scripts with `- ` lists,
+ * three Tcl files whose `[...]` command syntax matches the link regex, four pip files, and
+ * three of this repository's own sources whose doc comments genuinely contain fenced markdown.
+ */
 function looksLikeMarkdown(text: string): boolean {
   return (
     // A fenced block is a markdown construct. It used to be read as evidence of `code`,
     // which is backwards — see `isCodeExtension`.
     /```[\s\S]*```/.test(text) ||
-    /(^|\n)#{1,6}\s+\S/.test(text) ||
-    /(^|\n)(- |\* |\d+\.)\s+\S/.test(text) ||
+    // `- item` and `* item`, not just `-  item`. The previous rule was
+    // `/(^|\n)(- |\* |\d+\.)\s+\S/`, whose alternation already consumed the space after the
+    // bullet while `\s+` then demanded another one — so the two commonest list forms did not
+    // match and only ordered lists and double-spaced bullets did. 21 of 25 corpus documents
+    // tripped the old rule against 25 of 25 under this one, which is why dropping the heading
+    // path without this repair loses `CODE_OF_CONDUCT.md`.
+    /(^|\n)(-|\*|\d+\.)\s+\S/.test(text) ||
     /\[[^\]]+\]\([^)]+\)/.test(text)
   );
 }

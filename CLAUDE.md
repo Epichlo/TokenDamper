@@ -128,40 +128,41 @@ MCP tools: `optimize_context`, `rehydrate_context`, `get_session_metrics`,
     whether anything looked (DECISIONS §23). The same now applies to drift: read
     `trace.driftCoverage` (`measured`, `astMeasured`, `unwitnessedItems`), **not `driftScore`**
     — `0.0000` means "retained everything" and "found nothing to look at" indistinguishably.
-    The ninth instance is **closed for validator-covered items** (DECISIONS §28): drift refuses
-    to certify an item that changed, that an AST validator covers, and that yielded no symbols
-    and no content-derived markers. It closed `src/index.ts` being elided whole at 86.15% with
-    `S_k = 0.0000`. **Two parts of it remain open and are reported rather than enforced** —
-    plain prose is unwitnessed by both components and still passes at `S_k = 0.00` (enforcing
-    there would make prose incompressible and end Gateway dedup), and a symbol-free code file
-    the *pruner* removes is still invisible to drift.
-    **The tenth instance is open and measured (DECISIONS §32):** fabricated markdown markers
-    make `DriftCoverage` report `structMeasured: true` on content nothing validated. A frozen
-    `tclConfig.sh` goes 1,877 → 19 tokens (99%), `fallbackUsed: false`, `astCoverage.checked: 0`,
-    on the strength of 79 "headings" that are all `#` shell comments — `looksLikeMarkdown` fires
-    on one `#` line, so hash-commented code is markdown. This is the first instance where **the
-    coverage report itself is the thing that lies**. Pinned as a `KNOWN DEFECT` test in
-    `test/unit/markdown-marker-allowlist.test.ts`; not fixed, because the fix is §28's deferred
-    question and that question needs re-framing first (the population is not prose, it is every
-    language the AST-lite suite does not implement).
-    A third part was found and closed by Phase 4b.1 (DECISIONS §29): "validator-covered" is
-    itself route-dependent, so **the same barrel file was still being deleted unwitnessed over
-    stdin** — nothing covers a pathless item, so the refusal never fired. Declaring the
-    language brings it under a validator and it does. Phase 4b.2 narrowed the remainder by
-    detecting Python, but **did not close it**: an item the probe declines is still
-    unprotected, measured on `pip`'s symbol-free `status_codes.py` (elided whole over stdin at
-    44 → 27 tokens; the file route refuses it). Read the yield tables in
-    `docs/phase-4b-pathless-code-scope.md` with that in mind — the safety argument is the
-    larger one and the numbers hide it.
-    **"The file route refuses it" holds for Python and not in general (Phase 0,
-    `docs/phase-0-measurement-baseline.md` §4).** The file route protects only the 19 extensions
-    in `isCodeExtension`; `.pl`, `.tcl`, `.rb`, `.lua`, `.swift`, `.kt` are outside it and
-    classify `markdown` **by name**. Worst case measured: `Unicode_Collate_Locale_ja.pl`,
-    57,037 → 19 tokens (100%), file route, `fallbackUsed: false`, `astCoverage.checked: 0`.
-    **Seam 2 is also no longer deferred-by-assumption**: a *shape* discriminator on
-    `looksLikeMarkdown` (not the count threshold §32 imagined) takes code-classified-as-markdown
-    from 114/264 files to 12, keeping all 25 prose files — zero prose casualties. It mitigates
-    §32 by converting it into §28, so seam 3 stays load-bearing.
+    The ninth and tenth instances are **both closed by Phase A** (DECISIONS §33 and §34), and
+    it took both halves — read this if you are tempted to revert either.
+    - **§33 — the measurement gate no longer asks whether a validator was watching.** Any item
+      that changed, was not pruned away, and yields neither symbols nor content markers is
+      refused. §28 had scoped that rule to validator-covered items to protect prose; measured,
+      the scope protected the wrong population. All 25 real markdown documents carry content
+      markers and were never in reach of it, while what it excluded was uncovered **code** —
+      `Unicode_Collate_Locale_ja.pl` at **57,037 → 19 tokens (100%)** on the *file-argument*
+      route, `S_k = 0`, `measured: false`, `fallbackUsed: false`, because nothing covers `.pl`.
+      `DriftReport` now carries `measurementGate` and `retentionGate` separately, so `0.400`
+      stops being one comparison arbitrating two opposite configurations.
+    - **§34 — a bare `#` line no longer makes a document.** That is what closed §32's
+      "the coverage report itself is the thing that lies": `tclConfig.sh`'s 79 "headings" were
+      all `#` shell comments, and they **forged the very evidence §33 checks**. Shell over stdin
+      was byte-identical under §33 alone. §34 without §33 would merely have moved those files
+      from the forged failure to the honest one. A *shape* discriminator (not the count
+      threshold §32 imagined — counts point the wrong way) takes code misclassified as markdown
+      from **114 of 264 files to 12** with **zero** prose casualties.
+    - **Measured end state:** every uncovered-language bucket goes to **0.00%** reduction, and
+      **258 of 258** rows in the AST-covered and prose buckets are **byte-identical** to
+      baseline. `docs/phase-0-measurement-baseline.md`, DECISIONS §33–§34.
+    - **The Gateway keeps within-payload dedup and loses cross-turn sole-copy dedup.**
+      `resolveRecoverableElisions` substitutes recoverable elisions back before the gate runs,
+      so they are structurally invisible to it. The lost case is the one §9 of
+      `docs/phase-1-stabilization-summary.md` already called a marker the model cannot resolve.
+    - **Still open:** a symbol-free code file the **pruner** removes is invisible to drift (the
+      `!after` branch is a deliberate exemption — selection is not elision); and
+      `isCodeExtension` remains a hardcoded 19-entry list that decides whether a real source
+      file is validated at all. `.pl`, `.tcl`, `.rb`, `.lua`, `.swift`, `.kt` are outside it.
+      What changed is that falling outside it now yields a **refusal** rather than a silent
+      deletion.
+    Historical, and still worth knowing: Phase 4b.1 (§29) established that "validator-covered"
+    was itself route-dependent — the same barrel file was deleted unwitnessed over stdin because
+    nothing covers a pathless item. §33 makes coverage irrelevant to the refusal, so both routes
+    now behave the same; what a declaration still buys is *coverage*, not the refusal.
 
 ## Known bugs — highest-priority work
 

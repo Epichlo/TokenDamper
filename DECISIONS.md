@@ -1951,3 +1951,102 @@ deleted — `engine.test.ts`'s emit-path fixture elided a witness-free `text` it
 `fallbackUsed: false`, which only held because drift measured nothing; and two Gateway dedup
 tests used a sole cross-turn copy. `declared-language.test.ts`'s pathless-barrel test
 asserted that the hole was still open on the undeclared route, and now asserts it is closed.
+
+---
+
+## 34. Markdown Needs a Marker That Is Not a `#` Line
+
+**Date:** 2026-08-06
+**Status:** implemented (Phase A, part 2 of 2). Closes §32.
+
+### The defect
+
+`looksLikeMarkdown` accepted a single `#` heading as sufficient evidence of a document. `#` is
+the comment leader in shell, Perl, Tcl, Ruby, R, YAML and Python, so one `# Copyright …` line
+made a whole shell script `markdown`.
+
+That is not a cosmetic misfiling. `DriftTracker`'s `MARKDOWN_MARKER_TYPES` harvests markdown
+headings for `markdown`-tagged items, so the comment leaders became **structural markers**,
+`structMeasured` went `true`, and drift certified an item nothing had examined. Measured:
+591 fabricated headings across 9 frozen shell scripts, and `tclConfig.sh` at 1,877 → 19 tokens
+with `fallbackUsed: false` and `driftCoverage.measured: true`.
+
+### Why §32 deferred it, and why that reasoning was wrong
+
+§32 named this seam and rejected it: *"could require more than one `#` line, but that is a
+classifier change with blast radius over every prose item in every bundle."*
+
+"More than one `#` line" is a **count** threshold, and `docs/phase-4b-lever-disposition.md` §1
+had already shown counts point the wrong way — `tclConfig.sh` carries **79** markers to
+`CODE_OF_CONDUCT.md`'s **12**, so any count rule protects the shell script *less*. The seam
+was dismissed on the strength of the one formulation of it that cannot work.
+
+The discriminator that does work is **shape**: a real document also has fences, lists or links;
+a commented config fragment has none. Measured over the 289-file Phase 0 corpus
+(`docs/phase-0-measurement-baseline.md` §6):
+
+| candidate | code → markdown (of 264) | prose → markdown (of 25) |
+|---|---|---|
+| what shipped before | **114** | 25 |
+| require a non-`#` marker | 11 | **24** — loses `CODE_OF_CONDUCT.md` |
+| **the same, with the list regex repaired** | **12** | **25** |
+| any two distinct signals | 7 | 25 |
+
+**Blast radius over prose: zero files.**
+
+### The decision
+
+Drop the bare-heading alternative from `looksLikeMarkdown`, and repair the list regex in the
+same change because the second is what makes the first safe.
+
+The old list rule was `/(^|\n)(- |\* |\d+\.)\s+\S/`. The alternation already consumed the space
+after the bullet and `\s+` then demanded another, so `- item` and `* item` — the two commonest
+list forms — did not match, while `-  item` and `1. item` did. 21 of 25 corpus documents
+tripped the old rule against 25 of 25 under the repair. That single missing match is the whole
+difference between the two middle rows above.
+
+The stricter "any two distinct signals" variant separates better (7 versus 12) and is **not**
+taken: it costs a second concept for five files, and every one of the 12 residual leaks is
+honest — two shell scripts with `- ` lists, three Tcl files whose `[...]` command syntax
+matches the link regex, four pip files, and three of this repository's own sources whose doc
+comments genuinely contain fenced markdown.
+
+### Why this had to be part of the same phase as §33
+
+Neither half closes the defect alone, and the corpus says so:
+
+| arm | shell over stdin | perl, both routes |
+|---|---|---|
+| baseline | 20 reduce, 17.28% | 34 reduce, 81.91% |
+| §33 measurement gate only | **20 reduce, 17.28%** — unmoved | 7 reduce, 5.61% |
+| §34 + §33 | **0 reduce, 0.00%** | **0 reduce, 0.00%** |
+
+The measurement gate refuses an item that left no witness — but the fabricated headings *were*
+the witness it checks. Seam 2 removes the forgery, which is what brings shell and Tcl into the
+gate's reach. Stated the other way: §34 without §33 would have relocated those files from the
+forged failure to the honest one, where they would still have been elided unwitnessed.
+
+### Measured, end state
+
+114 of 578 runs change against the Phase 0 baseline, and the change is confined:
+
+- **Every uncovered-language bucket goes to 0.00%** — shell, perl, tcl, c, css over stdin.
+- **258 of 258** rows in the AST-covered buckets (python, typescript, rust) and the prose
+  bucket are **byte-identical** to baseline.
+- The combined result was predicted by an A/B patch before implementation and matched it on
+  all 578 rows with **zero** mismatches.
+
+### Consequence for §32
+
+§32 is closed. `test/unit/markdown-marker-allowlist.test.ts` is no longer a defect pinned by
+inversion; the `it.fails` contract went red with "Expected test to fail" the moment the remedy
+landed, exactly as designed, and its preconditions test went red alongside it because the fix
+arrived from a direction the contract could not see. Both are now stated positively, and the
+file asserts the closure rather than the defect.
+
+### What remains open
+
+`isCodeExtension` is still a hardcoded 19-entry list, and membership of it still decides
+whether a real source file is validated at all. Phase 0 §4 measured that `.pl` and `.tcl` fall
+outside it on the *file* route. Nothing here changes that; what changes is that falling outside
+it now yields a refusal instead of a silent deletion.

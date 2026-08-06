@@ -146,12 +146,18 @@ describe('a declaration sets language and contentType together', () => {
       'text',
     );
 
-    // Not a hypothetical: two comment lines are enough for the probe to call a Python file a
-    // markdown document, and `markdown` harvests headings by definition.
-    expect(probed.items[0]?.contentType).toBe('markdown');
+    // Until Phase A's seam 2 this asserted `markdown` and two fabricated headings: two comment
+    // lines were enough for a Python file to be read as a document, because a bare `#` line was
+    // sufficient evidence. A `#` line no longer is, so this content — which the Python probe
+    // also declines, having only one strong signal — now lands in `text`.
+    //
+    // The declaration is still what makes the difference that matters: `text` reaches no
+    // validator, while `python` reaches `PythonValidator`. What has changed is that failing to
+    // declare no longer *invents* structure on top of failing to check.
+    expect(probed.items[0]?.contentType).toBe('text');
     expect(
       [...tracker.extractMarkers(probed)].filter((m) => m.startsWith('heading:')),
-    ).toHaveLength(2);
+    ).toHaveLength(0);
     expect(
       [...tracker.extractMarkers(declared)].filter((m) => m.startsWith('heading:')),
     ).toHaveLength(0);
