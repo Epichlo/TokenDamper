@@ -10,6 +10,42 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
 `git log v1.1.0..HEAD` to confirm current scope before relying on this list.
 
 ### Added
+- **A frozen-corpus measurement harness — Phase 0 (`tools/corpus-harness/`)**: `collect.js`
+  freezes a corpus by `sha256` manifest and pins the engine (commit, a hash over all
+  `dist/**/*.js`, and a `dirty` flag); `measure.js` re-verifies every hash, spawns the shipped
+  CLI on both routes, and dumps per-item traces to JSONL; `seam2.js` scores candidate
+  classifier rules against the frozen set. Bucket counts and row counts are **asserted** — the
+  4b.3 A/B loop measured 132 of 144 files because a glob covered one directory level, and the
+  first run of this harness caught three count mismatches immediately.
+
+  No engine change. Findings in `docs/phase-0-measurement-baseline.md`; 289 files, 578 runs.
+
+- **Seam 2 measured, and DECISIONS §32's deferral reasoning corrected**: §32 deferred the
+  `looksLikeMarkdown` seam on the grounds that it "could require more than one `#` line, but
+  that is a classifier change with blast radius over every prose item". That is a *count*
+  threshold, which `docs/phase-4b-lever-disposition.md` had already shown points the wrong way.
+  A **shape** discriminator — require a non-`#` markdown marker, or any two distinct signals —
+  takes code misclassified as markdown from **114 of 264 files to 12 (or 7 for the stricter
+  variant), retaining all 25 prose files**. Zero prose casualties.
+
+  It is a mitigation, not the fix: it converts §32-shaped items (fabricated markers,
+  `measured: true`) into §28-shaped ones (nothing measured, `measured: false`, still reduces).
+  Seam 3 stays load-bearing.
+
+- **§32 is not a pathless-route defect — it reaches the file argument**: `.pl` and `.tcl` are
+  not in `isCodeExtension`'s 19-entry list, so Perl and Tcl classify `markdown` when passed
+  **by name**. Measured worst case: `Unicode_Collate_Locale_ja.pl` at **57,037 → 19 tokens
+  (100% deleted)**, file route, `fallbackUsed: false`, `astCoverage.checked: 0`,
+  `driftCoverage.measured: false` — two orders of magnitude larger than §32's `tclConfig.sh`.
+  Corrections applied to `CLAUDE.md`, `DECISIONS.md` §32 and
+  `docs/phase-4b-pathless-code-scope.md` §1, all of which framed the file route as the safe one.
+
+- **The shipped markdown list regex does not match markdown lists**: `RE_LIST` is
+  `/(^|\n)(- |\* |\d+\.)\s+\S/` — the alternation consumes the space after `-`, and `\s+` then
+  demands another, so `- item` and `* item` do not match while `-  item` and `1. item` do.
+  21 of 25 prose files trip the shipped rule against 25 of 25 under the repair. Recorded, **not
+  fixed** — it belongs to whoever implements the seam, measured under the harness.
+
 - **The §32 defect is pinned by inversion, not by assertion (DECISIONS §32)**: the
   `KNOWN DEFECT` block in `test/unit/markdown-marker-allowlist.test.ts` asserted the wrong
   behaviour and **passed**, which made the defect the suite's de facto specification — the

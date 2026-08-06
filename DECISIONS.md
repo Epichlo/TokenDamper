@@ -1806,6 +1806,13 @@ Three seams, none of them 4b.3's:
 2. **`looksLikeMarkdown`** could require more than one `#` line, but that is a classifier
    change with blast radius over every prose item in every bundle — the gotcha CLAUDE.md
    states outright, and how §17 was found.
+   **Measured 2026-08-06 and this reasoning is wrong — see `docs/phase-0-measurement-baseline.md`
+   §6.** "More than one `#` line" is a *count* threshold, which the lever disposition had
+   already shown points the wrong way. A **shape** discriminator — require a non-`#` markdown
+   marker, or any two distinct signals — takes code misclassified as markdown from **114 of 264
+   files to 12 (or 7), while retaining all 25 prose files**. The blast radius over prose is zero
+   on that corpus. Seam 2 is the best-separating lever measured, and it is a *mitigation*, not
+   the fix: it converts §32-shaped items into §28-shaped ones, which still reduce unwitnessed.
 3. **Drift** could refuse to certify an item nothing covers, which is exactly the prose
    question §28 deferred as a product decision.
 
@@ -1815,8 +1822,17 @@ where `astCoverage.checked == 0`) is dead twice over — `tclConfig.sh` and `COD
 are identical on every trace field the gate could key on, and *every* Gateway dedup elision is
 `checked == 0`, so the gate makes the proxy a pass-through. A fourth lever, non-content
 discriminators, is also dead: a shebang catches one of the four destroyed files, and the
-extension and executable bit do not exist on any pathless route. Seam 2 was not re-measured.
-Seam 3 survives and is the deferral itself.
+extension and executable bit do not exist on any pathless route. **Seam 2 was not re-measured
+then; it was measured on 2026-08-06 and it separates — 114 → 12 with no prose casualty
+(`docs/phase-0-measurement-baseline.md` §6).** Seam 3 survives and is still the deferral
+itself, because seam 2 relocates the defect rather than closing it.
+
+**One further correction, from the same measurement: this section's framing of the defect as
+pathless is wrong.** `.pl` and `.tcl` are not in `isCodeExtension`, so Perl and Tcl classify
+`markdown` **on the file-argument route too**. The worst case found is not a shell script over
+stdin — it is `Unicode_Collate_Locale_ja.pl` at **57,037 → 19 tokens (100%)**, passed by name,
+`fallbackUsed: false`, `astCoverage.checked: 0`. The variable is not the route; it is
+membership of a hardcoded 19-entry extension list.
 
 One correction to the sentence above, from that measurement: "the only identified fix" should
 read "the only fix that does not either destroy the Gateway or reduce to §28's open question".

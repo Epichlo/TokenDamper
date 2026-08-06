@@ -153,6 +153,15 @@ MCP tools: `optimize_context`, `rehydrate_context`, `get_session_metrics`,
     44 → 27 tokens; the file route refuses it). Read the yield tables in
     `docs/phase-4b-pathless-code-scope.md` with that in mind — the safety argument is the
     larger one and the numbers hide it.
+    **"The file route refuses it" holds for Python and not in general (Phase 0,
+    `docs/phase-0-measurement-baseline.md` §4).** The file route protects only the 19 extensions
+    in `isCodeExtension`; `.pl`, `.tcl`, `.rb`, `.lua`, `.swift`, `.kt` are outside it and
+    classify `markdown` **by name**. Worst case measured: `Unicode_Collate_Locale_ja.pl`,
+    57,037 → 19 tokens (100%), file route, `fallbackUsed: false`, `astCoverage.checked: 0`.
+    **Seam 2 is also no longer deferred-by-assumption**: a *shape* discriminator on
+    `looksLikeMarkdown` (not the count threshold §32 imagined) takes code-classified-as-markdown
+    from 114/264 files to 12, keeping all 25 prose files — zero prose casualties. It mitigates
+    §32 by converting it into §28, so seam 3 stays load-bearing.
 
 ## Known bugs — highest-priority work
 
@@ -321,7 +330,11 @@ scoring, MMR, AST folding and Prometheus metrics on top of a pipeline that curre
   repository's own `*.py` — the same files a session edits while it works. A re-run after
   three commits is not a re-run: a previous session read movement as a behavioral change when
   it was reading its own edits. **Copy the corpus to a scratch directory, record the commit
-  and a `sha256sum` manifest, and point the CLI at the copy.** Then vary only the engine —
+  and a `sha256sum` manifest, and point the CLI at the copy.** `tools/corpus-harness/` does
+  exactly this — `collect.js` freezes and pins (commit, `dist` hash, `dirty` flag), `measure.js`
+  re-verifies every hash and runs both routes, and both assert their counts. Use it rather than
+  hand-rolling the loop; the hand-rolled ones have been wrong twice (the repo moving mid-run,
+  and a 4b.3 glob that silently measured 132 of 144 files). Then vary only the engine —
   patch `dist/` and restore it — never the input. Two corollaries that have both bitten:
   a paired comparison must be made over the files that reduce under *every* variant (a variant
   that converts fallbacks into reductions changes the denominator and can make a strictly

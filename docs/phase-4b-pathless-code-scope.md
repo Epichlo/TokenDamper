@@ -54,6 +54,14 @@ Two of the three entry modes are pathless by construction. `optimize -` has no p
 field**; Gateway messages are provider payloads and have neither. The CLI file argument is the
 only route that works, and it is the one route a coding assistant does not use.
 
+> **Correction, 2026-08-06 (`docs/phase-0-measurement-baseline.md` §4).** "The CLI file argument
+> is the only route that works" is true for Python and false in general. The file route works
+> only for the **19 extensions in `isCodeExtension`**. `.pl` and `.tcl` are not among them, so
+> Perl and Tcl classify `markdown` on the file route exactly as they do over stdin, and a
+> 57,037-token Perl file passed **by name** is deleted whole at 100% with
+> `astCoverage.checked: 0` and `fallbackUsed: false`. Read "pathless" in this document as
+> "outside `isCodeExtension`" wherever it is used as the boundary of the defect.
+
 ## 2. There are two defects here, not one
 
 ### D1 — no validator, no regions (the known one)
