@@ -87,10 +87,12 @@ export function createOptimizationRequest(
  * only `language` leaves `contentType` at whatever the probe guessed — `text` for most
  * pathless code — and `text` is in `DriftTracker`'s `MARKDOWN_MARKER_TYPES`, so a declared
  * Python file would still have its `#` comments harvested as markdown headings and then
- * "destroyed" by the elision that follows. Setting only `contentType: 'code'` is worse:
- * `CONTENT_TYPE_VALIDATORS.code` maps to the **TypeScript** validator, so declared Python
- * would be checked by the wrong checker. The two fields answer to different consumers and
- * have to agree.
+ * "destroyed" by the elision that follows. Setting only `contentType: 'code'` fails the
+ * other way: `CONTENT_TYPE_VALIDATORS.code` is `null` since Phase C — `code` is a family,
+ * not a language — so declared Python would be checked by **nothing** and report
+ * `validated: false`. (Before Phase C that mapping was the *TypeScript* validator, so the
+ * same mistake produced a wrong verdict instead of a missing one.) The two fields answer to
+ * different consumers and have to agree.
  *
  * **Precedence: declaration > extension > probe.** A `--language` flag is a per-invocation
  * statement by whoever is running the tool; an extension is a statement by whoever named the
@@ -648,11 +650,12 @@ const LANGUAGE_ALIASES: Readonly<Record<string, DeclaredLanguage>> = {
  *
  * Every programming language maps to `code`, including the ones the AST-lite suite has no
  * validator for. That is not an oversight, and it is the same answer the filename route
- * gives today: `foo.rs` classifies as `code` and `CONTENT_TYPE_VALIDATORS.code` is the
- * TypeScript validator, so Rust is bracket-checked as TypeScript either way. Declaring the
- * language does not make that better; it makes it *reachable from stdin*, and it is pinned
- * in `test/unit/declared-language.test.ts` so the next person meets it as a recorded
- * decision rather than as a surprise.
+ * gives today: `foo.rs` classifies as `code`, and since Phase C `CONTENT_TYPE_VALIDATORS.code`
+ * is `null`, so Rust goes **unvalidated** either way rather than being bracket-checked as
+ * TypeScript. Declaring the language does not close that gap; it makes the gap *reachable
+ * from stdin* and *visible* on `trace.astCoverage`, and it is pinned in
+ * `test/unit/declared-language.test.ts` so the next person meets it as a recorded decision
+ * rather than as a surprise.
  */
 const CONTENT_TYPE_BY_LANGUAGE: Readonly<Record<DeclaredLanguage, ContentType>> = {
   typescript: 'code',

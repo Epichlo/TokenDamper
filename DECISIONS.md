@@ -1441,6 +1441,13 @@ each was measured:
 - **Content type alone** is worse: `CONTENT_TYPE_VALIDATORS.code` maps to the **TypeScript**
   validator, so a `code` tag with no language sends Python to the wrong checker. Pinned in
   `test/unit/declared-language.test.ts` rather than left as a comment.
+  **Superseded 2026-08-08 (Phase C): that mapping is now `null`.** `code` is a family tag
+  spanning ~19 extensions against three implemented validators, and lexing the family as
+  TypeScript invented findings rather than weakening them (perl 39/40, tcl 30/40, shell 22/40
+  false verdicts). A `code` tag with no language now sends Python to **no** checker — it
+  reports `validated: false` and appears on `trace.astCoverage` (§23) instead of returning a
+  wrong verdict. The conclusion this bullet supports is untouched: the two fields must move
+  together. The pin was re-aimed, not deleted.
 
 The two fields answer to different consumers — dispatch reads one, drift reads the other —
 and keying a transform and its check at different granularities is what produced Issue 2.

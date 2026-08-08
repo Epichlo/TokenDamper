@@ -10,6 +10,30 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
 `git log v1.1.0..HEAD` to confirm current scope before relying on this list.
 
 ### Changed
+- **`contentType: 'code'` no longer selects the TypeScript validator — Phase C**:
+  `CONTENT_TYPE_VALIDATORS.code` is now `null`. `code` is a *family* tag set from a file
+  extension covering ~19 languages, of which the AST-lite suite implements three; mapping the
+  whole family to TypeScript meant every non-TS member was lexed by a scanner written for a
+  different grammar. That is not a weaker check, it is a check that **invents** findings —
+  measured false `AST_UNTERMINATED_STRING` / `AST_UNBALANCED_BRACKET` verdicts at perl 39/40,
+  tcl 30/40, shell 22/40, powershell 7/40 (c and css 0/50, because the C-family scanner happens
+  to fit). Shell and PowerShell are in `isCodeExtension` today, so those were live false
+  verdicts on the file route: `$'…'` quoting, `'` inside comments, `${…}` expansion and
+  `[[ … ]]` tests are ordinary syntax a TS lexer misreads. This is DECISIONS §17's finding —
+  a verdict decided by apostrophe parity is not validating anything — reached from the
+  extension side instead of the fence side, and removed for the same reason rather than tuned.
+
+  **Nothing that was genuinely covered loses coverage.** TypeScript, JavaScript, Python and
+  JSON all reach their validator through the `language` and `path` branches of
+  `selectValidator`, which run *first* and are unchanged. What changes is that the remainder
+  now report `validated: false` and appear on `trace.astCoverage` — DECISIONS §23's
+  distinction, that an unexamined item is not a passing one.
+
+  Two hazard-pinning tests asserted the old mapping deliberately and were updated to pin the
+  new one (`test/unit/declared-language.test.ts`, `test/unit/bench/evaluator.test.ts`): the
+  trap they record changed shape from *wrong* validation to *absent* validation, so the pins
+  were kept and re-aimed rather than deleted. Three stale doc comments were corrected with
+  them (`src/core/model/constructors.ts` ×2, `docs/phase-4b-pathless-code-scope.md` §6.3).
 - **Fail-open now returns the caller's bytes — Phase B (DECISIONS §35)**: `resolveFallback`
   returns `request.rawInput`, which reads like a byte-identical echo and is not one —
   `rawInput` is a string the CLI decoded with `readFileSync(path, 'utf8')`, and that call turns
@@ -272,8 +296,11 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
     `DriftTracker`'s `MARKDOWN_MARKER_TYPES` — so a declared Python file would still have its
     `#` comments harvested as markdown headings and then "destroyed" by the elision that
     follows. Two comment lines are enough for the probe to call a Python file a markdown
-    document. Content type alone is worse: `CONTENT_TYPE_VALIDATORS.code` is the **TypeScript**
-    validator, so declared Python would be checked by the wrong checker.
+    document. Content type alone fails the other way: `CONTENT_TYPE_VALIDATORS.code` is `null`
+    (Phase C, above), so declared Python would be checked by **nothing** and report
+    `validated: false`. When this entry was written that mapping was the *TypeScript* validator,
+    so the same mistake produced a wrong verdict rather than a missing one — the coupling
+    argument this bullet makes is unchanged either way.
   - **An unrecognized language is rejected at the adapters, not dropped in the model.** A
     `--language pyton` that quietly does nothing produces a run that looks declared, validates
     nothing, and reports a clean trace — invariant 10's shape.
