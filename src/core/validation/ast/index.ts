@@ -46,10 +46,30 @@ const pythonValidator = new PythonValidator();
  */
 const CONTENT_TYPE_VALIDATORS: Readonly<Record<ContentType, AstValidator | null>> = {
   json: jsonValidator,
-  // `code` is set from a file extension covering ~19 languages, of which the AST-lite suite
-  // implements three. TypeScript is the historical default for the rest; `language` and
-  // `path` below are the precise routes and are consulted first.
-  code: tsValidator,
+  // `code` is a *family*, not a language, so it selects nothing. It used to select the
+  // TypeScript validator as a historical default for the ~19 extensions `isCodeExtension`
+  // covers, which meant every language outside the TS family was lexed by a scanner written
+  // for a different grammar. That is not a weaker check; it is a check that invents findings:
+  //
+  //   shell       22 of 40   (55%)  AST_UNTERMINATED_STRING / AST_UNBALANCED_BRACKET
+  //   powershell   7 of 40   (18%)
+  //   perl        39 of 40   (98%)   ← what adding `.pl` to the list would have bought
+  //   tcl         30 of 40   (75%)
+  //   c / css      0 of 50    (0%)   ← C-family; the scanner happens to fit, and finds nothing
+  //
+  // Shell and PowerShell are *in* `isCodeExtension` today, so those are live false verdicts
+  // on the file route: `$'…'` quoting, `'` inside comments, `${…}` expansion and `[[ … ]]`
+  // tests are all ordinary syntax that a TS lexer reads as an unterminated string or an
+  // unbalanced bracket. This is DECISIONS §17's finding — a verdict decided by apostrophe
+  // parity is not validating anything — reached from the extension side instead of the fence
+  // side, and it is removed for the same reason rather than tuned.
+  //
+  // Nothing that was genuinely covered loses coverage: TypeScript, JavaScript, Python and
+  // JSON all reach their validator through the `language` and `path` branches in
+  // `selectValidator`, which run *first* and are unchanged. What changes is that the
+  // remainder now report `validated: false` and appear on `trace.astCoverage`, which is
+  // §23's distinction — an unexamined item is not a passing one.
+  code: null,
   text: null,
   markdown: null,
   html: null,
