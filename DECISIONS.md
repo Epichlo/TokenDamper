@@ -2172,3 +2172,76 @@ The MIT → MPL migration itself has no entry in this file. It was made in the R
 LICENSE and nowhere else, so nothing prompted a sweep of the other places the license is
 asserted. The lesson is narrow and worth keeping: a license is asserted in four files, and
 changing it in one is a change to none of the others.
+
+---
+
+## 37. A Witness That Existed Before Does Not Count If None of It Survived
+
+**Date:** 2026-08-09 · **Status:** Accepted · **Closes:** max_audit.md C1 (measurement half)
+
+§33 widened the measurement gate from validator-covered items to every item, and was right to.
+What it did not change was the **tense** of the question. `findUnwitnessedItems` asked *did
+evidence exist before?* — it built its probe bundle from the *before* item — so an item whose
+witnesses were all destroyed was exempt, on the grounds that they had once been there.
+
+A structured document therefore walked between the two gates that were split apart to catch
+exactly this. Measured on this repository's own files, on both the file and stdin routes:
+
+| file | before | after | `fallbackUsed` | `S_k` |
+|---|---|---|---|---|
+| `CODE_OF_CONDUCT.md` | 3,542 B | **72 B** | `false` | 0.369 / **0.400** |
+| `SECURITY.md` | 1,154 B | **72 B** | `false` | 0.333 / **0.400** |
+
+`validation.passed: true`, both gates `pass`, the content gone and — on the CLI, which supplies
+no `TokenHasher` — unrecoverable.
+
+### Why neither gate fired
+
+The arithmetic is closed-form, which is what makes this a design defect rather than a tuning
+miss. Prose yields no symbols, so `R_AST = 1.0` as an empty-set default and contributes a free
+0.60. `collectMarkers` adds a `filepath:` marker derived from `item.path`, which no content
+transform can destroy, so `R_struct = 1/(N+1)` for N headings. Therefore:
+
+```
+S_k = 0.6·0 + 0.4·(N/(N+1))  =  0.4·N/(N+1)
+```
+
+which approaches 0.40 from below and never reaches it, for any N — against a retention gate
+that fires on `driftScore > 0.40`. **The retention gate cannot fire for markdown at all.** The
+two stdin rows above landed on *exactly* 0.400 and were admitted by the strict `>`; that is the
+supremum of the expression being waved through by the comparison, not a near miss.
+
+And the measurement gate exempted them because their headings had existed.
+
+### Decision
+
+An item that changed is refused when it yields **no symbols** and **no content-derived markers
+survive in the after item**. Two properties make this safe:
+
+- **It is scoped to symbol-free items.** An item carrying symbols is left to the retention gate,
+  because `R_AST` is measuring it for real. Whole-item elision of code still refuses as
+  `SEMANTIC_DRIFT_EXCEEDED`, which is the accurate reason — reporting "unmeasurable" for an
+  item whose loss was measured exactly would restore the conflation the split undid.
+- **It only ever adds refusals.** Refusing on the surviving set is strictly stronger than
+  refusing on the before set, so every §33 refusal still refuses. Nothing that was caught is
+  now let through.
+
+### Measured cost
+
+A frozen 293-file corpus, 586 rows across both routes: **4 rows changed, and all four are this
+defect.** Every other row is byte-identical to baseline. TypeScript stays at 14.00%, Python at
+14.98%, and every uncovered-language bucket stays at 0.00%. The prose bucket goes 0.67% → 0.00%,
+which was the data loss.
+
+### Not done here
+
+`filepath:` is still counted in `R_struct` (audit C1b, §3.2). That is the deeper half: it is why
+`R_struct` is pinned at 1.0 for code and contributes a free 0.40, which in turn is why a code
+file can lose **66.7%** of its symbols and pass. Fixing it moves every published reduction figure
+in the project and wants its own measurement pass, so it is deliberately deferred rather than
+folded in here. C1a closes the data loss; C1b closes the arithmetic.
+
+`extractContentMarkers` remains the right primitive for both — its own doc comment has said since
+§28 that metadata-derived markers "cannot serve as *evidence* that content was retained, because
+they are preserved whether it was or not". The principle was already written down. This applies
+it where the decision is made.

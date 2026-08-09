@@ -292,4 +292,120 @@ describe('drift refuses to certify an elision it has no evidence for', () => {
       expect(result.validation.driftCoverage?.symbolBearingItems).toBe(1);
     });
   });
+  /**
+   * The surviving-witness rule — C1a, 2026-08-09.
+   *
+   * Until this test existed the rule above asked *did evidence exist before?* rather than
+   * *did any of it survive?*, and a structured document walked between the two gates. Measured
+   * on this repository's own files: `CODE_OF_CONDUCT.md` went **3,542 bytes to 72** and
+   * `SECURITY.md` **1,154 to 72**, on both the file and stdin routes, with
+   * `fallbackUsed: false`, `validation.passed: true`, and both gates reporting `pass`.
+   *
+   * The arithmetic shows the old rule could never have caught it. Prose yields no symbols, so
+   * `R_AST = 1.0` as an empty-set default and contributes a free 0.60. `collectMarkers` adds a
+   * `filepath:` marker derived from `item.path`, which no content transform can destroy, so
+   * `R_struct = 1/(N+1)` for N headings. Therefore `S_k = 0.4 * N/(N+1)` — strictly below 0.40
+   * for every N, against a gate that fires on `driftScore > 0.40`.
+   *
+   * The stdin rows landed on **exactly 0.400** and passed on the strict `>`. That is not a
+   * near-miss: it is the supremum of the expression above being admitted by the comparison.
+   * Both are asserted below, because a later change to either the weights or the comparison
+   * operator should have to confront this case explicitly.
+   *
+   * Cost of the rule, measured over a frozen 293-file corpus (586 rows, both routes): **4 rows
+   * changed, all four of them this defect**. Every code bucket is byte-identical to baseline —
+   * TypeScript 14.00%, Python 14.98% unchanged. See DECISIONS §37 and max_audit.md C1.
+   */
+  describe('a witness that existed before does not count if none of it survived', () => {
+    const DOC = [
+      '# Runbook',
+      '',
+      'Steps when the queue backs up:',
+      '',
+      '- Check the lag dashboard',
+      '- Scale the consumer group to 12 workers',
+      '',
+      '## Escalation',
+      '',
+      'Page the platform on-call if lag exceeds 30 minutes.',
+      '',
+    ].join('\n');
+
+    const docItem = (content: string) =>
+      createContextItem({
+        id: 'doc',
+        kind: 'file',
+        content,
+        path: 'docs/runbook.md',
+        language: 'markdown',
+        contentType: 'markdown',
+      });
+
+    it('refuses a markdown document elided whole, though its headings witnessed it before', () => {
+      const before = bundleOf(docItem(DOC));
+      const after = bundleOf(docItem('[TokenDamper: 11 markdown lines elided, 233 bytes, sha256:60429ebe370b]'));
+
+      const report = tracker.calculateDrift(before, after);
+
+      expect(report.unwitnessedItemIds).toEqual(['doc']);
+      expect(report.measurementGate).toBe('refuse');
+      expect(report.shouldFallback).toBe(true);
+
+      // The evidence existed before and is what made the old rule exempt this item.
+      expect(report.contentMarkersBeforeCount).toBeGreaterThan(0);
+      expect(report.astMeasured).toBe(false);
+    });
+
+    it('pins the arithmetic: S_k stays under 0.40 for any heading count, so retention alone cannot fire', () => {
+      for (const headings of [1, 3, 10, 50]) {
+        const body = Array.from({ length: headings }, (_, i) => `## Section ${i}\n\nBody text ${i}.\n`).join('\n');
+        const before = bundleOf(docItem(body));
+        const after = bundleOf(docItem('[TokenDamper: elided, sha256:deadbeefcafe]'));
+
+        const report = tracker.calculateDrift(before, after);
+
+        // The supremum is 0.40 and it is never exceeded — `>` cannot fire, for any N.
+        expect(report.driftScore).toBeLessThanOrEqual(0.4 + 1e-9);
+        expect(report.retentionGate).toBe('pass');
+
+        // Which is exactly why the measurement gate has to be the one that refuses.
+        expect(report.measurementGate).toBe('refuse');
+        expect(report.shouldFallback).toBe(true);
+      }
+    });
+
+    it('leaves an item whose witnesses survived alone — the rule adds refusals, it does not invert', () => {
+      const before = bundleOf(docItem(DOC));
+      const after = bundleOf(docItem('# Runbook\n\n## Escalation\n\n[TokenDamper: 6 markdown lines elided]'));
+
+      const report = tracker.calculateDrift(before, after);
+
+      expect(report.unwitnessedItemIds).toEqual([]);
+      expect(report.measurementGate).toBe('pass');
+    });
+
+    it('leaves symbol-bearing code to the retention gate, so its refusal reason stays accurate', () => {
+      const codeItem = (content: string) =>
+        createContextItem({
+          id: 'code',
+          kind: 'file',
+          content,
+          path: 'src/thing.ts',
+          language: 'typescript',
+          contentType: 'code',
+        });
+
+      const before = bundleOf(codeItem('export function alpha() {\n  return 1;\n}\n'));
+      const after = bundleOf(codeItem('[TokenDamper: 3 code lines elided, sha256:0123456789ab]'));
+
+      const report = tracker.calculateDrift(before, after);
+
+      // Symbols existed, so `R_AST` measured the loss exactly rather than defaulting. Calling
+      // that "unmeasurable" would reintroduce the conflation the two-gate split undid.
+      expect(report.astMeasured).toBe(true);
+      expect(report.measurementGate).toBe('pass');
+      expect(report.retentionGate).toBe('refuse');
+      expect(report.shouldFallback).toBe(true);
+    });
+  });
 });

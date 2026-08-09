@@ -10,6 +10,36 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
 `git log v1.1.0..HEAD` to confirm current scope before relying on this list.
 
 ### Fixed
+- **A document whose witnesses were all destroyed is no longer certified — audit C1a**:
+  `DriftTracker.findUnwitnessedItems` asked *did evidence exist before?* (it built its probe
+  from the **before** item), so an item whose witnesses were entirely destroyed was exempt on
+  the grounds that they had once been there. Measured on this repository's own files, on both
+  routes: `CODE_OF_CONDUCT.md` **3,542 → 72 bytes** and `SECURITY.md` **1,154 → 72 bytes**, at
+  `fallbackUsed: false`, `validation.passed: true`, both gates reporting `pass` — and
+  unrecoverable on the CLI, which supplies no `TokenHasher`.
+
+  Neither gate could fire, and the arithmetic is closed-form: prose yields no symbols so
+  `R_AST = 1.0` as an empty-set default (a free 0.60), and `filepath:` is derived from
+  `item.path` and survives any content transform, so `R_struct = 1/(N+1)` for N headings. Hence
+  `S_k = 0.4·N/(N+1)`, which approaches 0.40 from below and never reaches it, against a gate
+  firing on `> 0.40`. The two stdin rows landed on **exactly 0.400** and were admitted by the
+  strict comparison.
+
+  An item that changed is now refused when it yields no symbols **and** no content-derived
+  markers survive in the *after* item. Scoped to symbol-free items, so whole-item elision of
+  code still refuses as `SEMANTIC_DRIFT_EXCEEDED` (the accurate reason) rather than being
+  relabelled; and strictly additive, so every §33 refusal still refuses.
+
+  Cost, over a frozen 293-file corpus (586 rows, both routes): **4 rows changed, all four this
+  defect.** Everything else byte-identical — TypeScript 14.00%, Python 14.98%, uncovered
+  buckets 0.00%, all unchanged. Prose goes 0.67% → 0.00%, which was the loss. Guarded by
+  `test/unit/drift-unwitnessed-elision.test.ts`, verified to fail against the unfixed tracker.
+  See DECISIONS §37.
+
+  **Deferred:** `filepath:` is still counted in `R_struct` (audit C1b). That is why `R_struct`
+  is pinned at 1.0 for code, and why a code file can lose 66.7% of its symbols and pass. It
+  moves every published figure and wants its own measurement pass.
+
 - **The regression baseline now measures the fixture set the product ships — audit H3**:
   `test/integration/bench.test.ts` Tests 1–5 loaded `loadBenchmarkFixtures('humaneval')`, and
   Test 2 did not use the shipped fixtures at all — it built a private two-fixture set inline
