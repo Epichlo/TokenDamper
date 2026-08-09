@@ -10,6 +10,27 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
 `git log v1.1.0..HEAD` to confirm current scope before relying on this list.
 
 ### Fixed
+- **The explainability trace now explains — audit M6**: `buildTrace` projected every
+  `StageResult` down to `{ stageId, status, durationMs: 0, changed }`, discarding each stage's
+  `metrics` and `notes` and hardcoding the duration. `StageTrace` now carries `metrics` and
+  `notes` verbatim, and `durationMs` is measured by the engine with `performance.now()` — by
+  the engine because a stage that read a clock would stop being a pure function of its input
+  (invariant 1), and `performance.now()` because most stages finish inside a millisecond and
+  integer resolution would report the same uninformative `0` the constant already did.
+
+  A CLI trace now shows, for example, `regionsHashed: 4`, `bytesSaved: 14509` and
+  `irreversibleElisions: 1` with the note explaining that no token hasher was supplied so the
+  removed content is retained nowhere — none of which was previously knowable from the trace.
+
+  **`pruning:topology-pruner`'s note was not vague, it was false.** It returned "All items fit
+  within token budget; no pruning required." unconditionally whenever `itemsPruned === 0`;
+  measured, a 5,405-token file at `maxInputTokens: 10` reported that all items fit. The note now
+  distinguishes the three cases and names the mechanism (everything pinned by cache-prefix
+  locking → pinned items bypass the knapsack → the budget could not be enforced), and the
+  metrics carry `bundleTokens` and `maxTokens` so the claim is checkable. This does not fix H5,
+  but it stops the trace concealing it. Guarded by `test/unit/trace-explains.test.ts`, verified
+  to fail 4/4 against the unfixed trace. See DECISIONS §39.
+
 - **The Gateway no longer corrupts non-ASCII request bodies — audit C2, L3**:
   `GatewayServer.onRequest` accumulated the body with `body += chunk`, decoding each chunk
   independently, so a multi-byte UTF-8 sequence straddling a chunk boundary became U+FFFD on

@@ -245,8 +245,26 @@ export interface ValidationReport {
 export interface StageTrace {
   readonly stageId: string;
   readonly status: StageStatus;
+  /**
+   * Wall time for this stage, measured by the engine.
+   *
+   * Measured by the engine and not by the stage: a stage that read a clock would no longer be
+   * a pure function of its input (invariant 1). Timing an opaque call from outside is an
+   * observation *about* the stage, not an input to it, and cannot change what it returns.
+   */
   readonly durationMs: number;
   readonly changed: boolean;
+  /**
+   * The stage's own counters — `itemsHashed`, `bytesSaved`, `regionsHashed`,
+   * `irreversibleElisions`, `skippedPostConditionRejected`, and so on.
+   *
+   * Discarded entirely until 2026-08-09, along with `notes`. The stages compute this telemetry
+   * carefully and the trace threw all of it away, so a reader could see *that* a stage ran and
+   * changed something but not what it did, how much it removed, or whether the elisions were
+   * reversible — on a product whose thesis is auditability. (audit M6)
+   */
+  readonly metrics: Readonly<Record<string, number>>;
+  readonly notes?: string | undefined;
 }
 
 /**

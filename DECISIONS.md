@@ -2311,3 +2311,57 @@ The remaining Gateway findings are untouched and independent: the `exec` token h
 0-bytes-saved measurement (H1), structured message content flattened to a string (C4), and the
 two environment branches in the request path (M8). C2 is a correctness fix to the pass-through,
 not an argument that the mode is finished.
+
+---
+
+## 39. The Trace Carries What the Stages Computed
+
+**Date:** 2026-08-09 · **Status:** Accepted · **Closes:** max_audit.md M6
+
+`buildTrace` projected every `StageResult` down to `{ stageId, status, durationMs: 0, changed }`.
+The stage's `metrics` and `notes` were discarded and the duration was a literal constant.
+
+So the trace could say that `compression:token-hashing` ran and changed something, and nothing
+about what it removed, how much, whether any elision was reversible, or how long it took. The
+stages compute that telemetry carefully — `itemsHashed`, `regionsHashed`, `bytesSaved`,
+`irreversibleElisions`, `skippedPostConditionRejected` — and all of it was thrown away one
+function call after being calculated. `--diff` and `--diff-html` partially compensate on the CLI;
+the MCP `get_optimization_trace` tool and the Gateway had nothing else at all.
+
+For a product whose stated differentiator is auditability, the audit surface was the least
+informative one in the system.
+
+### Decision
+
+`StageTrace` gains `metrics` and an optional `notes`, carried through verbatim. `durationMs` is
+measured by the **engine**, not by the stage: a stage that read a clock would stop being a pure
+function of its input (invariant 1), whereas timing an opaque call from outside is an observation
+*about* the stage and cannot change what it returns. `performance.now()` rather than `Date.now()`,
+because most stages finish inside a millisecond and integer resolution would report the same
+uninformative `0` the hardcoded constant already did.
+
+The trace was already non-deterministic — it carries a UUID `requestId` — so this changes nothing
+about invariant 1, which is a statement about emitted **bytes**.
+
+### The pruner's note was not vague, it was false
+
+`pruning:topology-pruner` returned `notes: 'All items fit within token budget; no pruning
+required.'` unconditionally whenever `itemsPruned === 0`. Measured, a 5,405-token file at
+`maxInputTokens: 10` reported that all items fit. They do not.
+
+The mechanism is worth stating because it is also H5: `applyCacheAwarePrefixLocking` pins every
+item inside the first 1,024 tokens, `solve01Knapsack` places pinned items outside the candidate
+set and always selects them, and `createContextBundle` produces a **one-item** bundle for CLI,
+MCP and bench. Item 0 is therefore always pinned and `itemsPruned` is always 0. The note reported
+that pruning was *unnecessary* for the case where it was *impossible*.
+
+The note now distinguishes the three cases and names the mechanism, and the metrics carry
+`bundleTokens` and `maxTokens` so the claim is checkable rather than asserted:
+
+> Nothing prunable: all 1 item(s) are pinned by cache-prefix locking, but the bundle is 5405
+> tokens against a budget of 10. Pinned items bypass the knapsack (invariant 7), so the budget
+> could not be enforced.
+
+This does not fix H5 — the knapsack is still unreachable on every shipping path. It stops the
+trace from concealing that behind a reassuring sentence, which is the necessary first step:
+the defect is now visible in the one place a user would look.
