@@ -10,6 +10,31 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
 `git log v1.1.0..HEAD` to confirm current scope before relying on this list.
 
 ### Fixed
+- **The Gateway no longer corrupts non-ASCII request bodies — audit C2, L3**:
+  `GatewayServer.onRequest` accumulated the body with `body += chunk`, decoding each chunk
+  independently, so a multi-byte UTF-8 sequence straddling a chunk boundary became U+FFFD on
+  both sides — at the socket, before the pipeline exists, on the bytes forwarded upstream.
+  Measured with two-write splits on a continuation byte: `héllo — ünïcode ✓ 日本語 😀` went out
+  94 B and forwarded as **98 B** (`h��llo …`); CJK 76 → **82 B**; box-drawing 89 → **95 B**. A
+  corrupted body is always *longer*, because U+FFFD re-encodes to three bytes.
+
+  Now collects `Buffer[]`, concatenates on `end`, and decodes once. Bodies that fail a UTF-8
+  round trip — which correct concatenation does not fix, since the decode is still lossy — are
+  forwarded verbatim rather than optimized or rejected: optimizing would have every stage
+  reasoning about content the caller never sent, and rejecting is not a transparent proxy's
+  call. `ProxyRequestResult` gains `bodyBytes` for this, preferred over `body` by both the
+  upstream `fetch` and `writeProxyResult`.
+
+  This is DECISIONS §35 at a different seam. Phase B applied that reasoning to the adapter that
+  reads from disk and not to the one that reads from a socket, where it is worse — the bytes
+  reach a provider, not a terminal. MCP was never affected: `setEncoding('utf8')` installs a
+  `StringDecoder`, which holds partial sequences across chunks; manual concatenation is exactly
+  what bypasses it.
+
+  Also removes the O(n²) body-size check, which re-measured the whole accumulated string on
+  every chunk (L3). Guarded by `test/integration/gateway-byte-fidelity.test.ts`, verified to
+  fail 4/4 against the unfixed server. See DECISIONS §38.
+
 - **A document whose witnesses were all destroyed is no longer certified — audit C1a**:
   `DriftTracker.findUnwitnessedItems` asked *did evidence exist before?* (it built its probe
   from the **before** item), so an item whose witnesses were entirely destroyed was exempt on

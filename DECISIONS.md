@@ -2245,3 +2245,69 @@ folded in here. C1a closes the data loss; C1b closes the arithmetic.
 §28 that metadata-derived markers "cannot serve as *evidence* that content was retained, because
 they are preserved whether it was or not". The principle was already written down. This applies
 it where the decision is made.
+
+---
+
+## 38. The Gateway Reads Bytes, Not String Fragments
+
+**Date:** 2026-08-09 · **Status:** Accepted · **Closes:** max_audit.md C2, L3
+
+`GatewayServer.onRequest` accumulated its request body with `body += chunk`. That invokes
+`Buffer.prototype.toString('utf8')` on **each chunk independently**, so a multi-byte UTF-8
+sequence straddling a chunk boundary is decoded as two truncated fragments and becomes U+FFFD on
+both sides. Node reads in ~64 KB chunks, so this fires by chance on any body large enough to be
+chunked, and deterministically for a body split at the wrong offset.
+
+Measured against the unfixed server, with each body written in two `req.write()` calls split on
+a UTF-8 continuation byte:
+
+| body | sent | forwarded |
+|---|---|---|
+| `héllo — ünïcode ✓ 日本語 😀` | 94 B | **98 B**, `h��llo …` |
+| `こんにちは世界` | 76 B | **82 B**, `���んにちは世界` |
+| `┌─┐│ build ok │└─┘` | 89 B | **95 B**, `���─┐│ build ok │└─┘` |
+
+A corrupted body is always *longer* than it was sent, because U+FFFD re-encodes to three bytes.
+Nothing was elided on any of these turns — the corruption happens at the socket, before the
+pipeline exists, and the corrupted string is what goes upstream.
+
+### This is DECISIONS §35 at a different seam
+
+Phase B's reasoning — *"`rawInput` is a decoded string, so the evidence is gone by the time a
+request exists"* — is correct and generalizes. It was applied to the one adapter that reads from
+disk and not to the one that reads from a socket, where it is worse: the bytes reach a provider
+rather than a terminal. The MCP transport is unaffected, and instructively so: `setEncoding('utf8')`
+installs a `StringDecoder`, which holds partial sequences across chunk boundaries. Manual
+concatenation is exactly what bypasses that machinery.
+
+### Decision
+
+Collect `Buffer[]`, `Buffer.concat` on `end`, decode **once**. Then apply the CLI's own round-trip
+test (`Buffer.from(str, 'utf8').equals(buf)`) and, when it fails, pass the caller's bytes through
+untouched.
+
+Concatenating correctly fixes the chunk-boundary defect. It does not make a body that was never
+valid UTF-8 representable — the decode is still lossy — so the round trip is a separate question
+and gets a separate answer. Optimizing such a body is not an option, because every stage,
+validator and token estimate operates on the decoded string and would be reasoning about content
+the caller never sent; a saving measured against corrupted input is worse than none. Rejecting it
+is not an option either: TokenDamper is a transparent proxy, and a body the provider might well
+accept is not TokenDamper's to refuse. So it is forwarded verbatim, which is invariant 3 on the
+Gateway.
+
+`ProxyRequestResult` gains an optional `bodyBytes`; `body` is still populated with the lossy
+decode so existing readers keep working, but anything that puts bytes on the wire prefers
+`bodyBytes`. Both the upstream `fetch` and the locally-returned branch in `writeProxyResult` do.
+
+### Also fixed
+
+The body-size cap recomputed `Buffer.byteLength(body, 'utf8')` over the entire accumulated string
+on every chunk — O(n²) in the length of the request (audit L3). It is now a running total, which
+falls out of collecting buffers anyway.
+
+### Not done here
+
+The remaining Gateway findings are untouched and independent: the `exec` token handoff (C3), the
+0-bytes-saved measurement (H1), structured message content flattened to a string (C4), and the
+two environment branches in the request path (M8). C2 is a correctness fix to the pass-through,
+not an argument that the mode is finished.

@@ -21,7 +21,7 @@ import { estimateBundleTokens } from '../core/hashing/tokenizer';
 import { ConfidenceLedger } from '../core/ledger/confidence-ledger';
 import { TOKENDAMPER_VERSION } from '../version';
 import { GatewaySessionStore } from './session-store';
-import type { AnthropicMessagesPayload, OpenAiChatPayload, ProxyHandlerOptions, ProxyRequestResult, SessionContentEntry } from './types';
+import type { AnthropicMessagesPayload, GatewaySession, OpenAiChatPayload, ProxyHandlerOptions, ProxyRequestResult, SessionContentEntry } from './types';
 
 /**
  * Handles incoming API requests, normalizing payloads, running cross-turn deduplication,
@@ -38,6 +38,16 @@ export async function handleProxyRequest(
   const routePath = requestUrl.pathname;
   const sessionId = getSessionIdFromHeaders(headers, rawBody);
   const session = options.sessionStore.getOrCreateSession(sessionId);
+
+  // Can the string model represent what the caller actually sent?
+  //
+  // A round trip, not a charset sniff — the only question that matters is whether these exact
+  // bytes survive the representation everything downstream is built on. Identical reasoning to
+  // the CLI's `inputSurvivesDecoding` (DECISIONS §35); the difference is that here an
+  // unfaithful decode is not merely printed, it is forwarded to a provider as if the caller had
+  // sent it.
+  const bodyBytes = options.rawBodyBytes;
+  const bodyIsLossless = bodyBytes === undefined || Buffer.from(rawBody, 'utf8').equals(bodyBytes);
 
   const cleanHeaders: Record<string, string> = {};
   for (const [key, val] of Object.entries(headers)) {
@@ -57,7 +67,9 @@ export async function handleProxyRequest(
 
   // Handle OpenAI API endpoint
   if (routePath === '/v1/chat/completions') {
-    const optimized = processOpenAiRequest(rawBody, cleanHeaders, session, options);
+    const optimized = bodyIsLossless
+      ? processOpenAiRequest(rawBody, cleanHeaders, session, options)
+      : passThroughUnrepresentable(bodyBytes as Buffer, rawBody, cleanHeaders, session);
     if (optimized.statusCode !== 200 || shouldUseMockUpstream()) {
       return optimized;
     }
@@ -77,6 +89,7 @@ export async function handleProxyRequest(
       provider: 'openai',
       requestUrl,
       body: optimized.body,
+      ...(optimized.bodyBytes ? { bodyBytes: optimized.bodyBytes } : {}),
       incomingHeaders: cleanHeaders,
       streamRequested: isStreamRequested(optimized.body),
       session: optimized.session,
@@ -86,7 +99,9 @@ export async function handleProxyRequest(
 
   // Handle Anthropic API endpoint
   if (routePath === '/v1/messages') {
-    const optimized = processAnthropicRequest(rawBody, cleanHeaders, session, options);
+    const optimized = bodyIsLossless
+      ? processAnthropicRequest(rawBody, cleanHeaders, session, options)
+      : passThroughUnrepresentable(bodyBytes as Buffer, rawBody, cleanHeaders, session);
     if (optimized.statusCode !== 200 || shouldUseMockUpstream()) {
       return optimized;
     }
@@ -106,6 +121,7 @@ export async function handleProxyRequest(
       provider: 'anthropic',
       requestUrl,
       body: optimized.body,
+      ...(optimized.bodyBytes ? { bodyBytes: optimized.bodyBytes } : {}),
       incomingHeaders: cleanHeaders,
       streamRequested: isStreamRequested(optimized.body),
       session: optimized.session,
@@ -128,6 +144,8 @@ interface ForwardUpstreamOptions {
   readonly provider: UpstreamProvider;
   readonly requestUrl: URL;
   readonly body: string;
+  /** Preferred over `body` when set — see `ProxyRequestResult.bodyBytes`. */
+  readonly bodyBytes?: Buffer | undefined;
   readonly incomingHeaders: Record<string, string>;
   readonly streamRequested: boolean;
   readonly session: ReturnType<GatewaySessionStore['getOrCreateSession']>;
@@ -151,7 +169,12 @@ async function forwardUpstreamRequest(params: ForwardUpstreamOptions): Promise<P
     const fetchInit: RequestInit = {
       method: 'POST',
       headers: buildForwardHeaders(params.incomingHeaders, params.provider),
-      body: params.body,
+      // Bytes win when present: `params.body` is a lossy decode in that case, and re-encoding
+      // it is exactly the corruption this path exists to avoid. Copied into a standalone
+      // `ArrayBuffer` because neither `Buffer` nor a `Uint8Array` view satisfies the `BodyInit`
+      // union this project's lib resolves. The copy is irrelevant — this branch is reached only
+      // by a body that is not valid UTF-8, and bodies are capped at 10 MB.
+      body: params.bodyBytes ? new Uint8Array(params.bodyBytes).buffer : params.body,
       signal,
     };
 
@@ -318,6 +341,33 @@ function getSessionIdFromHeaders(headers: IncomingHttpHeaders, body: string): st
   }
 
   return 'default-session';
+}
+
+/**
+ * Fail-open for a body the string model cannot represent: forward the caller's bytes, unchanged.
+ *
+ * Invariant 3 on the Gateway. Optimizing is not an option — every stage, validator and estimate
+ * operates on the decoded string, so for these bytes they would all be reasoning about content
+ * the caller never sent, and a "saving" measured against corrupted input is worse than none.
+ * Rejecting is not an option either: TokenDamper is a transparent proxy, and a body the provider
+ * might well accept is not TokenDamper's to refuse.
+ *
+ * `body` is still populated with the lossy decode so existing readers of `ProxyRequestResult`
+ * keep working; `bodyBytes` carries the truth and is what reaches the socket.
+ */
+function passThroughUnrepresentable(
+  bytes: Buffer,
+  lossyBody: string,
+  headers: Record<string, string>,
+  session: GatewaySession,
+): ProxyRequestResult {
+  return {
+    statusCode: 200,
+    headers,
+    body: lossyBody,
+    bodyBytes: bytes,
+    session,
+  };
 }
 
 interface GatewayOptimizationOutcome {
