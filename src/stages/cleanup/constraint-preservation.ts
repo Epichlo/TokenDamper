@@ -1,16 +1,24 @@
 import type { ContextBundle, ContextItem, OptimizationBudget, StageResult } from '../../core/model/types';
 import { createBundleStatistics, createContextItem, createStageResult, freeze, hashContent } from '../../core/model/constructors';
-import { extractImperativeDirectives } from '../../core/constraints/directives';
+import { extractImperativeDirectives, extractProseRegions } from '../../core/constraints/directives';
 import { estimateBundleTokens } from '../../core/hashing/tokenizer';
+import type { ContentType } from '../../core/model/types';
 
 /**
  * Extracts constraint directive sentences or clauses containing imperative keywords.
+ *
+ * `contentType` is optional so existing callers that scan a bare string keep working; it
+ * defaults to `text`, which scans everything, i.e. the pre-H6 behaviour. Pass the item's real
+ * content type to get the region filter — see `extractProseRegions`.
  */
-export function extractConstraintDirectives(content: string): {
+export function extractConstraintDirectives(
+  content: string,
+  contentType: ContentType = 'text',
+): {
   readonly directives: ReadonlyArray<string>;
   readonly keywords: ReadonlyArray<string>;
 } {
-  return extractImperativeDirectives(content);
+  return extractImperativeDirectives(extractProseRegions(content, contentType));
 }
 
 /**
@@ -28,7 +36,7 @@ export function runConstraintPreservationStage(
   let changed = false;
 
   const newItems: ContextItem[] = bundle.items.map((item) => {
-    const { directives, keywords } = extractConstraintDirectives(item.content);
+    const { directives, keywords } = extractConstraintDirectives(item.content, item.contentType);
     const hasConstraints = directives.length > 0;
     const directiveCount = directives.length;
 

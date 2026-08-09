@@ -2532,3 +2532,83 @@ H1's underlying limitation is untouched by choice. C4 (structured message conten
 string) remains open and is still masked by the fallback; M7 (savings measured against a
 newline-joined render rather than the wire bytes) and M8 (two environment branches in the request
 path) remain open.
+
+---
+
+## 42. An Imperative Lives in a Comment, Not in an Expression
+
+**Date:** 2026-08-09 · **Status:** Accepted · **Closes:** max_audit.md H6
+
+`cleanup:constraint-preservation` scans content for nine keywords — `must`, `must not`, `never`,
+`always`, `only if`, `do not`, `required`, `except when`, `make sure to`, `critical` — and
+`validate()` fails the run if any extracted sentence is absent afterwards. The list is written for
+natural-language system prompts. It was applied to raw content of every kind, and in source
+`required` and `critical` are ordinary identifiers. On the audit's corpus, **24 of 40 fallbacks
+involved `CONSTRAINT_DIRECTIVE_LOST`** — the single largest cause of code not being optimized.
+
+### Neither extreme is right, and the measurement says why
+
+Over a frozen 293-file corpus at `targetReductionRatio: 0.3`, classifying every directive a run
+reported as dropped by where it came from:
+
+| bucket | from comments / docstrings | from code |
+|---|---|---|
+| Python | 16 | **38** — nearly all `logger.critical(...)` |
+| TypeScript | 38 | **13** — `readonly required?`, error-message literals |
+
+Trusting the check everywhere keeps 51 false positives. The audit's proposed remedy — *"scope
+directive extraction by content type (prose/markdown/prompt kinds only, not `code`)"* — discards
+54 genuine constraints, and specifically the Python docstring case that
+`docs/phase-1d-semantic-gate-disposition.md` measured to be the **only** thing this check
+actually catches.
+
+What separates the two populations is not the content **type** but the **region**. An instruction
+to a reader lives in a comment or a docstring; it never lives in an expression.
+
+### Decision
+
+1. **Extraction is scoped to prose regions.** `extractProseRegions` returns whole content for
+   prose content types, and for code returns line comments (`//`, `#`, `--`, `*`), block comment
+   bodies, and Python docstrings including their interior lines. It is deliberately
+   line-oriented and syntax-approximate rather than lexed: this is a *filter on what may raise a
+   constraint*, so over-inclusion costs a false positive — the pre-existing behaviour — and
+   under-inclusion costs a missed constraint. Requiring the comment leader at the **start** of a
+   trimmed line is exactly what excludes `logger.critical(exc)` while keeping
+   `# never call this twice`.
+
+2. **Retention is checked per item.** The check collected every item's directives into one list
+   and tested each against `after.items.map(i => i.content).join('\n')`. A directive extracted
+   from item A was therefore satisfied if the string happened to appear anywhere in item B — the
+   check could pass for content that was in fact destroyed — and a loss anywhere failed the whole
+   run with no way to say where. Matching by item id fixes both, and the message now names the
+   item. An item absent from `after` is skipped, on the same reasoning
+   `DriftTracker.findUnwitnessedItems` records: selection is not elision, and failing here would
+   make any prunable item carrying an imperative unprunable.
+
+### Measured
+
+| bucket / route | before | after | delta |
+|---|---|---|---|
+| python (file) | 14.98% | **23.14%** | +8.16pp |
+| python (stdin) | 14.88% | **22.66%** | +7.78pp |
+| typescript (file) | 23.38% | **27.33%** | +3.95pp |
+
+**20 rows changed of 586, and none regressed** — no file went from reducing to falling back.
+Every other bucket is byte-identical.
+
+### What remains, and why it is the check working
+
+After the change, TypeScript has **zero** remaining code-sourced directives; every remaining
+`CONSTRAINT_DIRECTIVE_LOST` is a genuine imperative in a comment or docstring that an elision
+would drop. Those files still fall back, and should: the run would otherwise silently delete an
+instruction. That is the check doing its job rather than misfiring, and it is why the category
+does not go to zero.
+
+### Ordering note
+
+This had to land **after** §37 (C1a). The audit observed that this check was "currently the only
+thing preventing markdown documents from being deleted" — a document survived if its author
+happened to use one of nine words. Narrowing it first would have widened that data loss. With
+§37 in place the drift measurement gate covers markdown on its own merits, which the corpus
+confirms: the prose bucket is unchanged at 28/28 fallbacks, now attributed to drift rather than
+to a coincidence of vocabulary.

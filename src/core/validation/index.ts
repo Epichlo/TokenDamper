@@ -1,6 +1,7 @@
 import type {
   AstCoverage,
   ContextBundle,
+  ContextItem,
   DriftCoverage,
   OptimizationBudget,
   OptimizationPlan,
@@ -51,17 +52,33 @@ export function validate(
     }
   }
 
-  // 2. Verify Constraint Directive Retention
-  const beforeDirectives = collectBundleDirectives(before);
-  const afterContentCombined = after.items.map((i) => i.content).join('\n');
+  // 2. Verify Constraint Directive Retention — per item, not over a joined blob (audit H6).
+  //
+  // This used to collect every item's directives into one list and test each against
+  // `after.items.map(i => i.content).join('\n')`. Two things were wrong with that. A directive
+  // extracted from item A was satisfied if the string happened to appear anywhere in item B, so
+  // the check could pass for content that was in fact destroyed; and there was no attribution,
+  // so a loss anywhere failed the whole run with no way to say where. Matching by item id fixes
+  // both, and the message now names the item.
+  //
+  // An item absent from `after` is skipped, following the same reasoning `DriftTracker`'s
+  // `findUnwitnessedItems` records: the planner exists to drop items under a budget the caller
+  // set, and selection is not elision. Failing here would make any prunable item carrying an
+  // imperative unprunable.
+  const afterById = new Map(after.items.map((item) => [item.id, item]));
 
-  for (const directive of beforeDirectives) {
-    if (!afterContentCombined.includes(directive)) {
-      issues.push({
-        code: 'CONSTRAINT_DIRECTIVE_LOST',
-        message: `Imperative constraint directive dropped during optimization: "${directive}"`,
-        severity: 'error',
-      });
+  for (const item of before.items) {
+    const afterItem = afterById.get(item.id);
+    if (!afterItem) continue;
+
+    for (const directive of collectItemDirectives(item)) {
+      if (!afterItem.content.includes(directive)) {
+        issues.push({
+          code: 'CONSTRAINT_DIRECTIVE_LOST',
+          message: `Imperative constraint directive dropped from item [${item.id}]: "${directive}"`,
+          severity: 'error',
+        });
+      }
     }
   }
 
@@ -156,27 +173,25 @@ export function validate(
   };
 }
 
-function collectBundleDirectives(bundle: ContextBundle): string[] {
-  const directives: string[] = [];
-  for (const item of bundle.items) {
-    if (typeof item.metadata.constraintDirectives === 'string') {
-      try {
-        const parsed = JSON.parse(item.metadata.constraintDirectives);
-        if (Array.isArray(parsed)) {
-          for (const d of parsed) {
-            if (typeof d === 'string') {
-              directives.push(d);
-            }
-          }
-          continue;
-        }
-      } catch {
-        // Fall back to scanning content
+/**
+ * The imperative directives attributable to one item.
+ *
+ * Prefers what `cleanup:constraint-preservation` recorded, and falls back to scanning when the
+ * stage did not run — the Gateway plans only `cleanup:session-dedup`, so metadata is absent
+ * there. Both paths now scan **prose regions only** (`extractProseRegions`, audit H6), so the
+ * two agree; before that, the fallback scan and the stage could disagree about what counted.
+ */
+function collectItemDirectives(item: ContextItem): string[] {
+  if (typeof item.metadata.constraintDirectives === 'string') {
+    try {
+      const parsed = JSON.parse(item.metadata.constraintDirectives);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((d): d is string => typeof d === 'string');
       }
+    } catch {
+      // Fall back to scanning content
     }
-
-    const { directives: scanned } = extractConstraintDirectives(item.content);
-    directives.push(...scanned);
   }
-  return directives;
+
+  return [...extractConstraintDirectives(item.content, item.contentType).directives];
 }

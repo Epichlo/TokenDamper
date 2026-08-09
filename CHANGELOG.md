@@ -10,6 +10,38 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
 `git log v1.1.0..HEAD` to confirm current scope before relying on this list.
 
 ### Fixed
+- **Constraint directives are extracted from prose regions, and checked per item — audit H6**:
+  the nine-keyword imperative scan (`must`, `never`, `required`, `critical`, …) is written for
+  natural-language prompts and was applied to raw content of every kind. In source, `required`
+  and `critical` are ordinary identifiers, and `CONSTRAINT_DIRECTIVE_LOST` was the single largest
+  cause of code not being optimized — **24 of 40 fallbacks** on the audit's corpus.
+
+  Measured over a frozen 293-file corpus, classifying every dropped directive by origin: Python
+  **16 prose / 38 code** (nearly all `logger.critical(...)`), TypeScript **38 prose / 13 code**
+  (`readonly required?`, error-message literals). So neither extreme works — trusting it
+  everywhere keeps 51 false positives, and the audit's proposed "skip `code` entirely" discards
+  54 genuine constraints including the Python docstring case that
+  `docs/phase-1d-semantic-gate-disposition.md` measured this check to be the only thing catching.
+  The separator is the **region**, not the content type.
+
+  Extraction now covers line comments, block comments and Python docstrings within code, and
+  whole content for prose types. Retention is checked **per item** rather than against a joined
+  blob — previously a directive from item A was satisfied if the string appeared anywhere in item
+  B, so the check could pass for content that was destroyed, and a loss anywhere failed the whole
+  run with no attribution. Items absent from the after-bundle are skipped (selection is not
+  elision, matching `findUnwitnessedItems`).
+
+  | bucket / route | before | after |
+  |---|---|---|
+  | python (file) | 14.98% | **23.14%** |
+  | python (stdin) | 14.88% | **22.66%** |
+  | typescript (file) | 23.38% | **27.33%** |
+
+  **20 of 586 rows changed, none regressed.** TypeScript now has zero code-sourced directives
+  remaining; every surviving `CONSTRAINT_DIRECTIVE_LOST` is a genuine imperative in a comment or
+  docstring, which is the check working rather than misfiring. Landed after §37 deliberately —
+  this check was previously the only thing preventing markdown deletion. See DECISIONS §42.
+
 - **`tokendamper exec` reaches its own gateway — audit C3, L2 (partial)**: `runExecCommand`
   injected a token as `TOKENDAMPER_GATEWAY_TOKEN`, a variable **nothing in `src/` read** and no
   third-party client has heard of, while the server required it on every request. Reproduced by
