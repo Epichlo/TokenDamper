@@ -356,7 +356,22 @@ describe('drift refuses to certify an elision it has no evidence for', () => {
       expect(report.astMeasured).toBe(false);
     });
 
-    it('pins the arithmetic: S_k stays under 0.40 for any heading count, so retention alone cannot fire', () => {
+    it('refuses at both gates once R_struct stops counting the indestructible filepath: marker', () => {
+      // **This assertion was inverted by C1b, and the inversion is the point.**
+      //
+      // As written for C1a it asserted `driftScore <= 0.40` and `retentionGate === 'pass'` for
+      // every heading count, with the comment "which is exactly why the measurement gate has to
+      // be the one that refuses". That was a true description of the arithmetic *at the time*:
+      // `filepath:` is derived from `item.path`, survives every content transform, and left
+      // `R_struct = 1/(N+1)`, so `S_k = 0.4·N/(N+1)` — bounded strictly below the 0.40 gate.
+      //
+      // C1b removed `filepath:` from `R_struct` and stopped an unmeasured ratio from voting, so
+      // for a document whose every heading was destroyed `R_struct = 0` and `S_k = 1.0`. The
+      // retention gate now fires here too. See DECISIONS §40.
+      //
+      // The measurement gate is still asserted, and is still the load-bearing guard, because it
+      // covers the case retention cannot reach at all: a document with **no** content markers to
+      // begin with, where `R_struct` has nothing to measure and defaults out of the score.
       for (const headings of [1, 3, 10, 50]) {
         const body = Array.from({ length: headings }, (_, i) => `## Section ${i}\n\nBody text ${i}.\n`).join('\n');
         const before = bundleOf(docItem(body));
@@ -364,14 +379,34 @@ describe('drift refuses to certify an elision it has no evidence for', () => {
 
         const report = tracker.calculateDrift(before, after);
 
-        // The supremum is 0.40 and it is never exceeded — `>` cannot fire, for any N.
-        expect(report.driftScore).toBeLessThanOrEqual(0.4 + 1e-9);
-        expect(report.retentionGate).toBe('pass');
+        expect(report.astMeasured).toBe(false);
+        expect(report.structMeasured).toBe(true);
+        expect(report.structuralIntegrityRatio).toBe(0);
+        expect(report.driftScore).toBeCloseTo(1.0, 10);
+        expect(report.retentionGate).toBe('refuse');
 
-        // Which is exactly why the measurement gate has to be the one that refuses.
+        // C1a's guard, unchanged and independent of the above.
         expect(report.measurementGate).toBe('refuse');
         expect(report.shouldFallback).toBe(true);
       }
+    });
+
+    it('leaves the measurement gate as the only guard when there is no structure to measure', () => {
+      // Prose with no headings, fences or directives: `R_struct` has an empty before-set, so
+      // under C1b it does not vote, and `R_AST` has no symbols either. Retention therefore
+      // scores 1.0 (nothing to go on) and stays silent by design — attributing this refusal to
+      // "too little survived" would be a claim about evidence that was never gathered.
+      const plain = 'Steps when the queue backs up. Scale the consumer group. Verify the queue.\n';
+      const before = bundleOf(docItem(plain));
+      const after = bundleOf(docItem('[TokenDamper: elided, sha256:deadbeefcafe]'));
+
+      const report = tracker.calculateDrift(before, after);
+
+      expect(report.astMeasured).toBe(false);
+      expect(report.structMeasured).toBe(false);
+      expect(report.retentionGate).toBe('pass');
+      expect(report.measurementGate).toBe('refuse');
+      expect(report.shouldFallback).toBe(true);
     });
 
     it('leaves an item whose witnesses survived alone — the rule adds refusals, it does not invert', () => {
@@ -406,6 +441,177 @@ describe('drift refuses to certify an elision it has no evidence for', () => {
       expect(report.measurementGate).toBe('pass');
       expect(report.retentionGate).toBe('refuse');
       expect(report.shouldFallback).toBe(true);
+    });
+  });
+  /**
+   * C1b — `R_struct` measures content, and a ratio that measured nothing does not vote.
+   *
+   * Two changes that only work together, which is the part worth pinning:
+   *
+   *   1. `R_struct` is computed over `extractContentMarkers`, excluding `filepath:` (from
+   *      `item.path`) and metadata-derived `directive:`. Neither is destructible by a content
+   *      transform, so neither can evidence retention.
+   *   2. A ratio whose before-set is empty is excluded from the score rather than defaulting to
+   *      1.0, with the weight redistributed to the ratio that did measure something.
+   *
+   * (1) alone is **inert**, and the audit that prompted this got that wrong: removing the only
+   * marker an item had leaves the before-set empty, and an empty set defaults `R_struct` back to
+   * 1.0 — the identical free 0.40 by another route. Measured over a frozen 293-file corpus, (1)
+   * alone was byte-identical on all 586 rows.
+   *
+   * Consequence for code: `S_k = 1 - R_AST`, so the maximum symbol loss that can pass the 0.40
+   * gate falls from **66.7%** to **40%**. See DECISIONS §40.
+   */
+  describe('a ratio that measured nothing does not vote', () => {
+    const codeItem = (content: string) =>
+      createContextItem({
+        id: 'code',
+        kind: 'file',
+        content,
+        path: 'src/thing.ts',
+        language: 'typescript',
+        contentType: 'code',
+      });
+
+    const fns = (n: number) =>
+      Array.from({ length: n }, (_, i) => `export function f${i}() {\n  return ${i};\n}`).join('\n');
+
+    it('drops filepath: from R_struct, so it cannot certify a file it never examined', () => {
+      const before = bundleOf(codeItem(fns(4)));
+      const after = bundleOf(codeItem(fns(2) + '\n[TokenDamper: elided]'));
+
+      const report = tracker.calculateDrift(before, after);
+
+      // `filepath:` is still reported among all markers — it is useful diagnostically — but it
+      // is no longer evidence, and with no content markers `R_struct` is out of the score.
+      expect(report.markersBeforeCount).toBeGreaterThan(0);
+      expect(report.contentMarkersBeforeCount).toBe(0);
+      expect(report.structMeasured).toBe(false);
+    });
+
+    it('moves the passing ceiling for code from 66.7% symbol loss to 40%', () => {
+      const at = (keep: number, total: number) => {
+        const after = keep === total ? fns(total) : `${fns(keep)}\n[TokenDamper: elided]`;
+        return tracker.calculateDrift(bundleOf(codeItem(fns(total))), bundleOf(codeItem(after)));
+      };
+
+      // 33% lost: passes, as before.
+      const mild = at(2, 3);
+      expect(mild.astSymbolRetentionRatio).toBeCloseTo(2 / 3, 10);
+      expect(mild.driftScore).toBeCloseTo(1 / 3, 10);
+      expect(mild.retentionGate).toBe('pass');
+
+      // 66.7% lost: the case the audit named — it scored exactly 0.4000 and passed on the
+      // strict `>` because `R_struct` contributed a free 0.40. It now refuses.
+      const severe = at(1, 3);
+      expect(severe.astSymbolRetentionRatio).toBeCloseTo(1 / 3, 10);
+      expect(severe.driftScore).toBeCloseTo(2 / 3, 10);
+      expect(severe.retentionGate).toBe('refuse');
+
+      // 50% lost: also refuses now, and did not before (0.6 * 0.5 = 0.30).
+      const half = at(2, 4);
+      expect(half.driftScore).toBeCloseTo(0.5, 10);
+      expect(half.retentionGate).toBe('refuse');
+    });
+
+    it('still applies the weighted formula when both ratios measured something', () => {
+      const mdItem = (content: string) =>
+        createContextItem({
+          id: 'md',
+          kind: 'file',
+          content,
+          path: 'docs/guide.md',
+          language: 'markdown',
+          contentType: 'markdown',
+        });
+
+      const before = bundleOf(mdItem('# Guide\n\n## Usage\n\nexport function alpha() {}\n'));
+      const after = bundleOf(mdItem('# Guide\n\nexport function alpha() {}\n'));
+
+      const report = tracker.calculateDrift(before, after);
+
+      expect(report.astMeasured).toBe(true);
+      expect(report.structMeasured).toBe(true);
+      // R_AST = 1 (alpha survives), R_struct = 1/2 (one of two headings survives).
+      expect(report.astSymbolRetentionRatio).toBeCloseTo(1, 10);
+      expect(report.structuralIntegrityRatio).toBeCloseTo(0.5, 10);
+      expect(report.driftScore).toBeCloseTo(1 - (0.6 * 1 + 0.4 * 0.5), 10);
+    });
+  });
+
+  /**
+   * `extractSymbols` counts semantic surface, not function-local temporaries.
+   *
+   * The locals rule matched `const|let|var` anywhere, so every `const i`, `const result`,
+   * `const msg` inside a function body was a symbol on par with an exported function — and body
+   * elision is exactly the transform that removes them. Measured on this repository at
+   * `targetReductionRatio: 0.5`: `src/core/engine/index.ts` reported 42 of 63 symbols lost
+   * (66.7%) of which **41 were function-local**, and `src/core/hashing/tokenizer.ts` reported
+   * 9 of 17 (52.9%) of which **all 9 were**. No exported function, type or interface was lost in
+   * either case — `selectElisionRegions` retains signatures by construction.
+   *
+   * Python is the control: it never had a locals rule, its measured symbol loss under the same
+   * elision is 0.0%, and this change does not touch it. See DECISIONS §40.
+   */
+  describe('extractSymbols counts semantic surface, not locals', () => {
+    const tsItem = (content: string) =>
+      createContextItem({
+        id: 'ts',
+        kind: 'file',
+        content,
+        path: 'src/thing.ts',
+        language: 'typescript',
+        contentType: 'code',
+      });
+
+    const SOURCE = [
+      'export const TOP_LEVEL = 1;',
+      'const alsoTopLevel = 2;',
+      '',
+      'export function alpha(): number {',
+      '  const localOne = 10;',
+      '  let localTwo = 20;',
+      '  var localThree = 30;',
+      '  return localOne + localTwo + localThree;',
+      '}',
+      '',
+    ].join('\n');
+
+    it('keeps top-level declarations and drops function-local ones', () => {
+      const symbols = tracker.extractSymbols(bundleOf(tsItem(SOURCE)));
+
+      expect(symbols.has('var:TOP_LEVEL')).toBe(true);
+      expect(symbols.has('var:alsoTopLevel')).toBe(true);
+      expect(symbols.has('fn:alpha')).toBe(true);
+
+      expect(symbols.has('var:localOne')).toBe(false);
+      expect(symbols.has('var:localTwo')).toBe(false);
+      expect(symbols.has('var:localThree')).toBe(false);
+    });
+
+    it('reports no symbol loss when a body is elided but the signature is retained', () => {
+      // The whole point: this is what region elision does, and it should read as zero semantic
+      // loss rather than as the majority of the file being destroyed.
+      const before = bundleOf(tsItem(SOURCE));
+      const after = bundleOf(
+        tsItem(
+          [
+            'export const TOP_LEVEL = 1;',
+            'const alsoTopLevel = 2;',
+            '',
+            'export function alpha(): number {',
+            '  [TokenDamper: 4 code lines elided]',
+            '}',
+            '',
+          ].join('\n'),
+        ),
+      );
+
+      const report = tracker.calculateDrift(before, after);
+
+      expect(report.astSymbolRetentionRatio).toBe(1);
+      expect(report.driftScore).toBe(0);
+      expect(report.retentionGate).toBe('pass');
     });
   });
 });

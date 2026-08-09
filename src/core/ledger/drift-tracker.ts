@@ -186,22 +186,31 @@ export class DriftTracker {
       astSymbolRetentionRatio = preservedSymbols / symbolsBefore.size;
     }
 
+    // Reported for continuity and diagnostics; the *ratio* below deliberately does not use them.
     const markersBefore = this.extractMarkers(beforeBundle);
     const markersAfter = this.extractMarkers(effectiveAfter);
 
+    // `R_struct` measures content structure, and only content structure — C1b.
+    //
+    // It used to be computed over `extractMarkers`, which includes `filepath:` (from `item.path`)
+    // and `directive:` (from `item.metadata.constraintDirectives`). Neither is destructible by a
+    // content transform, so both survive whether content was retained or not. For code, where
+    // `filepath:` is usually the *only* marker, that pinned `R_struct` at exactly 1.0.
+    // `extractContentMarkers` has existed since §28 for precisely this distinction, and its own
+    // doc comment already said these markers "cannot serve as evidence that content was retained".
+    const contentMarkersBefore = this.extractContentMarkers(beforeBundle);
+    const contentMarkersAfter = this.extractContentMarkers(effectiveAfter);
+
     let structuralIntegrityRatio = 1.0;
-    if (markersBefore.size > 0) {
+    if (contentMarkersBefore.size > 0) {
       let preservedMarkers = 0;
-      for (const marker of markersBefore) {
-        if (markersAfter.has(marker)) {
+      for (const marker of contentMarkersBefore) {
+        if (contentMarkersAfter.has(marker)) {
           preservedMarkers++;
         }
       }
-      structuralIntegrityRatio = preservedMarkers / markersBefore.size;
+      structuralIntegrityRatio = preservedMarkers / contentMarkersBefore.size;
     }
-
-    const retentionScore = normAst * astSymbolRetentionRatio + normStruct * structuralIntegrityRatio;
-    const driftScore = Math.max(0.0, Math.min(1.0, 1.0 - retentionScore));
 
     // Did either ratio actually measure something, or is it just its empty-set default?
     //
@@ -209,10 +218,37 @@ export class DriftTracker {
     // "perfectly retained"; read honestly it says "nothing to compare". The difference is
     // invisible in `driftScore` alone, and it is load-bearing: with no symbols and no
     // content-derived markers, `S_k` is 0.0000 no matter what the stages did to the bytes.
-    const contentMarkersBefore = this.extractContentMarkers(beforeBundle);
     const astMeasured = symbolsBefore.size > 0;
     const structMeasured = contentMarkersBefore.size > 0;
     const measured = astMeasured || structMeasured;
+
+    // A ratio that measured nothing does not get a vote — the second half of C1b, and the half
+    // that does the work.
+    //
+    // Dropping `filepath:` above is necessary but *by itself inert*, which is worth stating
+    // because it is not obvious and the audit that prompted this got it wrong: removing the only
+    // marker an item had leaves the before-set empty, and an empty set defaults `R_struct` to
+    // 1.0 — the identical free 0.40, arriving by a different route. Measured, the marker change
+    // alone was byte-identical across all 586 corpus rows.
+    //
+    // So the weight of an unmeasured ratio is redistributed to the one that did measure, rather
+    // than filled in with a default that asserts perfection. This is §33's argument ("`0.0000`
+    // means 'retained everything' and 'found nothing to look at' indistinguishably") applied to
+    // the score instead of to the gate.
+    //
+    // For code this makes `S_k = 1 - R_AST`, so the maximum symbol loss that can pass falls from
+    // 66.7% to 40%. When neither ratio measured, this returns 1.0 and the retention gate stays
+    // silent — that case belongs to the measurement gate (C1a), and having both refuse would
+    // attribute the refusal to the wrong question.
+    const retentionScore =
+      astMeasured && structMeasured
+        ? normAst * astSymbolRetentionRatio + normStruct * structuralIntegrityRatio
+        : astMeasured
+          ? astSymbolRetentionRatio
+          : structMeasured
+            ? structuralIntegrityRatio
+            : 1.0;
+    const driftScore = Math.max(0.0, Math.min(1.0, 1.0 - retentionScore));
     const contentChanged = renderBundle(beforeBundle) !== renderBundle(effectiveAfter);
 
     // Which items were destroyed without leaving any evidence they were retained?
@@ -395,8 +431,31 @@ export class DriftTracker {
         if (match[1]) symbols.add(`type:${match[1]}`);
       }
 
-      // 5. Const/let/var declarations
-      const constRegex = /(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=/g;
+      // 5. Top-level const/let/var declarations.
+      //
+      // **Anchored to the start of a line, which excludes function-local bindings.** This used
+      // to match anywhere, so every `const i`, `const result`, `const msg` inside a function
+      // body counted as a semantic symbol on par with an exported function — and body elision
+      // is precisely the transform that removes them. Measured on this repo at
+      // `targetReductionRatio: 0.5`, on the two files whose drift scores sit closest to the
+      // gate:
+      //
+      //   src/core/hashing/tokenizer.ts   9 of 17 symbols "lost" — all 9 function-local
+      //   src/core/engine/index.ts       42 of 63 symbols "lost" — 41 function-local
+      //
+      // Not one exported function, type or interface was lost in either case, because
+      // `selectElisionRegions` retains signatures by construction. So `R_AST` was reporting
+      // 66.7% semantic loss for a file that had lost no API surface at all, and the audit's
+      // "you can destroy two-thirds of every symbol in a file and pass" was measuring
+      // temporaries inside bodies the caller asked to have elided.
+      //
+      // Python is the control: its extractor never had a locals rule, its measured symbol loss
+      // under the same elision is **0.0%**, and it is unaffected by this change.
+      //
+      // `^` with the `m` flag rather than an indentation test, because in TS and JS a top-level
+      // declaration *is* a column-0 declaration. Indented ones are inside a function, a class or
+      // a block, and are body content.
+      const constRegex = /^(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=/gm;
       while ((match = constRegex.exec(content)) !== null) {
         if (match[1]) symbols.add(`var:${match[1]}`);
       }
