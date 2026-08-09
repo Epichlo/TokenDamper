@@ -5,7 +5,7 @@ Context file for Claude Code. Read this before touching the codebase.
 ## What this is
 
 TokenDamper is a **deterministic context optimization engine** for AI coding assistants
-(Claude Code, Codex, Gemini CLI, Aider). TypeScript, CommonJS, Node >=18, MIT.
+(Claude Code, Codex, Gemini CLI, Aider). TypeScript, CommonJS, Node >=20.19, MPL-2.0.
 It sits between a developer tool and an LLM provider API and reduces token count while
 preserving syntax validity and provider prompt-cache alignment.
 
@@ -17,16 +17,7 @@ weakens determinism or the fallback guarantee defeats the point of the project.
 
 ## Commands
 
-```bash
-npm run build       # tsc -p tsconfig.json
-npm run typecheck   # tsc --noEmit
-npm run lint        # eslint src test
-npm run format      # prettier --check .
-npm test            # vitest run
-npm run test:watch  # vitest
-```
-
-Run the CLI: `node dist/src/cli/main.js` (or `npm start`), bin name `tokendamper`.
+Standard `npm` scripts (see `package.json`). Run the CLI: `node dist/src/cli/main.js` (or `npm start`), bin name `tokendamper`.
 
 ```
 tokendamper optimize <input-file|->
@@ -34,12 +25,6 @@ tokendamper bench [dataset-path]
 tokendamper exec -- <command>
 tokendamper mcp
 ```
-
-Key `optimize` flags: `--max-input-tokens`, `--max-output-tokens`,
-`--target-reduction-ratio`, `--max-latency-ms`, `--risk-tolerance`, `--preserve-kinds`,
-`--max-debt`, `--max-drift`, `--planner-mode`, `--minimum-confidence`, `--trace-output`,
-`--diff`, `--diff-html <path>`, `--report-json <path>`, `--config <path>`, `--quiet`,
-`--language <name>`, `--input-name <name>`.
 
 **Flags are command-scoped and enforced (DECISIONS §30).** `SUPPORTED_FLAGS` in
 `src/cli/main.ts` is keyed by what `runCli` actually consumes; anything else is a parse error
@@ -79,18 +64,11 @@ Raw Input
 | Path | Role |
 |---|---|
 | `src/core/model/` | Frozen immutable domain model. Source of truth. |
-| `src/core/planner/` | `index.ts` (mode selection), `knapsack.ts` (0/1 solver, DP + greedy), `cache-aware.ts` (1,024-token block quantization) |
-| `src/core/engine/` | Orchestration: plan → stages → validate → fallback → trace |
-| `src/core/stage-registry/` | Only module allowed to import concrete stages |
 | `src/core/validation/` | Validators + AST-lite validators under `validation/ast/` (ts, python, json) |
 | `src/core/fallback/` | Fallback-to-raw path |
 | `src/core/hashing/` | `TokenHasher` (`<BLOCK_HASH:sha256>` placeholders), tokenizer |
 | `src/core/ledger/` | `ConfidenceLedger`, `DebtTracker` (D_k), `DriftTracker` (S_k) |
-| `src/core/topology/` | `git-inspector.ts`, `dependency-graph.ts`, `topology-scorer.ts` |
-| `src/stages/` | `cleanup/session-dedup`, `cleanup/constraint-preservation`, `pruning/topology-pruner`, `compression/token-hashing`, `compression/delta-compression` |
 | `src/adapters/mcp/` | stdio JSON-RPC 2.0 server + `tools.ts` (`TOOL_DEFINITIONS`) |
-| `src/gateway/` | Local proxy (`server.ts`, `proxy.ts`, `session-store.ts`, `exec.ts`) |
-| `src/bench/` | Benchmark harness, fixtures, `evaluator.ts` (has `computeTokenSimilarity`) |
 | `tokendamper-benchmark/` | Python harness comparing TokenDamper vs. Headroom |
 
 Knapsack-mode stage order (from `src/core/planner/index.ts`):
@@ -101,10 +79,6 @@ runs via the CLI or MCP paths (both call `core/engine.optimize()`, which only ex
 `plan.stageIds`). It runs only under the `session_dedup` planner mode, which the Gateway
 pins via `config.planner.defaultMode`; that mode plans exactly `['cleanup:session-dedup']`
 and takes precedence over budget-derived knapsack selection.
-
-MCP tools: `optimize_context`, `rehydrate_context`, `get_session_metrics`,
-`get_optimization_trace`. Resources: `tokendamper://config`,
-`tokendamper://session/{sessionId}`.
 
 ## Invariants — do not break these
 
@@ -317,8 +291,6 @@ scoring, MMR, AST folding and Prometheus metrics on top of a pipeline that curre
 
 ## Conventions
 
-- TypeScript strict, CommonJS output to `dist/`. Prettier + ESLint enforced in CI
-  (`.github/workflows/ci.yml`).
 - Tests: vitest, under `test/unit/` and `test/integration/`. There is a property/fuzz
   suite (`test/unit/fuzz-diff-debt.test.ts`) and stress tests
   (`knapsack-stress`, `m2_stress`, `bench-table-stress`) — extend these rather than
@@ -382,10 +354,6 @@ scoring, MMR, AST folding and Prometheus metrics on top of a pipeline that curre
   Anything needing exact token boundaries (e.g. `cache_control` placement) still cannot be
   exact until `createTiktokenAdapter` is wired to a real encoder — which is now a one-line
   change to `DEFAULT_TOKENIZER`.
-- Benchmark latency numbers are **not** apples-to-apples: TokenDamper is timed through a
-  Node process spawn via `subprocess.run()`, Headroom via an in-process Python call.
-- Headroom's `target_ratio` is a soft hint, not an enforced budget — don't compare
-  target-adherence naively.
 - Several items in the roadmap's Phase 1 were already fixed in the codebase (fallback
   output bug, unbounded `traceStore`, missing SIGINT/SIGTERM, gateway body-size cap).
   Verify against source before implementing anything from a planning doc.

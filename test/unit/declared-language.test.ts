@@ -113,11 +113,20 @@ describe('a declaration sets language and contentType together', () => {
     expect(selectValidator(item)?.language).toBe('python');
   });
 
-  it('pins why the two fields must move together: contentType alone picks TypeScript', () => {
-    // `CONTENT_TYPE_VALIDATORS.code` is the TypeScript validator, so a `code` tag without a
-    // language is how Python gets checked by the wrong checker. This is the trap
-    // `docs/phase-4b-pathless-code-scope.md` §6.3 names; the declaration route avoids it by
-    // never setting one field without the other.
+  it('pins why the two fields must move together: contentType alone selects nothing', () => {
+    // The hazard changed shape in Phase C; it did not go away, which is why this pin stays.
+    //
+    // It used to be *wrong* validation: `CONTENT_TYPE_VALIDATORS.code` was the TypeScript
+    // validator, so a `code` tag without a language was how Python got checked by the wrong
+    // checker — the trap `docs/phase-4b-pathless-code-scope.md` §6.3 named. That mapping is
+    // now `null`, because `code` is a *family*, not a language, and lexing the whole family
+    // as TypeScript invented findings rather than weakening them (perl 39/40, tcl 30/40,
+    // shell 22/40).
+    //
+    // So a `code` tag without a language is now *absent* validation instead: the item
+    // reports `validated: false` and appears on `trace.astCoverage` rather than arriving as
+    // a confident pass (DECISIONS §23). Either way the tag alone is not enough, and the
+    // declaration route avoids it by never setting one field without the other.
     const untagged = createContextItem({
       id: 'no-language',
       kind: 'file',
@@ -125,7 +134,7 @@ describe('a declaration sets language and contentType together', () => {
       content: PY,
     });
 
-    expect(selectValidator(untagged)?.language).toBe('typescript');
+    expect(selectValidator(untagged)).toBeNull();
   });
 
   it('does not harvest Python comments as markdown headings', () => {

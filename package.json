@@ -4,7 +4,7 @@
   "private": false,
   "description": "Universal context optimization for AI coding assistants.",
   "engines": {
-    "node": ">=18.0.0"
+    "node": "^20.19.0 || ^22.13.0 || >=24"
   },
   "repository": {
     "type": "git",
@@ -21,7 +21,7 @@
     "anthropic",
     "openai"
   ],
-  "license": "MIT",
+  "license": "MPL-2.0",
   "type": "commonjs",
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",

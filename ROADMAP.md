@@ -1,19 +1,47 @@
 # TokenDamper Product Roadmap — v1.1.0 → v2.0.0
 
-**Baseline:** v1.1.0 (current, shipped — tag `v1.1.0` @ `807f6f0`, see `CHANGELOG.md`). All
-items below were checked against the actual source (`repomix-output.xml`), not assumed from
-a prior model's summary — file/function names cited are real, and known-already-shipped items
-have been excluded (see Appendix). **Correction:** this document previously listed v1.0.3 as
-the current baseline and treated v1.1.0 as upcoming work; v1.1.0 has since shipped and is
-tagged. `HEAD` currently carries commits beyond the `v1.1.0` tag that are not yet tagged or
-released — check `git log v1.1.0..HEAD` before treating anything past the tag as shipped.
+**Baseline:** v1.1.0 (shipped — tag `v1.1.0` @ `807f6f0`, see `CHANGELOG.md`). `HEAD` carries
+**51 commits** beyond the tag that are not yet tagged or released — check `git log v1.1.0..HEAD`
+before treating anything past the tag as shipped. All items below were checked against actual
+source, not assumed from a prior draft; file/function names cited are real, and
+known-already-shipped items have been excluded (see Appendix).
+
+> ### ⛔ Feature work is gated. Read this first.
+>
+> A full audit on **2026-08-07** (`max_audit.md`, commit `f93c385`) measured the shipped
+> pipeline through all three entry modes. Its findings invalidate the *preconditions* of every
+> release below, not merely their priority:
+>
+> - **The 0/1 knapsack solver is unreachable on every shipping path** (H5). `createContextBundle`
+>   emits a one-item bundle for CLI, MCP and bench; prefix locking pins item 0; the solver always
+>   selects it. `planner/index.ts:13-59` ignores its `_stageCatalog` argument entirely and returns
+>   a hardcoded four-element list. **v1.2.0's BM25 scorer and MMR refinement, v1.3.0's
+>   `cache_control` placement, and Milestone 8 all build on that solver** and would therefore
+>   produce no observable change on any output the product can currently emit.
+> - **A markdown document is deleted whole and every gate reports green** (C1). Reproduced:
+>   233 bytes → a 72-byte marker, `fallbackUsed: false`, `S_k = 0.2667`, `unwitnessedItems: []`.
+>   Irreversible on the CLI.
+> - **The shipped benchmark reports 0.0% reduction and 40% fallback while its regression suite
+>   passes** (H3), because the suite asserts against a private inline fixture set the product does
+>   not ship. There is currently no instrument that can detect total failure.
+>
+> `CLAUDE.md` has carried the instruction *"Do this before roadmap feature work"* for some time.
+> This document now encodes it: **v1.2.0 does not start until the v1.1.x remediation track lands
+> and the Scope Decision Gate is answered.** Numbering of v1.2.0–v2.0.0 is unchanged so existing
+> cross-references stay valid, but their **scope is provisional** pending those decisions.
 
 ```
-v1.1.0 (Current Baseline, shipped — tag @ 807f6f0)
- └── v1.2.0: Context Selection Quality & Redundancy Elimination
-      └── v1.3.0: AST Code Folding ("Fast" vs "Deep") & Cache Alignment
-           └── v1.4.0: Granular Sub-Query Re-hydration & MCP Tool Extension
-                └── v2.0.0: Enterprise Gateway, Remote MCP & Guardrails
+v1.1.0 (Baseline, shipped — tag @ 807f6f0)
+ │
+ ├── v1.1.1: Green Tree & Correct Metadata          ← hours   (BLOCKING)
+ ├── v1.1.2: Data Loss & Corruption                 ← days    (BLOCKING)
+ ├── v1.1.3: Honest Instruments                     ← days    (BLOCKING)
+ └── ▼ Scope Decision Gate  ─ outcomes rewrite everything below ─
+      │
+      └── v1.2.0: Context Selection Quality & Redundancy Elimination   [gated on H5]
+           └── v1.3.0: AST Code Folding ("Fast" vs "Deep") & Cache Alignment  [re-scoped]
+                └── v1.4.0: Granular Sub-Query Re-hydration & MCP Tool Extension [gated on M5b]
+                     └── v2.0.0: Enterprise Gateway, Remote MCP & Guardrails  [gated on C3/H1]
 ```
 
 ---
@@ -52,7 +80,90 @@ description under "Pluggable `TokenizerAdapter` architecture."
 
 ---
 
+## v1.1.x — Audit Remediation Track — **BLOCKING**
+
+Ordered by (harm prevented) ÷ (effort), with dependency edges made explicit. Finding IDs refer
+to `max_audit.md`; that document holds the evidence and reproduction commands, and is not
+restated here. Every item marked *verified* was independently reproduced against a scratch build
+on 2026-08-08.
+
+### v1.1.1 — Green Tree & Correct Metadata (hours)
+
+**Why first:** the working tree is red. Every fix below this line is unverifiable until it is
+green, because a failing baseline cannot distinguish new breakage from pre-existing breakage.
+The audit itself had to build to a scratch `outDir` for this reason.
+
+| # | Finding | Work |
+|---|---|---|
+| 1 | **M2** — Phase C is half-migrated | `npx vitest run` → **2 failed, 37 passed** (*verified*). `src/core/validation/ast/index.ts` sets `CONTENT_TYPE_VALIDATORS.code = null` (correct — a TS lexer scores 39/40 false positives on Perl), but the two hazard-pinning tests still assert the old behaviour: `test/unit/declared-language.test.ts:128`, `test/unit/bench/evaluator.test.ts:151`. Update both to pin the *new* trap. Fix the three stale doc comments (`constructors.ts:90-92`, `:650-654`, `docs/phase-4b-pathless-code-scope.md` §6.3). **Rebuild `dist/`** — it still contains `code: tsValidator`, so `npm start` and the installed binary contradict the source. |
+| 2 | **M3** — published license is wrong | `package.json:24` says `MIT`; `LICENSE:1` says Mozilla Public License 2.0 (*verified*). npm surfaces the `license` field as authoritative, so consumers read MIT and receive copyleft obligations. Set `"license": "MPL-2.0"`, fix `CLAUDE.md`'s "MIT", drop the README's "All rights reserved" sitting above an open-source grant. Record the MIT→MPL change in `DECISIONS.md`, which never mentions it. |
+| 3 | **M10** — `bench` is broken for every installed user | `DEFAULT_HUMANEVAL_PATH` resolves against `process.cwd()`, and `package.json` `files` is `["dist","README.md",…]` with no `test/` (*verified*). A documented top-level command throws outside the repo. Ship the fixtures and resolve against `__dirname`. |
+| 4 | **M4a** — stale README warning | The README still warns that the Gateway bypasses validation. False since Phase 1.0b. Delete it. *(The rest of M4 is deferred to the Scope Decision Gate — its remaining claims cannot be rewritten honestly until those decisions land.)* |
+
+### v1.1.2 — Data Loss & Corruption (days)
+
+| # | Finding | Work |
+|---|---|---|
+| 5 | **C1** — markdown deleted whole, all gates green | **The only finding that silently destroys user data.** Two changes: (a) `findUnwitnessedItems` (`drift-tracker.ts:315-321`) tests the **before** item for evidence — it must test the **surviving** witness set, so per-item `R_struct_content = 0` with `astMeasured: false` is a refusal regardless of what existed before; (b) drop `filepath:` from `R_struct` — `extractContentMarkers` already excludes it and is currently used only for the `structMeasured` boolean. Add a regression test that a markdown document survives. **⚠ This moves every published reduction number in the repo.** Freeze the corpus per `CLAUDE.md` first, and sequence it *after* v1.1.1 so you are moving from a green, rebuilt baseline. |
+| 6 | **C2** — Gateway corrupts non-ASCII bodies | `server.ts:102` is `body += chunk` over raw Buffers (*verified*), so a multi-byte sequence split across a chunk boundary becomes two U+FFFD. This is the identical defect class Phase B (DECISIONS §35) just closed on the CLI, applied to the adapter that reads a socket instead of a disk — and worse there, because the mangled bytes are forwarded to a provider. Accumulate `Buffer[]`, concat on `end`, decode once, then apply the CLI's own round-trip check. Closes **L3** (O(n²) `byteLength` recompute) for free. |
+| 7 | **M8 + M9** — env branches and credential echo | *Not in the audit's own recommended order; promoted here.* `TOKENDAMPER_MOCK_UPSTREAM` makes the proxy return the request as if it were the provider's completion; `NODE_ENV === 'test'` bypasses the missing-credentials 401. Response headers are built by spreading the **request's** headers, so `authorization` / `x-api-key` come back out — one env var from a live credential leak. Move both seams into `ProxyHandlerOptions` (which already exists and carries `upstreamOpenAiUrl`) and construct response headers explicitly. |
+
+### v1.1.3 — Honest Instruments (days)
+
+Nothing after this point is trustworthy until this lands: today's green signals come from checks
+that did not run.
+
+| # | Finding | Work |
+|---|---|---|
+| 8 | **H3** — the regression suite cannot detect total failure | `test/integration/bench.test.ts` Test 2 builds a private two-fixture set inline; Test 3 loads `humaneval` only — the one dataset whose fallback rate is 0 *because nothing happens* (*verified*). Meanwhile `codexglue` sits at 0.8 against a `maxFallbackRate: 0.0` baseline and is never run. Point both at `loadBenchmarkFixtures()`. Let them fail. Record measured truth as the baseline and ratchet. **Must follow C1**, or C1's pre-fix numbers get baked in permanently. |
+| 9 | **M5a** — MCP's default call is a guaranteed no-op | *Not in the audit's own recommended order; promoted here — highest value-per-effort item in the audit.* `optimize_context`'s `inputSchema` has no `targetReductionRatio`, and nothing tells a caller a budget is mandatory. `maxInputTokens` *is* wired (`tools.ts:147-150`), so this is ~10 lines of schema plus a description that states the requirement — turning an entire advertised entry mode from no-op to functional. |
+| 10 | **M5b** — dead rehydration path | `/<ELIDED:\s*ref=…>/` (`tools.ts:210`) cannot match `[TokenDamper Elided: ref=…]` (`stages/cleanup/session-dedup.ts:103`) (*verified*). Session-store rehydration through MCP has never worked. Fix the pattern or delete the path — shipping dead code that looks live is worse than either. **Blocks v1.4.0**, which extends this exact tool. |
+| 11 | **M6** — the explainability trace does not explain | `trace/index.ts:24-29` hardcodes `durationMs: 0` and discards every stage's `metrics` and `notes`. Carry them through; measure real durations; fix the pruner's factually false *"All items fit within token budget"* note (it reports that for a 4,600-token file under a 10-token budget). For a product whose thesis is auditability this is the least trustworthy surface in the system. |
+
+### ▼ Scope Decision Gate — decisions, not tasks (weeks)
+
+These four questions determine whether v1.2.0–v2.0.0 are buildable as written. **Answer them
+before scheduling any of it.** Each is a decision with a legitimate "narrow the product" answer.
+
+| Q | Finding | The decision |
+|---|---|---|
+| **A** | **H5** — knapsack unreachable | Give the CLI a multi-item ingestion path (directory, manifest, conversation file) so the solver has a job — **or** move `planner/knapsack.ts`, `planner/cache-aware.ts`, `topology/git-inspector.ts`, `topology/dependency-graph.ts` and `topology/topology-scorer.ts` behind an explicitly labelled "not yet reachable" boundary. ~1,000 LOC and the whole of invariant 6 currently affect no output. **This answer decides whether v1.2.0 and Milestone 8 exist at all.** |
+| **B** | **C3 + H1** — the Gateway | Not "fix C3." The `exec` token handoff is broken end-to-end (`TOKENDAMPER_GATEWAY_TOKEN` is written at `exec.ts:58` and read **nowhere** in `src/` — *verified*) **and** the mode saves 0 bytes on realistic traffic, because Phase A correctly concluded a marker the model cannot resolve is deletion, not reference. Either find a transform that survives the gates, or label the Gateway experimental and stop leading the README with it. **Decides v2.0.0's premise** and whether C4/M7 are worth doing. |
+| **C** | **H4** — four documented knobs do nothing | `--target-reduction-ratio 0.01` and `0.99` produce **byte-identical** 4,408-byte output (*verified*); the planner reads it only as `> 0` (`planner/index.ts:40`). `--max-debt`, `--max-output-tokens`, `--max-latency-ms` and `riskTolerance` are read by nothing, or by the bench table renderer only. Implement them as real dials or remove them from the surface. DECISIONS §30 established the principle; it was applied to *which command accepts a flag*, never to *whether the accepting command reads it*. |
+| **D** | **H2** — 3 of 19 languages work | Twelve of nineteen recognised extensions cannot produce a non-zero reduction under any flag combination, because `selectElisionRegions` returns `[]` outside TypeScript/Python and `extractSymbols` yields nothing for Go/Rust/C/shell/SQL/CSS. Three languages is a defensible v1. Nineteen in `isCodeExtension` and `DeclaredLanguage` is not, because it invites a user to declare a language and receive a mute 0%. Narrow the accepted set, or report *why* a declared language cannot be optimized. |
+
+**Follow-on work, sequenced by those answers:**
+
+- **H6** — scope constraint extraction by content type; make retention per-item. 60% of all
+  fallbacks involve `CONSTRAINT_DIRECTIVE_LOST`, a nine-word substring match over the joined
+  bundle. ⚠ **C1 must land first:** this check is currently the *only* thing protecting markdown
+  from deletion — this repo's own README survives solely because it contains "never" and "must".
+- **C4 + M7** — preserve content shape on Gateway items (structured `tool_result` blocks are
+  flattened to strings, producing API-invalid payloads); fix the `continue`-vs-positional-`map`
+  index skew and the never-mapped-back Anthropic `system` item; measure savings against the bytes
+  on the wire rather than the newline-joined render. **Only if B keeps the Gateway.** Currently
+  masked by H1, which is luck, not safety.
+- **M1 + M4b + M11** — docs last, once A–D are answered. Rename "syntax validity" to
+  "bracket/quote integrity" (the TS validator passes `const x = ;` and plain English prose);
+  correct the README's remaining untrue claims; retire the phase narratives to git history.
+  Docs currently run **4.1:1** against source.
+
+---
+
 ## v1.2.0 — Context Selection Quality & Redundancy Elimination
+
+> **⛔ Blocked on Scope Decision Gate — question A (H5).** Every deliverable in this release
+> operates on `scoreBundleTopology()` and `solve01Knapsack()`, both of which are **unreachable on
+> every shipping path**: `createContextBundle` (`constructors.ts:142`) emits `freeze([item])` — a
+> one-item bundle — for CLI, MCP and bench; `applyCacheAwarePrefixLocking` pins everything inside
+> the first 1,024 tokens; `solve01Knapsack` places pinned items outside the candidate set and
+> always selects them. The only multi-item bundle producer in `src/` is `gateway/proxy.ts`, and the
+> Gateway pins the planner to `session_dedup`, which never plans the pruner.
+>
+> A BM25 scorer and an MMR refinement pass added on top of that would be **correct code with no
+> observable effect on any output the product can emit** — the same condition the audit found in
+> ~1,000 existing LOC. Do not start this release until question A is answered. If the answer is
+> "boundary it off", this release is cancelled rather than deferred.
 
 **Core objective:** upgrade context selection with hybrid relevance scoring, and eliminate pairwise
 redundancy *without* breaking 0/1 knapsack's optimal-substructure guarantee.
@@ -89,6 +200,25 @@ $$\text{Score}(i \mid S) = \frac{V_i - \max_{j \in S}(M_{ij} \cdot V_j)}{w_i}$$
 ---
 
 ## v1.3.0 — AST Code Folding ("Fast" vs "Deep") & Cache Alignment
+
+> **⚠ Re-scoped by audit. Fast mode is substantially already shipped.** This release was written
+> as though body folding did not exist. It does: `selectElisionRegions` (`elision/regions.ts:382-384`)
+> already folds function bodies on TypeScript, JavaScript and Python, and `FUNCTION_HEADER`
+> (`regions.ts:50`) is precisely the "distinguishes top-level declarations from control-flow
+> blocks" discriminator this release schedules as new work — it is combined with
+> `CONTROL_FLOW_HEADER` to exclude `if`/`try`/class bodies. The audit rates this among the
+> project's genuinely good work (`max_audit.md` §4.4). **Re-derive Fast mode as an increment over
+> `regions.ts`, not as a new subsystem**, and measure what is missing before scheduling it.
+>
+> Two further corrections:
+> - **`cache_control` injection is blocked on question A (H5)**, same as v1.2.0 — it runs "after
+>   prefix locking", and prefix locking is unreachable.
+> - **The `R_AST = 1.0` target below is not the guarantee it appears to be.** Per audit §3.2,
+>   `R_AST` defaults to 1.0 on an empty symbol set, and `R_struct` is pinned at 1.0 for code
+>   because its only marker is `filepath:`, which elision cannot touch. The maximum symbol loss
+>   that can pass the gate today is **66.7%** — measured live: `src/core/engine/index.ts` reduced
+>   76% at `S_k = 0.3934`, i.e. 65.6% of its symbols destroyed, gate passed. State folding's
+>   retention target against a **post-C1** metric, or it certifies nothing.
 
 **Core objective:** dual-mode context compression, and exact provider prompt-cache alignment where the tokenizer allows it.
 
@@ -135,6 +265,16 @@ export function processOrder(order: Order): Promise<Result> {
 
 ## v1.4.0 — Granular Sub-Query Re-hydration & MCP Tool Extension
 
+> **⛔ Blocked on M5b (v1.1.3, item 10).** This release adds a `query` field to
+> `rehydrate_context`. That tool's session path has **never worked**: its regex
+> `/<ELIDED:\s*ref=([A-Za-z0-9_-]+)[^>]*>/` (`tools.ts:210`) cannot match the marker the product
+> actually emits, `[TokenDamper Elided: ref=… bytes=… kind=…]`
+> (`stages/cleanup/session-dedup.ts:103`) — different delimiters, different prefix. Extending a
+> tool whose base path is dead code produces a second dead path. Fix the base first, then design
+> the targeted-match response shape (which is a genuinely different return type from full
+> rehydration, and the note below is right to insist it be designed rather than fall out of adding
+> a field).
+
 **Core objective:** interactive partial context un-elision via MCP.
 
 ### Extended `rehydrate_context` tool schema
@@ -162,6 +302,19 @@ Update `TOOL_DEFINITIONS` in `src/adapters/mcp/tools.ts` — this matches the to
 
 ## v2.0.0 — Enterprise Gateway, Remote MCP & Proxy Guardrails
 
+> **⛔ Blocked on Scope Decision Gate — question B (C3 / H1).** Two of three deliverables here are
+> Gateway work, and the Gateway currently **cannot be started by its documented command** and
+> **saves nothing when it is**. `tokendamper exec` injects `TOKENDAMPER_GATEWAY_TOKEN` into the
+> child's environment; no code in `src/` reads it, and the server 401s every request that lacks
+> it (*verified*). It also sets `HTTP_PROXY`/`HTTPS_PROXY` while implementing neither absolute-form
+> request URIs nor `CONNECT` tunnelling. Measured cross-turn dedup on live sockets: **0 bytes
+> saved, 100% fallback** across prose, JSON and TypeScript.
+>
+> A Prometheus `/metrics` endpoint on a 0%-saving pass-through instruments nothing — and per **M7**
+> the numbers it would export (`rawTokens`/`optimizedTokens` from `summary.tokenEstimate`) measure
+> the newline-joined item render, not the bytes actually forwarded. **Fix the measurement (M7)
+> before exporting it.** Answer question B before scheduling any of this release.
+
 **Core objective:** enterprise-grade proxy integration and multi-agent remote access.
 
 - **MCP over Streamable HTTP/SSE:** extend `McpStdioServer` (`src/adapters/mcp/server.ts`) to support SSE and HTTP POST transports alongside stdio — enables remote containers, Cursor, Claude Code, and cloud agents over the network. (Note: this is distinct from the Gateway's existing upstream-SSE-passthrough — that's unrelated proxy behavior already in place, not MCP transport.)
@@ -172,26 +325,76 @@ Update `TOOL_DEFINITIONS` in `src/adapters/mcp/tools.ts` — this matches the to
 
 ## Version Summary
 
-| Release | Focus | Key Deliverable | Benchmark Target |
-|---|---|---|---|
-| v1.0.3 | Prior release | 0/1 Knapsack, AST validators, debt/drift ledgers | Current test suite |
-| v1.1.0 | **Baseline (shipped)** | Heuristic tokenizer, `configSchemaVersion`, Git TTL cache | Sub-ms cache lookups |
-| v1.2.0 | Selection quality | BM25 + graph hybrid scorer, dual-path MMR (DP refinement / live greedy) | `<10ms` pipeline selection |
-| v1.3.0 | Folding & cache | Fast (zero-dep) vs Deep (AST) mode, `cache_control` (exact/best-effort) | `<1ms` Fast / `~15ms` Deep |
-| v1.4.0 | Retrieval | `rehydrate_context` with sub-query matching | Targeted line extraction |
-| v2.0.0 | Ecosystem | Streamable HTTP/SSE MCP, LiteLLM plugin, Prometheus metrics | High-throughput multi-agent proxy |
-| Milestone 8 | Caching | MCP Schema Deduplication & Cache-Aligned Knapsack | 100% Provider Cache Hit Rates |
-| Milestone 9 | Guardrails | Agent Loop Circuit Breaking & Critical Atom Recall Tracking | $S_k \le 0.40$ enforcement |
+| Release | Focus | Key Deliverable | Benchmark Target | Status |
+|---|---|---|---|---|
+| v1.0.3 | Prior release | 0/1 Knapsack, AST validators, debt/drift ledgers | Current test suite | Shipped |
+| v1.1.0 | **Baseline (shipped)** | Heuristic tokenizer, `configSchemaVersion`, Git TTL cache | Sub-ms cache lookups | Shipped @ `807f6f0` |
+| **v1.1.1** | **Green tree** | M2 Phase C migration, M3 license, M10 bench packaging, M4a README | `npm test` green; `dist` rebuilt | **Next — blocking** |
+| **v1.1.2** | **Data loss** | C1 drift measurement gate, C2 Gateway `Buffer`, M8/M9 env & header leak | Markdown survives; Gateway byte-identity | **Blocking** |
+| **v1.1.3** | **Honest instruments** | H3 bench baseline, M5a MCP budget, M5b rehydrate regex, M6 trace | Suite can fail; trace carries real metrics | **Blocking** |
+| **Gate** | **Scope decisions** | A: H5 knapsack reachability · B: C3/H1 Gateway · C: H4 dead knobs · D: H2 languages | Decisions recorded in `DECISIONS.md` | **Blocking** |
+| v1.2.0 | Selection quality | BM25 + graph hybrid scorer, dual-path MMR (DP refinement / live greedy) | `<10ms` pipeline selection | ⛔ Gated on A |
+| v1.3.0 | Folding & cache | Fast (zero-dep) vs Deep (AST) mode, `cache_control` (exact/best-effort) | `<1ms` Fast / `~15ms` Deep | ⚠ Re-scope; Fast largely shipped |
+| v1.4.0 | Retrieval | `rehydrate_context` with sub-query matching | Targeted line extraction | ⛔ Gated on M5b |
+| v2.0.0 | Ecosystem | Streamable HTTP/SSE MCP, LiteLLM plugin, Prometheus metrics | High-throughput multi-agent proxy | ⛔ Gated on B |
+| Milestone 8 | Caching | MCP Schema Deduplication & Cache-Aligned Knapsack | 100% Provider Cache Hit Rates | ⛔ Gated on A |
+| Milestone 9 | Guardrails | Agent Loop Circuit Breaking & Critical Atom Recall Tracking | $S_k \le 0.40$ enforcement | ⚠ Re-derive after C1 + H6 |
+
+### Measured starting position (2026-08-07, `f93c385`)
+
+The numbers any of the above will be judged against. Source: `max_audit.md` Appendix B.
+
+| Metric | Value |
+|---|---|
+| CLI reduction, own TS corpus @ `trr=0.5` | **14.04%** aggregate — 42 of 64 files (65.6%) at exactly 0% |
+| Shipped `bench`, all fixtures | **0.0%** reduction, **40%** fallback, "100% syntax pass" |
+| Gateway, cross-turn dedup | **0 bytes saved**, 100% fallback |
+| Languages reaching non-zero reduction | **3** of 19 declared (+ markdown, which is C1, not a feature) |
+| Leading fallback cause | `CONSTRAINT_DIRECTIVE_LOST` — 24 of 40 |
+| Determinism / CLI fail-open byte-identity | ✅ holds |
 
 ---
 
 ## Milestone 8: MCP Schema Deduplication & Cache Alignment
+
+> **⛔ Blocked on Scope Decision Gate — question A (H5).** "Cache-Aligned 0/1 Knapsack Allocation"
+> is invariant 6, and invariant 6 is **unimplemented in practice**: `applyCacheAwarePrefixLocking`
+> and `solve01Knapsack` are exercised only by unit tests that build multi-item bundles via
+> `createBundleFromItems`, a function no production code calls. This milestone cannot raise a cache
+> hit rate that no shipping path can currently affect.
+>
+> Also note the exactness precondition: 1,024-token quantization is only meaningful with
+> `isExact: true`, which requires a caller-supplied `cl100k_base` encoder. The default
+> `EnhancedHeuristicTokenizer` has 24% mean absolute error — **worse than the `ceil(len/4)`
+> estimate it replaced** (17%). Boundary placement under the default is approximate by
+> construction.
 
 **Core objective:** Ensure provider cache hit rates via strict prefix pinning.
 - **MCP Schema Deduplication:** Convert tool definitions into deterministic, sorted JSON structures at prompt position 0. Use content-addressed hashes to anchor MCP schemas without blowing up context windows or cache blocks.
 - **Cache-Aligned 0/1 Knapsack Allocation:** Evaluate item weights in 1,024-token quantizations. Ensure items selected by the knapsack solver preserve exact prefix horizon ordering.
 
 ## Milestone 9: Safety & Drift Guardrails
+
+> **⚠ Must be re-derived after C1 and H6 — do not build it as written.** Both deliverables below
+> extend subsystems the audit found defective in ways this milestone would compound:
+>
+> - **The composite $S_k$ with a new $w_{\text{atom}} \cdot R_{\text{atom}}$ term adds a third
+>   weight to a formula whose second term does no work.** For code, $R_{\text{struct}}$ is pinned
+>   at 1.0 — its only marker is `filepath:`, derived from `item.path`, which elision cannot touch —
+>   so 40% of the metric is a free constant. That is the arithmetic behind C1. Fix
+>   $R_{\text{struct}}$ (drop `filepath:`, use the already-existing `extractContentMarkers`) before
+>   adding a term; otherwise the new weight dilutes the one ratio that measures anything.
+> - **"Verify imperative directives are never lost" already ships, and it is the leading cause of
+>   0% reduction.** `CONSTRAINT_DIRECTIVE_LOST` is a nine-word substring match
+>   (`must|must not|never|always|only if|do not|required|except when|make sure to|critical`) run
+>   over the joined bundle with no per-item attribution — it accounts for **24 of 40 fallbacks** on
+>   the repo's own corpus, firing on `required: ['rawInput']` in a JSON schema literal and on
+>   TypeScript type members. Formalizing it as `TD_PRESERVE` without first scoping it by content
+>   type and making retention per-item (H6) hardens a defect into a spec.
+>
+> The **Agent Loop Circuit Breaking** half is unaffected by the above and can proceed independently
+> — though note `DebtTracker` is arithmetically inert on the CLI today: with no ledger, maximum
+> achievable $D_k$ is **35** against a default threshold of **75** (*verified: `debtScore: 35`*).
 
 **Core objective:** Stop invisible runaway token usage and prevent semantic information loss.
 - **Agent Loop Circuit Breaking:** Integrate a circuit breaker into `DebtTracker`. If $N \ge 5$ consecutive turns show near-identical tool output signatures with high token volume, throttle or warn to prevent runaway costs.
@@ -210,3 +413,35 @@ taking a prior draft at face value, and are already excluded/corrected above:
 - `rehydrate_context`'s example payload corrected to match the tool's real parameters (`text`/`sessionId`), replacing an invented `blockHash` field.
 - The MMR mechanism went through three iterations: (1) "modify the knapsack value function directly" — rejected, incompatible with DP's independent-value assumption; (2) "static pre-knapsack reranking pass" — rejected, creates a circularity where items are penalized against a hypothetical selected-set that may not match the solver's actual output; (3) **adopted:** path-specific handling — post-selection refinement for DP, live marginal recomputation for greedy — with the loop-to-convergence and pinned-item exclusion requirements folded in above.
 - **Baseline correction:** this document previously stated `Baseline: v1.0.3 (current)` and listed the entire v1.1.0 section as upcoming work. A ground-truth check against `git tag`, `CHANGELOG.md`, and source confirmed `v1.1.0` is tagged (`807f6f0`) and shipped — `configSchemaVersion` (`src/config/types.ts`), the Git workspace TTL cache (`src/core/topology/git-inspector.ts`), and a heuristic tokenizer are all present in source. Baseline corrected to v1.1.0 and the v1.1.0 section marked shipped rather than removed, since its optional tiktoken/`cl100k` adapter sub-item is not independently confirmed.
+
+### Revision 2026-08-08 — audit remediation track inserted
+
+Basis: `max_audit.md` (2026-08-07, commit `f93c385`), whose load-bearing findings were
+independently reproduced against a scratch build before this document was changed. What changed
+and why:
+
+- **A blocking v1.1.x track and a Scope Decision Gate were inserted ahead of v1.2.0.** `CLAUDE.md`
+  has carried *"Do this before roadmap feature work"* without the roadmap reflecting it; the
+  instruction now lives where the scheduling happens. Release numbering v1.2.0–v2.0.0 was
+  deliberately **left unchanged** so existing cross-references (e.g. v1.3.0 `cache_control` →
+  v1.1.0 `createTiktokenAdapter`) stay valid — the remediation work is versioned as patch
+  releases against the shipped baseline instead of renumbering the chain.
+- **Three items absent from the audit's own recommended order were promoted into the track:**
+  M8+M9 (a credential echo one env var from being live), M5a (~10 lines that convert the entire
+  MCP mode from guaranteed no-op to functional), and M10 (`bench` throws for every installed
+  user). The audit's §5 lists 14 items and omits M1, M5, M7, M8, M9, M10 and all nine L-findings.
+- **M2 was moved from the audit's #4 to first.** The tree is red (2 failing tests, reproduced), so
+  every subsequent fix would land on a baseline that cannot distinguish new breakage from old.
+- **v1.3.0 was re-scoped rather than gated.** Its "Declaration Boundary Detector" was scheduled as
+  new work; `FUNCTION_HEADER` + `CONTROL_FLOW_HEADER` in `elision/regions.ts:50,384` already
+  implement that discriminator, and `selectElisionRegions` already folds bodies on TS/JS/Python.
+  This is a case of the roadmap scheduling something that shipped — the same class of error the
+  original Phase-1 correction above records.
+- **Milestone 9 was flagged for re-derivation, not deferred.** Its proposed
+  $w_{\text{atom}} \cdot R_{\text{atom}}$ term would add a third weight to a formula whose
+  $R_{\text{struct}}$ term is a pinned constant for code, and its `TD_PRESERVE` directive tracking
+  is a formalization of `CONSTRAINT_DIRECTIVE_LOST` — currently the single largest cause of 0%
+  reduction. Both need C1 and H6 first.
+- **A "measured starting position" table was added to the Version Summary.** Every benchmark target
+  in this document was previously stated without the number it improves on. Per audit §3.3, a
+  target with no baseline is the same shape as a green check that never ran.

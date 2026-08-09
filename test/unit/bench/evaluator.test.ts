@@ -141,14 +141,22 @@ describe('BenchmarkEvaluator', () => {
       expect(selectValidator(withLanguage)?.language).toBe('python');
 
       // And the standing hazard this change does NOT fix: strip `language` and the same
-      // computed tag routes Python to the TypeScript validator, exactly as the old literal
-      // did. These items pass the path as `origin`, not `path`, so the extension arm that
-      // would otherwise rescue them never runs.
+      // computed `code` tag selects no validator at all. Phase C set
+      // `CONTENT_TYPE_VALIDATORS.code = null`, so the outcome moved from "the wrong thing
+      // looked" (Python lexed as TypeScript, which is what this assertion used to pin) to
+      // "nothing looked".
+      //
+      // The exposure is unchanged in kind. These items pass the path as `origin`, not
+      // `path` — `item.path` is undefined here — so the extension arm that would otherwise
+      // rescue them still never runs, and `language` remains the only thing standing
+      // between a benchmark fixture and an unchecked item. What changed is that the miss
+      // now shows on `trace.astCoverage` instead of arriving as a TypeScript pass.
       const withoutLanguage = createContextItem({
         id: 'x', kind: 'file', contentType: classifyContent(content, 'file', 'src/x.py'),
         content, origin: 'src/x.py',
       });
-      expect(selectValidator(withoutLanguage)?.language).toBe('typescript');
+      expect(withoutLanguage.path).toBeUndefined();
+      expect(selectValidator(withoutLanguage)).toBeNull();
     });
   });
 

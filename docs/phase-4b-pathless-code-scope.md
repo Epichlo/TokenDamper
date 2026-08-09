@@ -240,6 +240,9 @@ Sets `language: 'python'` **and** `contentType: 'code'` atomically. Both, becaus
 language alone leaves the marker fabrication in place — and because
 `CONTENT_TYPE_VALIDATORS.code` maps to the **TypeScript** validator, so a `code` tag without a
 language sends Python to the wrong checker. That coupling deserves a test, not a comment.
+**Superseded 2026-08-08 (Phase C): `CONTENT_TYPE_VALIDATORS.code` is now `null`.** The coupling
+argument survives unchanged and the test still exists; only the failure mode moved, from *wrong*
+validation to *absent* validation. See the note on item 3 of §6.3.
 
 **4b.3 — the `MARKDOWN_MARKER_TYPES` allowlist, separately. — LANDED 2026-08-06, DECISIONS
 §32. The paragraph below is wrong about where the fabrication lives; see §10.** 4b.2 fixes the fabrication for
@@ -266,6 +269,14 @@ removal of fence-based detection.
    uncheckable.
 3. **`code` → `tsValidator` is a trap.** Any path that sets `contentType: 'code'` without a
    language sends the item to the TypeScript validator. Pin it.
+   **Resolved 2026-08-08 (Phase C), and the pin was kept rather than deleted.**
+   `CONTENT_TYPE_VALIDATORS.code` is `null`: `code` is a *family*, not a language, and lexing
+   the family as TypeScript invented findings rather than weakening them (perl 39/40, tcl 30/40,
+   shell 22/40 false `AST_UNTERMINATED_STRING` / `AST_UNBALANCED_BRACKET`). A `code` tag without
+   a language is still not enough — it now yields `validated: false` and a row on
+   `trace.astCoverage` (DECISIONS §23) instead of a wrong verdict. The pin lives in
+   `test/unit/declared-language.test.ts` and `test/unit/bench/evaluator.test.ts`; both were
+   updated to assert `null` rather than `'typescript'`.
 4. **User-visible marker text changes** for detected items — `[TokenDamper: N code lines
    elided…]` instead of `text`/`markdown`. Correct per §24, but it is a CHANGELOG line.
 5. **Corpus bias.** The negative set is 27 documents from one repository plus 7 synthetic

@@ -2,9 +2,17 @@
 
 TokenDamper is a universal context optimization engine for AI coding assistants. 
 
-It acts as an intelligent middleware proxy that compresses and deduplicates context before it reaches an LLM, reducing token usage, speeding up responses, and lowering API costs—while guaranteeing correctness and semantics in CLI and MCP modes. See the Gateway proxy limitation below.
+It acts as an intelligent middleware proxy that compresses and deduplicates context before it reaches an LLM, reducing token usage, speeding up responses, and lowering API costs—while preserving bracket/quote integrity and falling open to the caller's original bytes whenever a check cannot certify the result. See the Gateway proxy status below.
 
-> **Gateway proxy limitation:** The local Gateway HTTP proxy mode (started via `tokendamper exec`) currently bypasses TokenDamper's validation pipeline. It does not run AST/syntax validation, semantic-drift checking, the confidence ledger, or the fail-open fallback path. The trace field `fallbackUsed` is hardcoded `false` on this path — it is not a computed result. The syntax-safety, semantic-drift, and guaranteed-fallback guarantees described in this document apply to CLI (`tokendamper optimize`) and MCP (`tokendamper mcp`) modes only. This is a known gap, tracked and being fixed. Do not route production traffic through Gateway mode expecting those guarantees today.
+> **Gateway proxy status (measured 2026-08-09).** An earlier version of this notice said the Gateway "bypasses TokenDamper's validation pipeline" and that `fallbackUsed` is "hardcoded `false`". **That has been untrue since Phase 1.0b** and is corrected here: `src/gateway/proxy.ts` routes through `core/engine.optimize()`, so validators, `DriftTracker`, `ConfidenceLedger`, `DebtTracker` and the fallback resolver all run on proxy traffic, and `fallbackUsed` is computed.
+>
+> What is true today is different, and you should read it before routing traffic:
+>
+> - **It saves approximately nothing on ordinary conversations.** The Gateway plans one stage, `cleanup:session-dedup`, which marks an elision recoverable only when an intact copy survives *within the same payload*. Cross-turn deduplication of a sole copy is scored in full and trips the drift gate, so it falls back. Measured over real sockets on three content types: **0 bytes saved, 100% fallback**. Within-payload duplication does save (43% on the case tested).
+> - **`tokendamper exec` does not currently work end to end.** It injects a gateway token into the child's environment under a variable name no third-party client reads, and the server then rejects every request with `401`.
+> - **Non-ASCII request bodies can be corrupted.** The server accumulates the body by string concatenation per chunk, so a multi-byte UTF-8 sequence split across a chunk boundary becomes replacement characters before the pipeline sees it.
+>
+> Treat Gateway mode as experimental. CLI (`tokendamper optimize`) and MCP (`tokendamper mcp`) are the supported paths.
 
 ## Overview & Features
 
@@ -134,13 +142,16 @@ Raw Input
   -> Final Output + Explainability Trace
 ```
 
-Note: the `AST Validators` and `Explicit Fallback` steps above run in CLI and MCP modes. Gateway mode does not execute them — see the Gateway proxy limitation notice above.
+Note: the `AST Validators` and `Explicit Fallback` steps above run in **all three** modes, Gateway included, since Phase 1.0b. (A previous version of this note claimed Gateway mode skipped them; it does not.) What differs on the Gateway is the *stage list*, not the checks — it plans only `cleanup:session-dedup`. See the Gateway proxy status notice at the top.
 
 ## License
-TokenDamper is now licensed under the Mozilla Public License 2.0 (MPL-2.0). See [LICENSE](./LICENSE).
+TokenDamper is licensed under the Mozilla Public License 2.0 (MPL-2.0). See [LICENSE](./LICENSE).
 
 ## Copyright Notice
-Copyright (c) 2026 Ojas Sugur. All rights reserved.
+Copyright (c) 2026 Ojas Sugur.
+
+Licensed under the MPL-2.0 as stated above. The trademark reservation below is a limit on use
+of the *name*, not a reservation of rights in the code.
 
 ## Trademark Notice
 'TokenDamper' and its associated logos are trademarks of Ojas Sugur. You are free to fork, integrate, and modify the code under the terms of the MPL-2.0 license. However, you may not distribute, market, or publish your derivative works using the name 'TokenDamper' or imply any official endorsement without prior written permission.

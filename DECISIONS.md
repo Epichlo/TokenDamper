@@ -1441,6 +1441,13 @@ each was measured:
 - **Content type alone** is worse: `CONTENT_TYPE_VALIDATORS.code` maps to the **TypeScript**
   validator, so a `code` tag with no language sends Python to the wrong checker. Pinned in
   `test/unit/declared-language.test.ts` rather than left as a comment.
+  **Superseded 2026-08-08 (Phase C): that mapping is now `null`.** `code` is a family tag
+  spanning ~19 extensions against three implemented validators, and lexing the family as
+  TypeScript invented findings rather than weakening them (perl 39/40, tcl 30/40, shell 22/40
+  false verdicts). A `code` tag with no language now sends Python to **no** checker — it
+  reports `validated: false` and appears on `trace.astCoverage` (§23) instead of returning a
+  wrong verdict. The conclusion this bullet supports is untouched: the two fields must move
+  together. The pin was re-aimed, not deleted.
 
 The two fields answer to different consumers — dispatch reads one, drift reads the other —
 and keying a transform and its check at different granularities is what produced Issue 2.
@@ -2127,3 +2134,41 @@ The pipeline remains string-based, and that is the frozen architecture. A file t
 valid UTF-8 is therefore never optimized, only echoed. Making the model byte-oriented would
 touch every stage, validator and estimator, and is not justified by one file in 289 — but the
 refusal is now explicit and traced instead of silent and lossy.
+
+---
+
+## 36. The License Is MPL-2.0, and `package.json` Was the Stale Copy
+
+**Date:** 2026-08-09 · **Status:** Accepted · **Closes:** max_audit.md M3
+
+The repository declared two different licenses. `LICENSE` is a full Mozilla Public License
+2.0 and `README.md` stated the project "is now licensed under" it — the word *now* recording a
+deliberate migration. `package.json` still carried `"license": "MIT"`, and `CLAUDE.md` repeated
+the MIT claim in its opening description.
+
+This is not cosmetic. `package.json` is `"private": false` with a `files` array and a
+`prepublishOnly` script, so it is meant to be published, and npm surfaces the `license` field
+as the authoritative machine-readable signal. Consumers and license scanners would read **MIT**
+— permissive, no reciprocity — and actually receive **MPL-2.0**, which carries file-level source
+disclosure obligations on modification. The direction of that error is the harmful one: it
+understates the obligations a downstream user takes on.
+
+### Decision
+
+MPL-2.0 is the license. `package.json` and `CLAUDE.md` are corrected to match `LICENSE`, which
+is the document that actually grants rights and is the only one of the four with legal text in it.
+
+### Also corrected
+
+`README.md` carried "Copyright (c) 2026 Ojas Sugur. **All rights reserved.**" immediately above
+an open-source grant. "All rights reserved" asserts the opposite of what the license does, and
+placing it directly above the grant makes the section self-contradicting. The copyright line is
+retained without it, and the trademark reservation that follows is explicitly scoped to the
+*name* rather than the code — which is what it was always meant to say.
+
+### Why this was never recorded
+
+The MIT → MPL migration itself has no entry in this file. It was made in the README and the
+LICENSE and nowhere else, so nothing prompted a sweep of the other places the license is
+asserted. The lesson is narrow and worth keeping: a license is asserted in four files, and
+changing it in one is a change to none of the others.

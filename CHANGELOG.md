@@ -9,7 +9,76 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or released; run
 `git log v1.1.0..HEAD` to confirm current scope before relying on this list.
 
+### Fixed
+- **The regression baseline now measures the fixture set the product ships — audit H3**:
+  `test/integration/bench.test.ts` Tests 1–5 loaded `loadBenchmarkFixtures('humaneval')`, and
+  Test 2 did not use the shipped fixtures at all — it built a private two-fixture set inline
+  under an artificial `maxInputTokens: 50` and asserted 40% reduction against that. The suite
+  was green while `tokendamper bench` printed **0.0% reduction, 40% fallback**. The two facts
+  never met because no test ran the combined set: humaneval is the half that cannot fall back
+  (0.00), codexglue sits at **0.80**, and only humaneval was ever loaded.
+
+  All five tests now load the shipped combined set, and `baseline.json` records **measured
+  truth** rather than a target: `minTokenReductionRatio` 0.40 → **0.0**, `maxFallbackRate`
+  0.0 → **0.40**. The old values are retained in an `aspirational` block so the gap stays
+  visible instead of being deleted.
+
+  The new assertions use **equality**, not `>=`. A `>=` check against a measured floor of 0.0
+  is vacuously true and can never fail — the same defect one level up. Equality means an
+  *improvement* breaks the suite too and has to be recorded deliberately, which is what makes
+  it a ratchet. Verified able to fail: mutating the recorded numbers turns 3 of 6 tests red.
+
+  Two things the measurement surfaced that were not previously written down: every non-fallback
+  fixture also reduces **exactly 0%**, because `BenchmarkRunner` supplies a `TokenHasher` and
+  the engine rehydrates what it elided — so the shipped set produces no reduction by two
+  independent mechanisms, not one; and `syntaxPassRate: 1.0` is now asserted *alongside* the
+  40% fallback rate, since syntax is evaluated on emitted output and emitted output on fallback
+  is the input. Test 3 keeps the historical `aba84df` finding intact, rescoped to humaneval,
+  which is the only population it was ever true of.
+
+- **The stale Gateway warning in `README.md` is removed — audit M4a**: it claimed the Gateway
+  "bypasses TokenDamper's validation pipeline" and that `fallbackUsed` is "hardcoded `false`".
+  Both have been untrue since Phase 1.0b (`proxy.ts` imports and calls `core/engine.optimize`;
+  `fallbackUsed` is `result.fallbackUsed`). Replaced with the measured status rather than
+  deleted, because removing a false warning while leaving the feature claims uncaveated would
+  have made the page less accurate, not more: the notice now records that cross-turn dedup
+  saves 0 bytes on ordinary traffic (H1), that `tokendamper exec` returns 401 to its own child
+  (C3), and that non-ASCII bodies can be corrupted at the socket (C2). The contradicting note
+  under the architecture diagram is corrected the same way.
+
 ### Changed
+- **License metadata corrected to MPL-2.0 — audit M3**: `package.json` declared `"license":
+  "MIT"` while `LICENSE` is a full Mozilla Public License 2.0 and `README.md` stated the project
+  is licensed under it. `package.json` is publishable (`"private": false`, `files`,
+  `prepublishOnly`) and npm treats its `license` field as authoritative, so scanners read MIT —
+  permissive — and receive MPL-2.0 copyleft. `package.json` and `CLAUDE.md` now match `LICENSE`.
+  "All rights reserved" is dropped from the README copyright notice, where it sat directly above
+  an open-source grant and asserted its opposite. See DECISIONS §36.
+
+- **`contentType: 'code'` no longer selects the TypeScript validator — Phase C**:
+  `CONTENT_TYPE_VALIDATORS.code` is now `null`. `code` is a *family* tag set from a file
+  extension covering ~19 languages, of which the AST-lite suite implements three; mapping the
+  whole family to TypeScript meant every non-TS member was lexed by a scanner written for a
+  different grammar. That is not a weaker check, it is a check that **invents** findings —
+  measured false `AST_UNTERMINATED_STRING` / `AST_UNBALANCED_BRACKET` verdicts at perl 39/40,
+  tcl 30/40, shell 22/40, powershell 7/40 (c and css 0/50, because the C-family scanner happens
+  to fit). Shell and PowerShell are in `isCodeExtension` today, so those were live false
+  verdicts on the file route: `$'…'` quoting, `'` inside comments, `${…}` expansion and
+  `[[ … ]]` tests are ordinary syntax a TS lexer misreads. This is DECISIONS §17's finding —
+  a verdict decided by apostrophe parity is not validating anything — reached from the
+  extension side instead of the fence side, and removed for the same reason rather than tuned.
+
+  **Nothing that was genuinely covered loses coverage.** TypeScript, JavaScript, Python and
+  JSON all reach their validator through the `language` and `path` branches of
+  `selectValidator`, which run *first* and are unchanged. What changes is that the remainder
+  now report `validated: false` and appear on `trace.astCoverage` — DECISIONS §23's
+  distinction, that an unexamined item is not a passing one.
+
+  Two hazard-pinning tests asserted the old mapping deliberately and were updated to pin the
+  new one (`test/unit/declared-language.test.ts`, `test/unit/bench/evaluator.test.ts`): the
+  trap they record changed shape from *wrong* validation to *absent* validation, so the pins
+  were kept and re-aimed rather than deleted. Three stale doc comments were corrected with
+  them (`src/core/model/constructors.ts` ×2, `docs/phase-4b-pathless-code-scope.md` §6.3).
 - **Fail-open now returns the caller's bytes — Phase B (DECISIONS §35)**: `resolveFallback`
   returns `request.rawInput`, which reads like a byte-identical echo and is not one —
   `rawInput` is a string the CLI decoded with `readFileSync(path, 'utf8')`, and that call turns
@@ -272,8 +341,11 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
     `DriftTracker`'s `MARKDOWN_MARKER_TYPES` — so a declared Python file would still have its
     `#` comments harvested as markdown headings and then "destroyed" by the elision that
     follows. Two comment lines are enough for the probe to call a Python file a markdown
-    document. Content type alone is worse: `CONTENT_TYPE_VALIDATORS.code` is the **TypeScript**
-    validator, so declared Python would be checked by the wrong checker.
+    document. Content type alone fails the other way: `CONTENT_TYPE_VALIDATORS.code` is `null`
+    (Phase C, above), so declared Python would be checked by **nothing** and report
+    `validated: false`. When this entry was written that mapping was the *TypeScript* validator,
+    so the same mistake produced a wrong verdict rather than a missing one — the coupling
+    argument this bullet makes is unchanged either way.
   - **An unrecognized language is rejected at the adapters, not dropped in the model.** A
     `--language pyton` that quietly does nothing produces a run that looks declared, validates
     nothing, and reports a clean trace — invariant 10's shape.

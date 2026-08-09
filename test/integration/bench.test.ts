@@ -3,21 +3,47 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { loadBenchmarkFixtures } from '../../src/bench/fixtures';
-import type { BenchmarkFixtureSet } from '../../src/bench/fixtures/types';
 import { BenchmarkRunner } from '../../src/bench/runner';
 import type { BenchmarkReport, BenchmarkRunnerConfig } from '../../src/bench/types';
 import { runCli } from '../../src/cli/main';
 import { loadConfig } from '../../src/config';
 import { createOptimizationBudget } from '../../src/core/model/constructors';
 
+interface ObservedMetrics {
+  readonly avgReductionRatio: number;
+  readonly fallbackRate: number;
+}
+
 interface BaselineConfig {
   readonly version: string;
   readonly dataset: string;
+  readonly measured: {
+    readonly at: string;
+    readonly commit: string;
+    readonly fixtureCount: number;
+  };
   readonly thresholds: {
     readonly minTokenReductionRatio: number;
     readonly maxFallbackRate: number;
     readonly maxAvgLatencyMs: number;
     readonly minSyntaxPassRate: number;
+  };
+  /**
+   * The exact behaviour of the shipped fixture set, asserted for **equality**.
+   *
+   * A `>=` assertion against a measured floor of 0.0 is vacuously true and can never fail —
+   * which is the defect this block exists to close, not a style preference. Equality means an
+   * improvement trips the suite too, and whoever improves it records the new number here on
+   * purpose. That is what makes this a ratchet rather than a rubber stamp.
+   */
+  readonly observed: {
+    readonly combined: ObservedMetrics & {
+      readonly syntaxPassRate: number;
+      readonly passAt1Rate: number;
+    };
+    readonly combinedTightBudget: ObservedMetrics;
+    readonly humanevalOnly: ObservedMetrics;
+    readonly codexglueOnly: ObservedMetrics;
   };
   readonly expectedMetrics: {
     readonly targetReductionRatio: number;
@@ -47,12 +73,16 @@ describe('TokenDamper Regression Test Suite & Performance Baseline (R5)', () => 
   });
 
   it('Test 1: Load baseline.json and execute BenchmarkRunner.run() against default benchmark fixtures', () => {
-    expect(baseline.version).toBe('1.0.0');
+    expect(baseline.version).toBe('1.1.0');
     expect(baseline.dataset).toBe('combined_humaneval_codexglue');
     expect(baseline.thresholds).toBeDefined();
 
-    const fixtures = loadBenchmarkFixtures('humaneval');
+    // The shipped set, which is what `tokendamper bench` runs and what `baseline.dataset`
+    // has always claimed. Until 2026-08-09 every test in this file loaded `'humaneval'`
+    // instead — half the fixtures, and the half that never falls back.
+    const fixtures = loadBenchmarkFixtures();
     expect(fixtures.count).toBeGreaterThan(0);
+    expect(fixtures.count).toBe(baseline.measured.fixtureCount);
 
     const baseConfig = loadConfig();
     const runnerConfig: BenchmarkRunnerConfig = {
@@ -71,67 +101,29 @@ describe('TokenDamper Regression Test Suite & Performance Baseline (R5)', () => 
     const report = BenchmarkRunner.run(fixtures, runnerConfig);
 
     expect(report).toBeDefined();
-    expect(report.datasetName).toBe('humaneval');
+    expect(report.datasetName).toBe('combined');
     expect(report.totalFixtures).toBe(fixtures.count);
     expect(report.overallSummary).toBeDefined();
     expect(report.sweepResults.length).toBe(1);
     expect(report.environment.tokendamperVersion).toBeDefined();
   });
 
-  // These two fixtures used to be English prose carrying `language: 'python'` and `.txt`
-  // paths, and the test passed only because the loader ignored `language` entirely. Phase
-  // 4b.1 makes the loader declare it, so the lie became load-bearing: prose dragged under the
-  // Python validator yields no symbols, drift refuses to certify what it cannot witness
-  // (`SEMANTIC_DRIFT_UNMEASURABLE`, DECISIONS §28), and the ratio this test asserts went to 0.
+  // This test used to construct a private two-fixture set inline and assert 40% against it.
   //
-  // The fixtures are now Python, which is what they always claimed to be. The assertion is
-  // unchanged and still measures what it was written to measure — the runner producing a real
-  // reduction under a tight budget — except that the reduction is now sub-item body elision on
-  // actual code rather than whole-item deletion of unlabelled prose. Measured 58.8%, 0
-  // fallbacks, against the same 40% threshold.
-  it('Test 2: Assert aggregate token reduction ratio >= baseline.thresholds.minTokenReductionRatio (>= 40%)', () => {
-    const textFixtureSet: BenchmarkFixtureSet = {
-      datasetName: 'bench_prompts',
-      count: 2,
-      fixtures: [
-        {
-          id: 'bench-1',
-          dataset: 'humaneval',
-          language: 'python',
-          prompt: [
-            'def build_index(records):',
-            '    index = {}',
-            '    for record in records:',
-            '        key = record.get("id")',
-            '        if key is None:',
-            '            continue',
-            '        index.setdefault(key, []).append(record)',
-            '    return index',
-          ].join('\n'),
-          referenceCompletion: '    return index',
-          path: 'bench_context1.py',
-          metadata: {},
-        },
-        {
-          id: 'bench-2',
-          dataset: 'humaneval',
-          language: 'python',
-          prompt: [
-            'def merge_settings(base, override):',
-            '    merged = dict(base)',
-            '    for key, value in override.items():',
-            '        if isinstance(value, dict) and isinstance(merged.get(key), dict):',
-            '            merged[key] = merge_settings(merged[key], value)',
-            '        else:',
-            '            merged[key] = value',
-            '    return merged',
-          ].join('\n'),
-          referenceCompletion: '    return merged',
-          path: 'bench_context2.py',
-          metadata: {},
-        },
-      ],
-    };
+  // It measured 58.8% and passed for four months, while the set the product actually ships —
+  // and that `baseline.dataset` names — reduces **0.00%** under the identical budget, with a
+  // 90% fallback rate. The 40% was real; it was just a property of two hand-written Python
+  // functions under an artificially tiny `maxInputTokens: 50`, not of TokenDamper. A
+  // regression test whose corpus the product does not ship cannot regress when the product
+  // does. See max_audit.md H3, and CLAUDE.md invariant 10 — this is that invariant applied to
+  // the guardrail rather than to the engine.
+  //
+  // The inline fixtures are deleted rather than kept alongside: they were the reason nobody
+  // looked at the shipped numbers. What they demonstrated (sub-item body elision produces real
+  // reduction on small Python under a tight budget) is covered by `test/unit/bench/*` and by
+  // the region-elision suites, which is where a unit-scale claim belongs.
+  it('Test 2: Pin aggregate token reduction on the SHIPPED fixture set (measured, not aspirational)', () => {
+    const fixtures = loadBenchmarkFixtures();
 
     const runnerConfig: BenchmarkRunnerConfig = {
       baseConfig: loadConfig(),
@@ -146,51 +138,89 @@ describe('TokenDamper Regression Test Suite & Performance Baseline (R5)', () => 
       ],
     };
 
-    const report = BenchmarkRunner.run(textFixtureSet, runnerConfig);
+    const report = BenchmarkRunner.run(fixtures, runnerConfig);
 
+    // Equality, not `>=`. The measured floor is 0.0, so `>=` could never fail — it would be a
+    // green light wired to nothing, which is the exact pattern being fixed here. When someone
+    // closes C1/H6 and this number moves, this test is *supposed* to break so the new baseline
+    // gets recorded deliberately in `baseline.json`.
+    expect(report.overallSummary.avgReductionRatio).toBeCloseTo(
+      baseline.observed.combinedTightBudget.avgReductionRatio,
+      4,
+    );
+    expect(report.overallSummary.fallbackRate).toBeCloseTo(
+      baseline.observed.combinedTightBudget.fallbackRate,
+      4,
+    );
+
+    // The floor CI enforces, kept as a separate statement so the gap between what the product
+    // does (`thresholds`) and what it is meant to do (`aspirational`) stays legible.
     expect(report.overallSummary.avgReductionRatio).toBeGreaterThanOrEqual(
       baseline.thresholds.minTokenReductionRatio,
     );
   });
 
-  it('Test 3: Assert fallback count === 0 (fallbackRate <= baseline.thresholds.maxFallbackRate)', () => {
-    const fixtures = loadBenchmarkFixtures('humaneval');
+  it('Test 3: Pin fallback rate on the SHIPPED fixture set, and keep the humaneval finding scoped', () => {
     const baseConfig = loadConfig();
+    const sweepBudget = createOptimizationBudget({
+      targetReductionRatio: baseline.expectedMetrics.targetReductionRatio,
+      riskTolerance: 'low',
+    });
     const runnerConfig: BenchmarkRunnerConfig = {
       baseConfig,
-      sweeps: [
-        {
-          sweepId: 'fallback-sweep',
-          budget: createOptimizationBudget({
-            targetReductionRatio: baseline.expectedMetrics.targetReductionRatio,
-            riskTolerance: 'low',
-          }),
-        },
-      ],
+      sweeps: [{ sweepId: 'fallback-sweep', budget: sweepBudget }],
     };
 
-    const report = BenchmarkRunner.run(fixtures, runnerConfig);
+    // The historical finding, preserved and now explicitly scoped to the subset it was true of.
+    //
+    // `aba84df` inverted this assertion to expect a 100% fallback rate, attributing that to
+    // Issue 3 (the drift threshold being wrong for code). That attribution was incorrect: the
+    // fallbacks came from `BenchmarkRunner` calling `optimize(request)` with no options, so no
+    // `TokenHasher` reached the engine and `attemptAutomatedRehydration` returned immediately
+    // on `if (!hasher && !ledger)` — the recovery path never ran. With the hasher supplied, the
+    // engine rehydrates the placeholder, re-validates, and passes on every humaneval fixture.
+    // That remains true and is still asserted below. See docs/phase-1d-drift-investigation.md §10.
+    //
+    // What was wrong was not the assertion but its **scope**. `maxFallbackRate: 0` was read as
+    // a statement about the product; it was only ever a statement about humaneval, which is
+    // half the shipped set and the half that cannot fall back. codexglue sits at 0.80 and was
+    // never run here. Note also what the humaneval pass costs: zero fallbacks *and* zero
+    // reduction, because rehydration restores what elision removed. A 0% fallback rate is not
+    // evidence of success when the successful path is a round trip. (max_audit.md H3.)
+    const humanevalReport = BenchmarkRunner.run(loadBenchmarkFixtures('humaneval'), runnerConfig);
+    const humanevalFallbacks = humanevalReport.sweepResults[0]!.itemResults.filter(
+      (item) => item.fallbackUsed,
+    );
+    expect(humanevalFallbacks.length).toBe(0);
+    expect(humanevalReport.overallSummary.fallbackRate).toBeCloseTo(
+      baseline.observed.humanevalOnly.fallbackRate,
+      4,
+    );
+    expect(humanevalReport.overallSummary.avgReductionRatio).toBeCloseTo(
+      baseline.observed.humanevalOnly.avgReductionRatio,
+      4,
+    );
 
-    // Restored to the baseline assertion this test was written to make.
-    //
-    // `aba84df` inverted it to expect a 100% fallback rate, attributing that to Issue 3
-    // (the drift threshold being wrong for code). That attribution was incorrect. The
-    // fallbacks came from `BenchmarkRunner` calling `optimize(request)` with no options, so
-    // no `TokenHasher` reached the engine and `attemptAutomatedRehydration` returned
-    // immediately on `if (!hasher && !ledger)` — the recovery path never ran. With the
-    // hasher supplied, the engine rehydrates the placeholder, re-validates, and passes on
-    // every humaneval fixture.
-    //
-    // Do not re-invert this to accommodate a failure. It is the baseline threshold
-    // (`maxFallbackRate: 0`), and the drift gate is not what was tripping it.
-    // See docs/phase-1d-drift-investigation.md §10.
-    const fallbacks = report.sweepResults[0]!.itemResults.filter((item) => item.fallbackUsed);
-    expect(fallbacks.length).toBe(0);
-    expect(report.overallSummary.fallbackRate).toBeLessThanOrEqual(baseline.thresholds.maxFallbackRate);
+    // codexglue, run here for the first time. This is the half that was hiding the 40%.
+    const codexglueReport = BenchmarkRunner.run(loadBenchmarkFixtures('codexglue'), runnerConfig);
+    expect(codexglueReport.overallSummary.fallbackRate).toBeCloseTo(
+      baseline.observed.codexglueOnly.fallbackRate,
+      4,
+    );
+
+    // The shipped set — what `tokendamper bench` prints and what CI now enforces.
+    const report = BenchmarkRunner.run(loadBenchmarkFixtures(), runnerConfig);
+    expect(report.overallSummary.fallbackRate).toBeCloseTo(
+      baseline.observed.combined.fallbackRate,
+      4,
+    );
+    expect(report.overallSummary.fallbackRate).toBeLessThanOrEqual(
+      baseline.thresholds.maxFallbackRate,
+    );
   });
 
   it('Test 4: Assert average execution latency <= baseline.thresholds.maxAvgLatencyMs (< 50ms)', () => {
-    const fixtures = loadBenchmarkFixtures('humaneval');
+    const fixtures = loadBenchmarkFixtures();
     const baseConfig = loadConfig();
     const runnerConfig: BenchmarkRunnerConfig = {
       baseConfig,
@@ -209,8 +239,8 @@ describe('TokenDamper Regression Test Suite & Performance Baseline (R5)', () => 
     );
   });
 
-  it('Test 5: Assert aggregate AST syntax pass rate >= baseline.thresholds.minSyntaxPassRate (100%)', () => {
-    const fixtures = loadBenchmarkFixtures('humaneval');
+  it('Test 5: Assert aggregate AST syntax pass rate, and pin what that 100% does NOT mean', () => {
+    const fixtures = loadBenchmarkFixtures();
     const baseConfig = loadConfig();
     const runnerConfig: BenchmarkRunnerConfig = {
       baseConfig,
@@ -230,6 +260,23 @@ describe('TokenDamper Regression Test Suite & Performance Baseline (R5)', () => 
     expect(report.overallSummary.syntaxPassRate).toBe(1.0);
     expect(report.overallSummary.passAt1Rate).toBeGreaterThanOrEqual(
       baseline.thresholds.minSyntaxPassRate,
+    );
+
+    // `syntaxPassRate: 1.0` is not evidence that the pipeline preserved syntax.
+    //
+    // Syntax is evaluated on the emitted output, and on fallback the emitted output *is* the
+    // input — so this metric reads 1.0 whenever the engine does nothing, which is precisely
+    // when it is least informative. Asserting the two together is the point: a reader who sees
+    // 100% here should also see the 40% fallback rate sitting next to it. If a future change
+    // makes syntax meaningful (by driving the fallback rate down), this pairing breaks and
+    // forces the claim to be restated rather than silently inherited. max_audit.md H3, §3.3.
+    expect(report.overallSummary.fallbackRate).toBeCloseTo(
+      baseline.observed.combined.fallbackRate,
+      4,
+    );
+    expect(report.overallSummary.avgReductionRatio).toBeCloseTo(
+      baseline.observed.combined.avgReductionRatio,
+      4,
     );
   });
 
