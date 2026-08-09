@@ -19,13 +19,26 @@ export function buildTrace(
   validation: ValidationReport,
   fallback: FallbackOutcome,
   finalOutput: string,
-  metrics?: { readonly debtScore?: number; readonly driftScore?: number },
+  metrics?: {
+    readonly debtScore?: number;
+    readonly driftScore?: number;
+    /** Per-stage wall time, positionally aligned with `stageResults`. See `StageTrace`. */
+    readonly stageDurationsMs?: ReadonlyArray<number>;
+  },
 ): OptimizationTrace {
-  const stageTraces = stageResults.map((stage) => ({
+  // Carry the stage's own telemetry through instead of discarding it.
+  //
+  // This used to project away `metrics` and `notes` and hardcode `durationMs: 0`, so the trace
+  // reported that a stage ran and nothing about what it did. `--diff` and `--diff-html`
+  // partially compensated on the CLI; the MCP `get_optimization_trace` tool and the Gateway had
+  // nothing else at all. (audit M6)
+  const stageTraces = stageResults.map((stage, index) => ({
     stageId: stage.stageId,
     status: stage.status,
-    durationMs: 0,
+    durationMs: metrics?.stageDurationsMs?.[index] ?? 0,
     changed: stage.changed,
+    metrics: stage.metrics,
+    ...(stage.notes !== undefined ? { notes: stage.notes } : {}),
   }));
 
   return createOptimizationTrace({

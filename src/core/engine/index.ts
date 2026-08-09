@@ -62,6 +62,14 @@ export function optimize(
     const stageCatalog = getBuiltInStageCatalog();
     const selectedPlan = plan(request.bundle, request.budget, request.config, stageCatalog);
     const stageResults: StageResult[] = [];
+    // Wall time per stage, positionally aligned with `stageResults`.
+    //
+    // Measured here rather than inside the stages: a stage that read a clock would stop being a
+    // pure function of its input (invariant 1). Timing an opaque call from the outside is an
+    // observation about the stage, not an input to it. `performance.now()` rather than
+    // `Date.now()` because most stages finish inside a millisecond, and integer-millisecond
+    // resolution would report the same uninformative 0 the hardcoded value already did.
+    const stageDurationsMs: number[] = [];
     let currentBundle = request.bundle;
     let stageFailed = false;
     let failureReason: string | undefined;
@@ -73,6 +81,7 @@ export function optimize(
     };
 
     for (const stageId of selectedPlan.stageIds) {
+      const startedAt = performance.now();
       try {
         const result = executeBuiltInStage(
           stageId,
@@ -81,6 +90,7 @@ export function optimize(
           options?.sessionContext,
           compressionContext,
         );
+        stageDurationsMs.push(performance.now() - startedAt);
         stageResults.push(result);
         if (result.status === 'ok' && result.changed) {
           currentBundle = result.bundle;
@@ -91,6 +101,8 @@ export function optimize(
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
+        // A stage that threw still consumed time, and a reader diagnosing a failure wants it.
+        stageDurationsMs.push(performance.now() - startedAt);
         stageResults.push(
           createStageResult({
             stageId,
@@ -282,6 +294,7 @@ export function optimize(
     const emittedOutput = fallback.output;
     const trace = buildTrace(request, selectedPlan, stageResults, validation, fallback, emittedOutput, {
       debtScore: debtBreakdown.debtScore,
+      stageDurationsMs,
       ...(validation.driftReport?.driftScore !== undefined
         ? { driftScore: validation.driftReport.driftScore }
         : {}),

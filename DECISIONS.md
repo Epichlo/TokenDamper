@@ -2172,3 +2172,196 @@ The MIT → MPL migration itself has no entry in this file. It was made in the R
 LICENSE and nowhere else, so nothing prompted a sweep of the other places the license is
 asserted. The lesson is narrow and worth keeping: a license is asserted in four files, and
 changing it in one is a change to none of the others.
+
+---
+
+## 37. A Witness That Existed Before Does Not Count If None of It Survived
+
+**Date:** 2026-08-09 · **Status:** Accepted · **Closes:** max_audit.md C1 (measurement half)
+
+§33 widened the measurement gate from validator-covered items to every item, and was right to.
+What it did not change was the **tense** of the question. `findUnwitnessedItems` asked *did
+evidence exist before?* — it built its probe bundle from the *before* item — so an item whose
+witnesses were all destroyed was exempt, on the grounds that they had once been there.
+
+A structured document therefore walked between the two gates that were split apart to catch
+exactly this. Measured on this repository's own files, on both the file and stdin routes:
+
+| file | before | after | `fallbackUsed` | `S_k` |
+|---|---|---|---|---|
+| `CODE_OF_CONDUCT.md` | 3,542 B | **72 B** | `false` | 0.369 / **0.400** |
+| `SECURITY.md` | 1,154 B | **72 B** | `false` | 0.333 / **0.400** |
+
+`validation.passed: true`, both gates `pass`, the content gone and — on the CLI, which supplies
+no `TokenHasher` — unrecoverable.
+
+### Why neither gate fired
+
+The arithmetic is closed-form, which is what makes this a design defect rather than a tuning
+miss. Prose yields no symbols, so `R_AST = 1.0` as an empty-set default and contributes a free
+0.60. `collectMarkers` adds a `filepath:` marker derived from `item.path`, which no content
+transform can destroy, so `R_struct = 1/(N+1)` for N headings. Therefore:
+
+```
+S_k = 0.6·0 + 0.4·(N/(N+1))  =  0.4·N/(N+1)
+```
+
+which approaches 0.40 from below and never reaches it, for any N — against a retention gate
+that fires on `driftScore > 0.40`. **The retention gate cannot fire for markdown at all.** The
+two stdin rows above landed on *exactly* 0.400 and were admitted by the strict `>`; that is the
+supremum of the expression being waved through by the comparison, not a near miss.
+
+And the measurement gate exempted them because their headings had existed.
+
+### Decision
+
+An item that changed is refused when it yields **no symbols** and **no content-derived markers
+survive in the after item**. Two properties make this safe:
+
+- **It is scoped to symbol-free items.** An item carrying symbols is left to the retention gate,
+  because `R_AST` is measuring it for real. Whole-item elision of code still refuses as
+  `SEMANTIC_DRIFT_EXCEEDED`, which is the accurate reason — reporting "unmeasurable" for an
+  item whose loss was measured exactly would restore the conflation the split undid.
+- **It only ever adds refusals.** Refusing on the surviving set is strictly stronger than
+  refusing on the before set, so every §33 refusal still refuses. Nothing that was caught is
+  now let through.
+
+### Measured cost
+
+A frozen 293-file corpus, 586 rows across both routes: **4 rows changed, and all four are this
+defect.** Every other row is byte-identical to baseline. TypeScript stays at 14.00%, Python at
+14.98%, and every uncovered-language bucket stays at 0.00%. The prose bucket goes 0.67% → 0.00%,
+which was the data loss.
+
+### Not done here
+
+`filepath:` is still counted in `R_struct` (audit C1b, §3.2). That is the deeper half: it is why
+`R_struct` is pinned at 1.0 for code and contributes a free 0.40, which in turn is why a code
+file can lose **66.7%** of its symbols and pass. Fixing it moves every published reduction figure
+in the project and wants its own measurement pass, so it is deliberately deferred rather than
+folded in here. C1a closes the data loss; C1b closes the arithmetic.
+
+`extractContentMarkers` remains the right primitive for both — its own doc comment has said since
+§28 that metadata-derived markers "cannot serve as *evidence* that content was retained, because
+they are preserved whether it was or not". The principle was already written down. This applies
+it where the decision is made.
+
+---
+
+## 38. The Gateway Reads Bytes, Not String Fragments
+
+**Date:** 2026-08-09 · **Status:** Accepted · **Closes:** max_audit.md C2, L3
+
+`GatewayServer.onRequest` accumulated its request body with `body += chunk`. That invokes
+`Buffer.prototype.toString('utf8')` on **each chunk independently**, so a multi-byte UTF-8
+sequence straddling a chunk boundary is decoded as two truncated fragments and becomes U+FFFD on
+both sides. Node reads in ~64 KB chunks, so this fires by chance on any body large enough to be
+chunked, and deterministically for a body split at the wrong offset.
+
+Measured against the unfixed server, with each body written in two `req.write()` calls split on
+a UTF-8 continuation byte:
+
+| body | sent | forwarded |
+|---|---|---|
+| `héllo — ünïcode ✓ 日本語 😀` | 94 B | **98 B**, `h��llo …` |
+| `こんにちは世界` | 76 B | **82 B**, `���んにちは世界` |
+| `┌─┐│ build ok │└─┘` | 89 B | **95 B**, `���─┐│ build ok │└─┘` |
+
+A corrupted body is always *longer* than it was sent, because U+FFFD re-encodes to three bytes.
+Nothing was elided on any of these turns — the corruption happens at the socket, before the
+pipeline exists, and the corrupted string is what goes upstream.
+
+### This is DECISIONS §35 at a different seam
+
+Phase B's reasoning — *"`rawInput` is a decoded string, so the evidence is gone by the time a
+request exists"* — is correct and generalizes. It was applied to the one adapter that reads from
+disk and not to the one that reads from a socket, where it is worse: the bytes reach a provider
+rather than a terminal. The MCP transport is unaffected, and instructively so: `setEncoding('utf8')`
+installs a `StringDecoder`, which holds partial sequences across chunk boundaries. Manual
+concatenation is exactly what bypasses that machinery.
+
+### Decision
+
+Collect `Buffer[]`, `Buffer.concat` on `end`, decode **once**. Then apply the CLI's own round-trip
+test (`Buffer.from(str, 'utf8').equals(buf)`) and, when it fails, pass the caller's bytes through
+untouched.
+
+Concatenating correctly fixes the chunk-boundary defect. It does not make a body that was never
+valid UTF-8 representable — the decode is still lossy — so the round trip is a separate question
+and gets a separate answer. Optimizing such a body is not an option, because every stage,
+validator and token estimate operates on the decoded string and would be reasoning about content
+the caller never sent; a saving measured against corrupted input is worse than none. Rejecting it
+is not an option either: TokenDamper is a transparent proxy, and a body the provider might well
+accept is not TokenDamper's to refuse. So it is forwarded verbatim, which is invariant 3 on the
+Gateway.
+
+`ProxyRequestResult` gains an optional `bodyBytes`; `body` is still populated with the lossy
+decode so existing readers keep working, but anything that puts bytes on the wire prefers
+`bodyBytes`. Both the upstream `fetch` and the locally-returned branch in `writeProxyResult` do.
+
+### Also fixed
+
+The body-size cap recomputed `Buffer.byteLength(body, 'utf8')` over the entire accumulated string
+on every chunk — O(n²) in the length of the request (audit L3). It is now a running total, which
+falls out of collecting buffers anyway.
+
+### Not done here
+
+The remaining Gateway findings are untouched and independent: the `exec` token handoff (C3), the
+0-bytes-saved measurement (H1), structured message content flattened to a string (C4), and the
+two environment branches in the request path (M8). C2 is a correctness fix to the pass-through,
+not an argument that the mode is finished.
+
+---
+
+## 39. The Trace Carries What the Stages Computed
+
+**Date:** 2026-08-09 · **Status:** Accepted · **Closes:** max_audit.md M6
+
+`buildTrace` projected every `StageResult` down to `{ stageId, status, durationMs: 0, changed }`.
+The stage's `metrics` and `notes` were discarded and the duration was a literal constant.
+
+So the trace could say that `compression:token-hashing` ran and changed something, and nothing
+about what it removed, how much, whether any elision was reversible, or how long it took. The
+stages compute that telemetry carefully — `itemsHashed`, `regionsHashed`, `bytesSaved`,
+`irreversibleElisions`, `skippedPostConditionRejected` — and all of it was thrown away one
+function call after being calculated. `--diff` and `--diff-html` partially compensate on the CLI;
+the MCP `get_optimization_trace` tool and the Gateway had nothing else at all.
+
+For a product whose stated differentiator is auditability, the audit surface was the least
+informative one in the system.
+
+### Decision
+
+`StageTrace` gains `metrics` and an optional `notes`, carried through verbatim. `durationMs` is
+measured by the **engine**, not by the stage: a stage that read a clock would stop being a pure
+function of its input (invariant 1), whereas timing an opaque call from outside is an observation
+*about* the stage and cannot change what it returns. `performance.now()` rather than `Date.now()`,
+because most stages finish inside a millisecond and integer resolution would report the same
+uninformative `0` the hardcoded constant already did.
+
+The trace was already non-deterministic — it carries a UUID `requestId` — so this changes nothing
+about invariant 1, which is a statement about emitted **bytes**.
+
+### The pruner's note was not vague, it was false
+
+`pruning:topology-pruner` returned `notes: 'All items fit within token budget; no pruning
+required.'` unconditionally whenever `itemsPruned === 0`. Measured, a 5,405-token file at
+`maxInputTokens: 10` reported that all items fit. They do not.
+
+The mechanism is worth stating because it is also H5: `applyCacheAwarePrefixLocking` pins every
+item inside the first 1,024 tokens, `solve01Knapsack` places pinned items outside the candidate
+set and always selects them, and `createContextBundle` produces a **one-item** bundle for CLI,
+MCP and bench. Item 0 is therefore always pinned and `itemsPruned` is always 0. The note reported
+that pruning was *unnecessary* for the case where it was *impossible*.
+
+The note now distinguishes the three cases and names the mechanism, and the metrics carry
+`bundleTokens` and `maxTokens` so the claim is checkable rather than asserted:
+
+> Nothing prunable: all 1 item(s) are pinned by cache-prefix locking, but the bundle is 5405
+> tokens against a budget of 10. Pinned items bypass the knapsack (invariant 7), so the budget
+> could not be enforced.
+
+This does not fix H5 — the knapsack is still unreachable on every shipping path. It stops the
+trace from concealing that behind a reassuring sentence, which is the necessary first step:
+the defect is now visible in the one place a user would look.

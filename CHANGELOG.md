@@ -10,6 +10,82 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
 `git log v1.1.0..HEAD` to confirm current scope before relying on this list.
 
 ### Fixed
+- **The explainability trace now explains — audit M6**: `buildTrace` projected every
+  `StageResult` down to `{ stageId, status, durationMs: 0, changed }`, discarding each stage's
+  `metrics` and `notes` and hardcoding the duration. `StageTrace` now carries `metrics` and
+  `notes` verbatim, and `durationMs` is measured by the engine with `performance.now()` — by
+  the engine because a stage that read a clock would stop being a pure function of its input
+  (invariant 1), and `performance.now()` because most stages finish inside a millisecond and
+  integer resolution would report the same uninformative `0` the constant already did.
+
+  A CLI trace now shows, for example, `regionsHashed: 4`, `bytesSaved: 14509` and
+  `irreversibleElisions: 1` with the note explaining that no token hasher was supplied so the
+  removed content is retained nowhere — none of which was previously knowable from the trace.
+
+  **`pruning:topology-pruner`'s note was not vague, it was false.** It returned "All items fit
+  within token budget; no pruning required." unconditionally whenever `itemsPruned === 0`;
+  measured, a 5,405-token file at `maxInputTokens: 10` reported that all items fit. The note now
+  distinguishes the three cases and names the mechanism (everything pinned by cache-prefix
+  locking → pinned items bypass the knapsack → the budget could not be enforced), and the
+  metrics carry `bundleTokens` and `maxTokens` so the claim is checkable. This does not fix H5,
+  but it stops the trace concealing it. Guarded by `test/unit/trace-explains.test.ts`, verified
+  to fail 4/4 against the unfixed trace. See DECISIONS §39.
+
+- **The Gateway no longer corrupts non-ASCII request bodies — audit C2, L3**:
+  `GatewayServer.onRequest` accumulated the body with `body += chunk`, decoding each chunk
+  independently, so a multi-byte UTF-8 sequence straddling a chunk boundary became U+FFFD on
+  both sides — at the socket, before the pipeline exists, on the bytes forwarded upstream.
+  Measured with two-write splits on a continuation byte: `héllo — ünïcode ✓ 日本語 😀` went out
+  94 B and forwarded as **98 B** (`h��llo …`); CJK 76 → **82 B**; box-drawing 89 → **95 B**. A
+  corrupted body is always *longer*, because U+FFFD re-encodes to three bytes.
+
+  Now collects `Buffer[]`, concatenates on `end`, and decodes once. Bodies that fail a UTF-8
+  round trip — which correct concatenation does not fix, since the decode is still lossy — are
+  forwarded verbatim rather than optimized or rejected: optimizing would have every stage
+  reasoning about content the caller never sent, and rejecting is not a transparent proxy's
+  call. `ProxyRequestResult` gains `bodyBytes` for this, preferred over `body` by both the
+  upstream `fetch` and `writeProxyResult`.
+
+  This is DECISIONS §35 at a different seam. Phase B applied that reasoning to the adapter that
+  reads from disk and not to the one that reads from a socket, where it is worse — the bytes
+  reach a provider, not a terminal. MCP was never affected: `setEncoding('utf8')` installs a
+  `StringDecoder`, which holds partial sequences across chunks; manual concatenation is exactly
+  what bypasses it.
+
+  Also removes the O(n²) body-size check, which re-measured the whole accumulated string on
+  every chunk (L3). Guarded by `test/integration/gateway-byte-fidelity.test.ts`, verified to
+  fail 4/4 against the unfixed server. See DECISIONS §38.
+
+- **A document whose witnesses were all destroyed is no longer certified — audit C1a**:
+  `DriftTracker.findUnwitnessedItems` asked *did evidence exist before?* (it built its probe
+  from the **before** item), so an item whose witnesses were entirely destroyed was exempt on
+  the grounds that they had once been there. Measured on this repository's own files, on both
+  routes: `CODE_OF_CONDUCT.md` **3,542 → 72 bytes** and `SECURITY.md` **1,154 → 72 bytes**, at
+  `fallbackUsed: false`, `validation.passed: true`, both gates reporting `pass` — and
+  unrecoverable on the CLI, which supplies no `TokenHasher`.
+
+  Neither gate could fire, and the arithmetic is closed-form: prose yields no symbols so
+  `R_AST = 1.0` as an empty-set default (a free 0.60), and `filepath:` is derived from
+  `item.path` and survives any content transform, so `R_struct = 1/(N+1)` for N headings. Hence
+  `S_k = 0.4·N/(N+1)`, which approaches 0.40 from below and never reaches it, against a gate
+  firing on `> 0.40`. The two stdin rows landed on **exactly 0.400** and were admitted by the
+  strict comparison.
+
+  An item that changed is now refused when it yields no symbols **and** no content-derived
+  markers survive in the *after* item. Scoped to symbol-free items, so whole-item elision of
+  code still refuses as `SEMANTIC_DRIFT_EXCEEDED` (the accurate reason) rather than being
+  relabelled; and strictly additive, so every §33 refusal still refuses.
+
+  Cost, over a frozen 293-file corpus (586 rows, both routes): **4 rows changed, all four this
+  defect.** Everything else byte-identical — TypeScript 14.00%, Python 14.98%, uncovered
+  buckets 0.00%, all unchanged. Prose goes 0.67% → 0.00%, which was the loss. Guarded by
+  `test/unit/drift-unwitnessed-elision.test.ts`, verified to fail against the unfixed tracker.
+  See DECISIONS §37.
+
+  **Deferred:** `filepath:` is still counted in `R_struct` (audit C1b). That is why `R_struct`
+  is pinned at 1.0 for code, and why a code file can lose 66.7% of its symbols and pass. It
+  moves every published figure and wants its own measurement pass.
+
 - **The regression baseline now measures the fixture set the product ships — audit H3**:
   `test/integration/bench.test.ts` Tests 1–5 loaded `loadBenchmarkFixtures('humaneval')`, and
   Test 2 did not use the shipped fixtures at all — it built a private two-fixture set inline

@@ -314,10 +314,41 @@ export class DriftTracker {
         continue; // untouched: retention needs no evidence
       }
 
-      const single: ContextBundle = { ...beforeBundle, items: Object.freeze([item]) };
-      if (this.extractSymbols(single).size > 0 || this.extractContentMarkers(single).size > 0) {
-        continue; // measurable: the ratios above already scored it
+      const beforeSingle: ContextBundle = { ...beforeBundle, items: Object.freeze([item]) };
+      const afterSingle: ContextBundle = { ...beforeBundle, items: Object.freeze([after]) };
+
+      // Symbols present *before* means `R_AST` is measuring this item for real rather than
+      // reporting its empty-set default, so retention is evidenced and the retention gate owns
+      // the verdict. Whole-item elision of code lands here: `R_AST = 0`, `S_k` pins at 0.60,
+      // refused as EXCEEDED — which is the accurate reason. Claiming "unmeasurable" for an
+      // item whose loss was measured exactly would be the same conflation the two-gate split
+      // exists to undo.
+      if (this.extractSymbols(beforeSingle).size > 0) {
+        continue;
       }
+
+      // No symbols, so 60% of `S_k` is a free 0.60 from an empty-set default that looked at
+      // nothing. Content markers are the only real evidence left — and they must **survive**.
+      //
+      // This asked `extractContentMarkers(beforeSingle)` until 2026-08-09, i.e. *did evidence
+      // exist?* rather than *did any of it survive?*. Measured, that let a markdown document be
+      // deleted in its entirety with every gate green: a 233-byte runbook became a 72-byte
+      // marker at `fallbackUsed: false`, `S_k = 0.3000`, both gates passing. The arithmetic is
+      // closed-form and worth stating, because it shows the old rule could never have caught
+      // it: with no symbols `R_AST = 1.0`, and `R_struct = 1/(N+1)` for N headings because
+      // `filepath:` is derived from `item.path` and no content transform can destroy it. So
+      // `S_k = 0.4·N/(N+1)`, which approaches 0.40 from below and never reaches it, for any N.
+      // The retention gate compares with strict `>`. It cannot fire for markdown at all.
+      //
+      // §33 widened this rule from validator-covered items to every item and was right to;
+      // what it did not change was the tense of the question. Refusing on the surviving set is
+      // strictly more refusing than refusing on the before set, so every §33 refusal (the
+      // symbol-free Perl file elided whole) still refuses — nothing that was caught is now let
+      // through. See DECISIONS §37 and max_audit.md C1.
+      if (this.extractContentMarkers(afterSingle).size > 0) {
+        continue;
+      }
+
       unwitnessed.push(item.id);
     }
     return unwitnessed;

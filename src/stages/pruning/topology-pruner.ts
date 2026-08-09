@@ -61,6 +61,27 @@ export function runTopologyPrunerStage(
     const itemsPruned = bundle.items.length - selectedItems.length;
 
     if (itemsPruned === 0) {
+      const pinnedCount = knapsackItems.filter((i) => i.isPinned).length;
+      const bundleTokens = knapsackItems.reduce((sum, i) => sum + i.weight, 0);
+
+      // Say which of the two very different reasons produced "nothing pruned".
+      //
+      // This unconditionally reported "All items fit within token budget; no pruning required."
+      // — which is a factual claim, and it was false in the case that matters. `solve01Knapsack`
+      // places pinned items outside the candidate set and always selects them, and
+      // `applyCacheAwarePrefixLocking` pins everything inside the first 1,024 tokens; on the
+      // one-item bundle `createContextBundle` builds for CLI, MCP and bench, item 0 is therefore
+      // always pinned. Measured: a 4,600-token file at `maxInputTokens: 10` reported "all items
+      // fit" — 4,600 tokens do not fit in 10. It announced that pruning was unnecessary for a
+      // case where pruning was impossible. (audit M6, H5)
+      const everythingPinned = pinnedCount === knapsackItems.length && knapsackItems.length > 0;
+      const overBudget = bundleTokens > maxTokens;
+      const notes = everythingPinned && overBudget
+        ? `Nothing prunable: all ${pinnedCount} item(s) are pinned by cache-prefix locking, but the bundle is ${bundleTokens} tokens against a budget of ${maxTokens}. Pinned items bypass the knapsack (invariant 7), so the budget could not be enforced.`
+        : overBudget
+          ? `No items pruned, but the bundle is ${bundleTokens} tokens against a budget of ${maxTokens}; the knapsack selected every candidate.`
+          : `All items fit within token budget (${bundleTokens} of ${maxTokens} tokens); no pruning required.`;
+
       return createStageResult({
         stageId,
         status: 'ok',
@@ -69,10 +90,12 @@ export function runTopologyPrunerStage(
         metrics: {
           itemsPruned: 0,
           tokensSaved: 0,
-          pinnedCount: knapsackItems.filter((i) => i.isPinned).length,
+          pinnedCount,
           selectedCount: bundle.items.length,
+          bundleTokens,
+          maxTokens,
         },
-        notes: 'All items fit within token budget; no pruning required.',
+        notes,
       });
     }
 

@@ -61,6 +61,20 @@ export interface ProxyHandlerOptions {
   readonly upstreamOpenAiUrl?: string | undefined;
   readonly upstreamAnthropicUrl?: string | undefined;
   readonly abortSignal?: AbortSignal | undefined;
+  /**
+   * The request body exactly as it arrived on the socket.
+   *
+   * The pipeline is string-based, so `rawBody` is a decode of these bytes. When the decode is
+   * not faithful — the body was not valid UTF-8 — every stage, validator and token estimate
+   * downstream would be reasoning about content the caller never sent, and the re-encoded
+   * result is what gets forwarded to the provider. Supplying the bytes lets the proxy detect
+   * that and pass the original through untouched.
+   *
+   * Optional because in-process callers (tests, and `processOpenAiRequest` used directly)
+   * legitimately have only a string; absent, the body is trusted as-is, which is what the
+   * behaviour was before.
+   */
+  readonly rawBodyBytes?: Buffer | undefined;
 }
 
 export interface GatewaySessionStoreInterface {
@@ -82,6 +96,14 @@ export interface ProxyRequestResult {
   readonly statusCode: number;
   readonly headers: Record<string, string>;
   readonly body: string;
+  /**
+   * Bytes to forward upstream in place of `body`, when the two are not interchangeable.
+   *
+   * Set only on the pass-through path for a body that does not survive a UTF-8 round trip.
+   * `body` is still populated (lossily) so existing readers keep working; anything that
+   * actually puts bytes on the wire must prefer this when present.
+   */
+  readonly bodyBytes?: Buffer | undefined;
   readonly upstreamBody?: ReadableStream<Uint8Array> | null | undefined;
   readonly session: GatewaySession;
   readonly optimizationResult?: OptimizationResult | undefined;
