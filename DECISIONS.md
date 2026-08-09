@@ -2453,3 +2453,82 @@ from "that class of bug". After the locals fix this is the entire remaining symb
 commented codebase carry noise proportional to how often the words `function` and `class` appear
 in English. Not fixed here: making extraction comment-aware is a per-language lexing problem,
 and the measured cost does not yet justify it.
+
+---
+
+## 41. The Gateway Is an Experimental Pass-Through, and `exec` Now Reaches It
+
+**Date:** 2026-08-09 · **Status:** Accepted · **Closes:** max_audit.md C3, H1, L2 (partial)
+
+Two findings, one decision, because they are the same question: what is Gateway mode *for*?
+
+### C3 — `exec` returned 401 to its own child
+
+`runExecCommand` generated a per-run token and injected it as `TOKENDAMPER_GATEWAY_TOKEN`. The
+server required it on every non-`/health` request. The child is `aider`, `claude`, `codex` or
+`curl` — third-party software that has never heard of that variable and sends `authorization` or
+`x-api-key` and nothing else. **Nothing in `src/` read it either.**
+
+Reproduced by spawning a real child through `runExecCommand`: every request came back
+`401 Unauthorized: Invalid or missing gateway token`, and `exec` exited **0**. The flagship
+integration was non-functional end to end, and the existing test suite passed throughout because
+its gateway test presented the header that no real client sends.
+
+**Decision: trust loopback peers, keep the token for non-loopback binds.** The server binds to
+`127.0.0.1` by default, so a loopback peer was already the only peer that could connect; the
+token was protecting one local process from another on the same machine. That boundary is real
+but narrow, and it was being paid for with a mode nobody could use. Loopback is determined from
+`req.socket.remoteAddress` — never from a header, since `X-Forwarded-For` is attacker-supplied —
+and includes `::1` and the IPv4-mapped `::ffff:127.0.0.1` form Node reports on a dual-stack
+listener.
+
+**`HTTP_PROXY` and `HTTPS_PROXY` are no longer set.** `GatewayServer` implements neither HTTP
+proxy semantics (absolute-form request URIs) nor the `connect` event `CONNECT` tunnelling
+requires. Any child honouring `HTTPS_PROXY` — most HTTP clients — would have failed to reach the
+provider at all, independently of the 401 and masked by it. Setting a proxy variable for a server
+that is not a proxy is worse than setting nothing. Base-URL interception is now the only
+supported mechanism, and is documented as such.
+
+**Partial L2:** the `?token=` query parameter is removed (a credential in a query string lands in
+access logs, shell history and any error echoing the URL) and the header comparison is now
+constant-time.
+
+### H1 — the Gateway saves nothing across turns, and that is correct
+
+Measured over real sockets on realistic two-turn conversations, where a resent history contains
+each block exactly once: **0 bytes saved, fallback on every turn**, for code, prose and JSON tool
+results alike.
+
+This is not a bug. `cleanup:session-dedup` marks an elision `recoverable: true` only when an
+intact copy survives elsewhere in the same outbound payload (§16). A sole copy seen only in a
+previous turn is scored in full and refused — correctly, because Phase A established that the
+consumer is a stateless provider API with no rehydration mechanism, so such a marker is
+**deletion, not reference**.
+
+The consequence is that the Gateway has no cross-turn transform, and none is available without
+provider-side resolvability that does not exist.
+
+**Decision: document it as experimental and stop advertising the saving.** The mode delivers
+transparent interception, the full validation pipeline, byte-faithful forwarding (§38), metrics,
+and within-payload deduplication. That is a coherent product; "Cross-turn Session Deduplication"
+was not. README, ARCHITECTURE and CLAUDE.md invariant 8 are updated to say so.
+
+The measurement is pinned by `test/integration/gateway-dedup-reality.test.ts` rather than left
+as prose. **If a cross-turn saving ever appears, that is the signal to read**: either
+resolvability was implemented, in which case update the test deliberately, or the drift gate was
+relaxed and the Gateway is deleting content the model cannot recover, in which case do not.
+
+### Also corrected in the README
+
+The audit's M4 list of overstated claims is now resolved rather than deferred: "0/1 Knapsack
+Planning" is marked implemented-but-unreachable (H5, one-item bundles), "Reversible Token
+Hashing" is qualified as irreversible on the CLI by design, `TOKENDAMPER_RISK_TOLERANCE` is
+marked as having no effect on optimization (H4, still open), and `TOKENDAMPER_GATEWAY_TOKEN` is
+described accurately.
+
+### Not done here
+
+H1's underlying limitation is untouched by choice. C4 (structured message content flattened to a
+string) remains open and is still masked by the fallback; M7 (savings measured against a
+newline-joined render rather than the wire bytes) and M8 (two environment branches in the request
+path) remain open.

@@ -10,6 +10,46 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
 `git log v1.1.0..HEAD` to confirm current scope before relying on this list.
 
 ### Fixed
+- **`tokendamper exec` reaches its own gateway — audit C3, L2 (partial)**: `runExecCommand`
+  injected a token as `TOKENDAMPER_GATEWAY_TOKEN`, a variable **nothing in `src/` read** and no
+  third-party client has heard of, while the server required it on every request. Reproduced by
+  spawning a real child: every request returned `401`, and `exec` exited **0**. The existing
+  suite passed throughout because its gateway test presented the header no real client sends.
+
+  Loopback peers are now trusted — the server binds to `127.0.0.1`, so a loopback peer was
+  already the only peer able to connect, and the token was protecting one local process from
+  another while costing the entire mode. Determined from `req.socket.remoteAddress` (never a
+  header, since `X-Forwarded-For` is attacker-supplied), including `::1` and `::ffff:127.0.0.1`.
+  The token is still enforced on any non-loopback bind.
+
+  **`HTTP_PROXY`/`HTTPS_PROXY` are no longer set.** `GatewayServer` implements neither
+  absolute-form request URIs nor `CONNECT`, so any child honouring them would have failed to
+  reach the provider entirely — a second failure, independent of the 401 and masked by it.
+  Base-URL interception is now the only supported mechanism. Also removes `?token=` query
+  authentication (a credential in logs and shell history) and makes the header comparison
+  constant-time.
+
+### Changed
+- **Gateway mode is documented as experimental, and the cross-turn saving claim is withdrawn —
+  audit H1, M4**: measured over real sockets on two-turn conversations where a resent history
+  contains each block once, the Gateway saves **0 bytes and falls back on every turn**, for code,
+  prose and JSON tool results alike.
+
+  This is a design conclusion, not a defect. `cleanup:session-dedup` marks an elision recoverable
+  only when an intact copy survives in the same payload (§16); a sole copy seen only in a previous
+  turn is refused because the consumer is a stateless provider API with no rehydration mechanism,
+  so the marker would be deletion rather than reference. No cross-turn transform is available
+  without provider-side resolvability, which does not exist.
+
+  README, ARCHITECTURE.md and CLAUDE.md invariant 8 now say so. The measurement is pinned by
+  `test/integration/gateway-dedup-reality.test.ts` rather than left as prose — if a cross-turn
+  saving ever appears, either resolvability was implemented or the drift gate was relaxed.
+
+  The remaining M4 claims are resolved rather than deferred: knapsack planning marked
+  implemented-but-unreachable (H5), token hashing qualified as irreversible on the CLI by design,
+  and `TOKENDAMPER_RISK_TOLERANCE` marked as having no effect on optimization (H4, still open).
+  See DECISIONS §41.
+
 - **`R_struct` no longer votes on evidence it never gathered, and a local variable is no longer
   a symbol — audit C1b, §3.2**: two changes that only work together.
 
