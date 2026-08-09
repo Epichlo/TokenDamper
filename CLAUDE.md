@@ -5,7 +5,7 @@ Context file for Claude Code. Read this before touching the codebase.
 ## What this is
 
 TokenDamper is a **deterministic context optimization engine** for AI coding assistants
-(Claude Code, Codex, Gemini CLI, Aider). TypeScript, CommonJS, Node >=20.19, MIT.
+(Claude Code, Codex, Gemini CLI, Aider). TypeScript, CommonJS, Node >=20.19, MPL-2.0.
 It sits between a developer tool and an LLM provider API and reduces token count while
 preserving syntax validity and provider prompt-cache alignment.
 

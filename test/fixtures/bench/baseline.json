@@ -1,13 +1,49 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "dataset": "combined_humaneval_codexglue",
+  "_note": "`thresholds` is what CI enforces and is set to MEASURED TRUTH, not to a target. `observed` is the exact behaviour of the shipped fixture set and is asserted for equality, so an improvement fails the suite just as loudly as a regression and has to be recorded here deliberately. `aspirational` is where this is supposed to get to; nothing asserts it. See max_audit.md H3.",
+  "measured": {
+    "at": "2026-08-09",
+    "commit": "0f7dbb9",
+    "fixtureCount": 10
+  },
   "thresholds": {
-    "minTokenReductionRatio": 0.40,
-    "maxFallbackRate": 0.0,
+    "minTokenReductionRatio": 0.0,
+    "maxFallbackRate": 0.40,
     "maxAvgLatencyMs": 50.0,
     "minSyntaxPassRate": 1.0
   },
+  "observed": {
+    "_note": "Every non-fallback fixture also reduces exactly 0%: BenchmarkRunner supplies a TokenHasher, so the engine elides and then rehydrates back to the original. The shipped set produces no reduction by two independent mechanisms — fallback (40%) and round-trip rehydration (60%).",
+    "combined": {
+      "avgReductionRatio": 0.0,
+      "fallbackRate": 0.40,
+      "syntaxPassRate": 1.0,
+      "passAt1Rate": 1.0
+    },
+    "combinedTightBudget": {
+      "_note": "budget { maxInputTokens: 50, targetReductionRatio: 0.50 } — the shape Test 2 used to run against a private inline fixture pair.",
+      "avgReductionRatio": 0.0,
+      "fallbackRate": 0.90
+    },
+    "humanevalOnly": {
+      "_note": "0 fallbacks because nothing happens, not because it succeeded. This is the subset Tests 1-5 used to run in place of the shipped set.",
+      "avgReductionRatio": 0.0,
+      "fallbackRate": 0.0
+    },
+    "codexglueOnly": {
+      "_note": "Never exercised by the regression suite before 2026-08-09. Would have failed the old maxFallbackRate: 0.0 immediately.",
+      "avgReductionRatio": 0.0,
+      "fallbackRate": 0.80
+    }
+  },
+  "aspirational": {
+    "_note": "The old `thresholds` block. Retained as the target, asserted by nothing. Restore these to `thresholds` only when the measured numbers reach them.",
+    "minTokenReductionRatio": 0.40,
+    "maxFallbackRate": 0.0
+  },
   "expectedMetrics": {
+    "_note": "Misnomer retained for compatibility: `targetReductionRatio` is the BUDGET the tests pass to the engine, not a value they expect back.",
     "targetReductionRatio": 0.50,
     "targetFallbackRate": 0.0
   }

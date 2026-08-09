@@ -9,7 +9,52 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or released; run
 `git log v1.1.0..HEAD` to confirm current scope before relying on this list.
 
+### Fixed
+- **The regression baseline now measures the fixture set the product ships — audit H3**:
+  `test/integration/bench.test.ts` Tests 1–5 loaded `loadBenchmarkFixtures('humaneval')`, and
+  Test 2 did not use the shipped fixtures at all — it built a private two-fixture set inline
+  under an artificial `maxInputTokens: 50` and asserted 40% reduction against that. The suite
+  was green while `tokendamper bench` printed **0.0% reduction, 40% fallback**. The two facts
+  never met because no test ran the combined set: humaneval is the half that cannot fall back
+  (0.00), codexglue sits at **0.80**, and only humaneval was ever loaded.
+
+  All five tests now load the shipped combined set, and `baseline.json` records **measured
+  truth** rather than a target: `minTokenReductionRatio` 0.40 → **0.0**, `maxFallbackRate`
+  0.0 → **0.40**. The old values are retained in an `aspirational` block so the gap stays
+  visible instead of being deleted.
+
+  The new assertions use **equality**, not `>=`. A `>=` check against a measured floor of 0.0
+  is vacuously true and can never fail — the same defect one level up. Equality means an
+  *improvement* breaks the suite too and has to be recorded deliberately, which is what makes
+  it a ratchet. Verified able to fail: mutating the recorded numbers turns 3 of 6 tests red.
+
+  Two things the measurement surfaced that were not previously written down: every non-fallback
+  fixture also reduces **exactly 0%**, because `BenchmarkRunner` supplies a `TokenHasher` and
+  the engine rehydrates what it elided — so the shipped set produces no reduction by two
+  independent mechanisms, not one; and `syntaxPassRate: 1.0` is now asserted *alongside* the
+  40% fallback rate, since syntax is evaluated on emitted output and emitted output on fallback
+  is the input. Test 3 keeps the historical `aba84df` finding intact, rescoped to humaneval,
+  which is the only population it was ever true of.
+
+- **The stale Gateway warning in `README.md` is removed — audit M4a**: it claimed the Gateway
+  "bypasses TokenDamper's validation pipeline" and that `fallbackUsed` is "hardcoded `false`".
+  Both have been untrue since Phase 1.0b (`proxy.ts` imports and calls `core/engine.optimize`;
+  `fallbackUsed` is `result.fallbackUsed`). Replaced with the measured status rather than
+  deleted, because removing a false warning while leaving the feature claims uncaveated would
+  have made the page less accurate, not more: the notice now records that cross-turn dedup
+  saves 0 bytes on ordinary traffic (H1), that `tokendamper exec` returns 401 to its own child
+  (C3), and that non-ASCII bodies can be corrupted at the socket (C2). The contradicting note
+  under the architecture diagram is corrected the same way.
+
 ### Changed
+- **License metadata corrected to MPL-2.0 — audit M3**: `package.json` declared `"license":
+  "MIT"` while `LICENSE` is a full Mozilla Public License 2.0 and `README.md` stated the project
+  is licensed under it. `package.json` is publishable (`"private": false`, `files`,
+  `prepublishOnly`) and npm treats its `license` field as authoritative, so scanners read MIT —
+  permissive — and receive MPL-2.0 copyleft. `package.json` and `CLAUDE.md` now match `LICENSE`.
+  "All rights reserved" is dropped from the README copyright notice, where it sat directly above
+  an open-source grant and asserted its opposite. See DECISIONS §36.
+
 - **`contentType: 'code'` no longer selects the TypeScript validator — Phase C**:
   `CONTENT_TYPE_VALIDATORS.code` is now `null`. `code` is a *family* tag set from a file
   extension covering ~19 languages, of which the AST-lite suite implements three; mapping the
