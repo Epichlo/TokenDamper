@@ -21,6 +21,8 @@ Standard `npm` scripts (see `package.json`). Run the CLI: `node dist/src/cli/mai
 
 ```
 tokendamper optimize <input-file|->
+tokendamper optimize <file> <file> ...      # multi-item bundle
+tokendamper optimize <directory>            # walked, sorted, filtered
 tokendamper bench [dataset-path]
 tokendamper exec -- <command>
 tokendamper mcp
@@ -34,9 +36,11 @@ read `parsed.configPath` and the parser never set it); `exec` forwards everythin
 
 **Second critical flag, for stdin:** `--language`. Without it a piped payload has no filename,
 classification falls to content probes, no validator covers the item and reduction is ~0%
-(0.07% on this repo's TypeScript vs 19.27% with it, cl100k, DECISIONS §29). `--input-name`
-declares a filename instead and is equivalent. Pathless MCP calls take `language`/`path` on
-`optimize_context`. Unrecognized names are rejected, never ignored.
+(0.07% on this repo's TypeScript vs 19.27% with it, cl100k, DECISIONS §29 — a 2026-08 figure on
+a smaller corpus; for current numbers use the baseline in `docs/audit-remediation-status.md`,
+never a remembered one). `--input-name` declares a filename instead and is equivalent. Pathless
+MCP calls take `language`/`path` on `optimize_context`. Unrecognized names are rejected, never
+ignored.
 
 **Critical:** with no budget flag, the planner returns `pass_through` with an empty
 `stageIds` array — zero stages run and reduction is guaranteed 0%. This is not a bug;
@@ -103,7 +107,11 @@ and takes precedence over budget-derived knapsack selection.
    `test/integration/gateway-dedup-reality.test.ts` pins the measurement: if a cross-turn
    saving ever appears, either resolvability was implemented or the gate was relaxed.
 9. **The Gateway maps `finalBundle` back onto the parsed payload, never `emittedOutput`** —
-   `emittedOutput` is a newline-joined blob, and using it reintroduces Issue 5.
+   `emittedOutput` is a *rendered stream for a human or a model*, not an API payload, so using
+   it reintroduces Issue 5. (It used to be a newline-joined blob; since §43 it is a
+   `==> path <==` delimited envelope for multi-item bundles and bare content for one item.
+   Neither is valid JSON for a provider, so the invariant is unchanged — only its reason is
+   restated.)
 10. **When a check passes, confirm it ran.** A green result from a check that never executed
     is worse than a red one — it has happened **nine** times in this project already. Read
     `AstValidatorResult.validated` and `trace.astCoverage`, not `valid`, when the question is
@@ -147,6 +155,17 @@ and takes precedence over budget-derived knapsack selection.
     now behave the same; what a declaration still buys is *coverage*, not the refusal.
 
 ## Known bugs — highest-priority work
+
+> **Start at `docs/audit-remediation-status.md`.** It carries the current state of the
+> `max_audit.md` remediation — what is merged, the measured corpus baseline, exactly what the
+> next batch (Wave 2) requires, and the traps this codebase has for anyone changing it. The
+> entries below are the older per-issue history and several are now closed; the status doc is
+> the one that is kept current.
+>
+> As of `main` = `dd540fe`: Waves 0, 1 and most of 3 are merged (DECISIONS §36–§43).
+> **Wave 2 — M5a, M5b, H4, M8, M9, M10 — is not started and is next.** The highest-value item
+> in it is M5a: `optimize_context` has no budget parameter, so the MCP entry mode is a
+> guaranteed 0% no-op.
 
 Full detail in `tokendamper-headroom-known-issues.md`; proposed fixes in
 `purposed architecture changes.md`. Summary:
@@ -235,12 +254,21 @@ Full detail in `tokendamper-headroom-known-issues.md`; proposed fixes in
     replaces the item's whole content with a 77-byte placeholder. No validator is involved
     in extraction — it is regex over `item.content`, identical under all five contentType
     tags. Only the `jsonkey:` branch reads the tag.
-  - Cause is **granularity**: `token-hashing` is whole-item and `createContextBundle` makes
-    a single-item bundle for CLI/bench, so `R_AST` is a boolean. A single-item code bundle
-    with ≥1 symbol can never pass. (Symbol-free files pass trivially — `R_AST` defaults to
-    1.0 when `symbolsBefore` is empty.)
-  - For code, `R_struct` is pinned at 1.0 — the only marker is `filepath:`, from
-    `item.path`, which elision never touches. 40% of the metric does no work. DECISIONS §18.
+  - ~~Cause is **granularity**: `token-hashing` is whole-item and `createContextBundle` makes
+    a single-item bundle for CLI/bench, so `R_AST` is a boolean.~~ **Both halves are now false,
+    and several notes below still reason from them — read this first.** `token-hashing` prefers
+    sub-item regions and, since §43, **refuses whole-item elision of a symbol-bearing item
+    entirely** (it can never survive validation, so attempting it only guaranteed a fallback).
+    And `optimize` accepts multiple paths and directories since §43, so a CLI bundle is no longer
+    single-item — `createMultiItemRequest` builds one item per file. `R_AST` is a real ratio on
+    both routes. (Symbol-free files still pass trivially — `R_AST` defaults to 1.0 when
+    `symbolsBefore` is empty; that case is the measurement gate's, §37.)
+  - ~~For code, `R_struct` is pinned at 1.0 — the only marker is `filepath:`.~~ **Fixed in §40.**
+    `R_struct` is computed over `extractContentMarkers`, which excludes `filepath:` and
+    metadata-derived markers, and a ratio whose before-set is empty no longer votes at all — its
+    weight is redistributed. For code `S_k = 1 - R_AST`, so the maximum symbol loss that can pass
+    fell from 66.7% to **40%**. Note the audit's proposed fix (drop `filepath:`) was measured
+    **inert** on its own: an empty marker set defaults `R_struct` back to 1.0.
   - The old "Headroom independently chose `router:noop`, so this is probably correct" claim
     is **retracted** — on re-run Headroom hit a 20-second backend timeout and failed open.
     Same 0%, different mechanism. Do not cite it as corroboration.
@@ -368,6 +396,10 @@ scoring, MMR, AST folding and Prometheus metrics on top of a pipeline that curre
 
 ## Reference docs in repo
 
+**`docs/audit-remediation-status.md`** — current audit state, measured baseline, what is next.
+Start here for anything audit-related; it is the doc kept current.
+
 `ARCHITECTURE.md` (canonical, frozen) · `ROADMAP.md` · `DECISIONS.md` · `CHANGELOG.md` ·
-`docs/architecture/milestone_*.md` · `docs/v1_deployment_audit.md` ·
+`max_audit.md` (the audit itself — note several of its proposed fixes were measured wrong; see
+§40 and §42) · `docs/architecture/milestone_*.md` · `docs/v1_deployment_audit.md` ·
 `tokendamper-benchmark/BENCHMARK_RESULTS.md`
