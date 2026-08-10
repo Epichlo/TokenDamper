@@ -76,6 +76,44 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
   is a planner change. See `docs/audit-remediation-status.md`.
 
 ### Fixed
+- **Structured message content was flattened to a string and shipped as one — audit C4, and it
+  was *live*, not latent.** The Gateway ingests a provider message as
+  `JSON.stringify(msg.content)` and used to write the optimized item back as a plain string, so a
+  message whose content was `[{"type":"tool_result","tool_use_id":"toolu_01ABC",…}]` could reach
+  the provider as a bare string — a `400 invalid_request_error` on Anthropic, and broken
+  multimodal parts on OpenAI.
+
+  The audit records this as "masked by H1 — that is luck". **Measured, the mask covers only half
+  the cases.** A cross-turn *sole* copy is scored in full by drift and does fall back. Content
+  duplicated **within one payload** is elided `recoverable: true`, which drift exempts by
+  substitution — no fallback, and it ships. On the pre-fix engine that payload returned
+  `messages[2].content` as the string `"{\"__td_block__\":\"[TokenDamper Elided: …]\"}"` with
+  `fallbackUsed: false` and `tokensSaved: 42`. Within-payload duplication is also the only case
+  the Gateway saves anything on at all (DECISIONS §41), so C4 was live on exactly the path the
+  mode exists for.
+
+  Items now carry `contentShape`, and `core/elision` refuses to elide anything structured —
+  at the shared chokepoint rather than in the Gateway, so the guard survives any widening of the
+  stage list. `ElisionSkipReason` gained `'structured_content'`, which failed to compile in all
+  three eliding stages until each acknowledged it, and stages report
+  `skippedStructuredContent`. Untagged items are treated as plain text, so CLI, MCP and bench are
+  unaffected — confirmed by **594 of 594 corpus rows identical** to the pre-fix engine.
+
+- **A hole in `messages` shifted every later item onto the wrong message — audit C4.** Ingestion
+  skips falsy entries with `if (!msg) continue`, while egress indexed `finalBundle.items[idx]` by
+  array position. Also **not** masked: the pinning test fails against the pre-fix engine with
+  `expected 'ok' to be 'export function helper0…'` — the assistant's message had received the
+  previous item's content. Items now carry `payloadSlot` and egress looks it up, which also
+  survives a stage that reorders or drops items.
+
+- **The Anthropic `system` prompt is mapped back — audit C4.** It was ingested as `items[0]`
+  while the egress map started at `itemOffset`, so any change to it was dropped from `finalBody`
+  while `optimizedTokens` — and therefore `tokensSaved` and `dedupRatio` — still counted it as
+  saved. **This path is unreachable today** (`cleanup:session-dedup` refuses system items, and
+  rehydration needs `rehydrateRefs`, which the Gateway does not set); the change makes the
+  mapping correct for when it is not, and guards the `finalBody` rebuild against dropping or
+  duplicating `system`.
+
 - **The MCP entry mode did nothing — audit M5a.** `optimize_context` had no
   `targetReductionRatio` parameter, so a client calling the tool as documented got
   `pass_through`, zero stages, the input back unchanged and `reductionRatio: 0` with **no

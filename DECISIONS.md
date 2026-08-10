@@ -2892,3 +2892,128 @@ first per-file diff keyed rows on `r.file`, a field the harness does not emit. E
 collapsed onto one undefined key, and the script cheerfully reported **"compared 2 rows,
 differing: 0"** — a green result from a comparison that never happened. The row count is what
 gave it away, which is why the corrected script asserts 594 and refuses duplicate keys.
+
+---
+
+## 45. Structure Is Not a String, and C4 Was Not Latent
+
+Audit C4, the last unstarted audit item. Three defects in the Gateway's payload mapping, all in
+`src/gateway/proxy.ts`, plus a refusal added at the shared elision chokepoint.
+
+### The finding, and the part of it that was wrong
+
+Ingestion flattens a provider message to the string the pipeline needs:
+
+```js
+const textContent = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+```
+
+Egress wrote the optimized item back as a string regardless of what the caller had sent. A
+message whose content was `[{"type":"tool_result","tool_use_id":"toolu_01ABC",…}]` came back as
+`content: "…"`. The Anthropic Messages API requires a `tool_use` block to be answered by a
+`tool_result` block carrying the matching id; a bare string there is a
+`400 invalid_request_error`, and the same shape breaks OpenAI multimodal content parts. Tool-heavy
+traffic is the entire target market.
+
+**The audit rates this "Critical when reached (currently masked by H1)" and says the payload falls
+back unchanged — "that is luck". Measured, that is true of one case and false of the other, and
+the false one is the case that matters.**
+
+Cross-turn elision of a *sole* copy is `recoverable: false`, scored in full by `DriftTracker`,
+and exceeds the gate — fallback, corruption never ships. That is the masked case.
+
+Content duplicated **within one payload** is elided `recoverable: true`, and `DriftTracker`
+exempts it by substituting the pre-optimization content before scoring (§16). No drift, no
+fallback, and the elision goes out on the wire. Measured on the pre-C4 engine, a two-copy
+`tool_result` payload came back as:
+
+```
+fallbackUsed: false   tokensSaved: 42
+messages[2].content = "{\"__td_block__\":\"[TokenDamper Elided: ref=17c67ba215e4 bytes=251 kind=conversation]\"}"
+```
+
+A `tool_result` block, replaced by a string, shipped with no fallback and a reported saving.
+Within-payload duplication is also **the only case the Gateway saves anything on at all**
+(§41, `gateway-dedup-reality.test.ts`). So C4 was live on precisely the one path the mode exists
+for — not latent, and not luck.
+
+This is the third audit claim this project has had to correct by measurement (§40's inert
+`filepath:` fix, §42's imperative scoping). The pattern is worth naming: the audit's *findings*
+have held up well; its assessments of **whether a defect is reachable** have not, because
+reachability here depends on interactions between the drift exemption, the planner mode and the
+stage list that are not local to the code being read.
+
+### What changed
+
+**1. The refusal lives at the chokepoint, not in the Gateway.** `core/elision` gained
+`CONTENT_SHAPE_METADATA_KEY` and `hasStructuredContent`, and both `elideItem` and `elideRegions`
+refuse an item carrying `contentShape: 'structured'` with a new `ElisionSkipReason`,
+`'structured_content'`. Putting it in the Gateway would have protected today's single stage;
+putting it here protects any stage the Gateway is ever pointed at, which is the change most
+likely to make this live again.
+
+`ElisionSkipReason` is a union and the stages count into `Record<ElisionSkipReason, number>`, so
+adding the member **failed to compile** in all three eliding stages until each acknowledged it.
+That is the intended forcing function, and it is why the reason is a union member rather than a
+boolean.
+
+The refusal is checked **first**, before the savings and syntax checks. A structured item's
+content is `JSON.stringify(...)`, which classifies as JSON, so it would usually have been refused
+downstream anyway — for being JSON. Right outcome, wrong reason, and it evaporates the moment the
+classification changes. The item is now refused for the reason that is true of it.
+
+An item with **no** tag is treated as plain text, which is correct for every non-Gateway
+producer: CLI, MCP and bench all ingest text that was text.
+
+**2. Egress maps by slot, not by array position.** Ingestion skips falsy entries
+(`if (!msg) continue`) while egress indexed `finalBundle.items[idx]` by position, so a single hole
+in `messages` shifted every later item onto the wrong message. This was **not** masked either —
+it is live on today's Gateway, and the test that pins it fails against the pre-C4 engine with
+`expected 'ok' to be 'export function helper0…'`: the assistant's message had received the
+previous item's content. Items now carry `payloadSlot` and egress looks up by it.
+
+Invariant 9 says the Gateway maps `finalBundle` back onto the parsed payload. It does not say
+*positionally*, and a filtered push could never supply the precondition a positional map assumes.
+
+**3. The Anthropic `system` prompt is mapped back.** It was ingested as `items[0]` while
+`updatedMessages` started at `itemOffset`, so a change to it was dropped from `finalBody` — while
+`optimizedTokens`, and therefore `tokensSaved` and `dedupRatio`, still counted it as saved. The
+turn's metrics described a saving that never reached the wire.
+
+This path is **unreachable today** and the entry says so rather than claiming a fix that fires:
+`cleanup:session-dedup` refuses system items (Rule 2), and rehydration — the one branch that runs
+before that check — needs `rehydrateRefs`, which the Gateway does not set. What the change buys
+is that the mapping is correct when something eventually does change a system item, and that the
+`finalBody` rebuild neither drops nor duplicates `system`, which is a live regression risk created
+by this commit and is tested as one.
+
+### Measurement
+
+**594 of 594 corpus rows identical** to the pre-C4 engine across 17 fields, same frozen corpus,
+varying only `dist/`. The guard is inert for untagged items, which is every CLI, MCP and bench
+item, and that is measured rather than reasoned.
+
+Live on a real `GatewayServer` over sockets, the discriminating comparison — identical bytes,
+differing only in shape:
+
+```
+structured            fallbackUsed: false   tokensSaved: 0    content stays an array
+same bytes as string  fallbackUsed: false   tokensSaved: 42   elided normally
+```
+
+The refusal is scoped to the shape, not to the content, and the saving it declines is honestly
+reported as zero rather than bought by corrupting the payload.
+
+### A corpus caution, recorded because it cost time
+
+The TypeScript bucket read **23.16%** here against the **23.26%** recorded for Wave 2, on the same
+297-file recipe with `reduced` and `fallback` unchanged. The pre-C4 engine also reads 23.16%, so
+it is not this change.
+
+The cause is **line endings**. Wave 2's corpus was frozen from working-tree files written with
+LF; committing and checking them out normalized them to CRLF, adding a byte per line to the
+repository's own sources — which are the corpus. `file` on a frozen corpus source reports "with
+CRLF line terminators".
+
+So aggregate reduction figures on this repo are not comparable across a commit boundary, not only
+across a corpus-size change. Only the per-row A/B over one frozen corpus is.

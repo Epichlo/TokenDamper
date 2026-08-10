@@ -151,6 +151,7 @@ export function runDeltaCompressionStage(
   let bytesSaved = 0;
   const skipReasons: Record<ElisionSkipReason, number> = {
     no_savings: 0,
+    structured_content: 0,
     post_condition_rejected: 0,
   };
 
@@ -253,12 +254,13 @@ export function runDeltaCompressionStage(
         itemsSkipped,
         skippedNoSavings: skipReasons.no_savings,
         skippedPostConditionRejected: skipReasons.post_condition_rejected,
+        skippedStructuredContent: skipReasons.structured_content,
         bytesSaved: 0,
         tokenEstimateSaved: 0,
       },
       notes:
         itemsSkipped > 0
-          ? `No items delta-compressed; skipped ${itemsSkipped} (${skipReasons.post_condition_rejected} rejected by post-condition, ${skipReasons.no_savings} for no savings).`
+          ? `No items delta-compressed; skipped ${itemsSkipped} (${skipReasons.post_condition_rejected} rejected by post-condition, ${skipReasons.no_savings} for no savings, ${skipReasons.structured_content} for structured content).`
           : 'No matching modified items found for delta compression.',
     });
   }
@@ -302,9 +304,10 @@ export function runDeltaCompressionStage(
       itemsSkipped,
       skippedNoSavings: skipReasons.no_savings,
       skippedPostConditionRejected: skipReasons.post_condition_rejected,
+      skippedStructuredContent: skipReasons.structured_content,
       bytesSaved,
       tokenEstimateSaved,
     },
-    notes: `Successfully delta-compressed ${itemsCompressed} item(s); skipped ${itemsSkipped} (${skipReasons.post_condition_rejected} rejected by post-condition, ${skipReasons.no_savings} for no savings).`,
+    notes: `Successfully delta-compressed ${itemsCompressed} item(s); skipped ${itemsSkipped} (${skipReasons.post_condition_rejected} rejected by post-condition, ${skipReasons.no_savings} for no savings, ${skipReasons.structured_content} for structured content).`,
   });
 }

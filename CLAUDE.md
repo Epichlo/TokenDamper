@@ -166,7 +166,15 @@ and takes precedence over budget-derived knapsack selection.
 > reports `budgetApplied` when it does not), MCP session rehydration matches a marker the product
 > actually emits, the Gateway no longer reads test seams from `process.env` or returns the
 > caller's credentials as response headers, `bench` runs when installed, and three knobs that did
-> nothing are gone from the surface. **C4 is the only unstarted audit item left.**
+> nothing are gone from the surface. **C4 is closed too (§45), so every task-shaped audit item is
+> done** — what remains is three decisions (H2, M1, M11) and the architectural work in the status
+> doc's §5, chiefly Phase 1c.
+>
+> §45 is worth reading even if you never touch the Gateway: C4 was recorded as "masked by the
+> drift gate — that is luck", and measurement found it **live** on within-payload duplication,
+> which drift exempts and which is the only case the Gateway saves anything on. That is the third
+> audit *reachability* claim this project has corrected by measuring (§40, §42, §45). Do not defer
+> a defect because a doc says it is latent.
 >
 > Two things Wave 2 established that outlive it: a 0% result now has to say whether anything ran
 > (this is invariant 10 applied to budgets, and H2 is the same question one layer down), and the

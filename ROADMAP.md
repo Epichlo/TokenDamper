@@ -138,11 +138,14 @@ before scheduling any of it.** Each is a decision with a legitimate "narrow the 
   fallbacks involve `CONSTRAINT_DIRECTIVE_LOST`, a nine-word substring match over the joined
   bundle. ⚠ **C1 must land first:** this check is currently the *only* thing protecting markdown
   from deletion — this repo's own README survives solely because it contains "never" and "must".
-- **C4 + M7** — preserve content shape on Gateway items (structured `tool_result` blocks are
-  flattened to strings, producing API-invalid payloads); fix the `continue`-vs-positional-`map`
-  index skew and the never-mapped-back Anthropic `system` item; measure savings against the bytes
-  on the wire rather than the newline-joined render. **Only if B keeps the Gateway.** Currently
-  masked by H1, which is luck, not safety.
+- ~~**C4**~~ — **done, DECISIONS §45.** Content shape is carried on Gateway items and
+  `core/elision` refuses to elide anything structured; egress maps by `payloadSlot` instead of
+  array position; the Anthropic `system` item is mapped back. The note that it was "currently
+  masked by H1, which is luck, not safety" was **half wrong** — measured, within-payload
+  duplication is drift-exempt and shipped a `tool_result` block as a bare string with
+  `fallbackUsed: false`. It was live, on the one path the Gateway saves anything on.
+- **M7** — measure savings against the bytes on the wire rather than the newline-joined render.
+  Still open, and no longer blocked on C4. **Only if B keeps the Gateway.**
 - **M1 + M4b + M11** — docs last, once A–D are answered. Rename "syntax validity" to
   "bracket/quote integrity" (the TS validator passes `const x = ;` and plain English prose);
   correct the README's remaining untrue claims; retire the phase narratives to git history.
