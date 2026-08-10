@@ -9,6 +9,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or released; run
 `git log v1.1.0..HEAD` to confirm current scope before relying on this list.
 
+### Documentation
+- **`docs/audit-remediation-status.md` is the entry point for audit work**, and `CLAUDE.md` points
+  at it. It carries what is merged, the measured corpus baseline, exactly what Wave 2 requires,
+  and the traps this codebase has for anyone changing it — replacing status prose scattered across
+  several documents rather than adding to it (audit M11).
+
+  `CLAUDE.md` corrections, all of which other notes reasoned from: *"`createContextBundle` makes a
+  single-item bundle for CLI/bench, so `R_AST` is a boolean"* is false on both halves since §43;
+  *"for code, `R_struct` is pinned at 1.0"* is fixed by §40 (and the audit's proposed fix for it
+  was measured **inert**); invariant 9's rationale restated, since `emittedOutput` is no longer a
+  newline-joined blob; the 19.27% figure marked as belonging to a smaller corpus.
+
+- **Corpus harness recipe: `typescript` 57 → 59**, the two files H5 added. `collect.js` would
+  otherwise refuse on the next run — which is it working as designed. A clean post-wave baseline
+  is recorded in the status doc: Python **23.14%** (file) / **22.66%** (stdin), TypeScript
+  **25.35%** (file) over 59 files. That last figure is *not* comparable to §43's 29.55%: same
+  engine, larger denominator.
+
 ### Added
 - **`optimize` accepts multiple paths and directories — audit H5**: `tokendamper optimize a.ts
   b.ts` and `tokendamper optimize ./src`. This is what makes the 0/1 knapsack reachable:
