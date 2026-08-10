@@ -2453,3 +2453,257 @@ from "that class of bug". After the locals fix this is the entire remaining symb
 commented codebase carry noise proportional to how often the words `function` and `class` appear
 in English. Not fixed here: making extraction comment-aware is a per-language lexing problem,
 and the measured cost does not yet justify it.
+
+---
+
+## 41. The Gateway Is an Experimental Pass-Through, and `exec` Now Reaches It
+
+**Date:** 2026-08-09 · **Status:** Accepted · **Closes:** max_audit.md C3, H1, L2 (partial)
+
+Two findings, one decision, because they are the same question: what is Gateway mode *for*?
+
+### C3 — `exec` returned 401 to its own child
+
+`runExecCommand` generated a per-run token and injected it as `TOKENDAMPER_GATEWAY_TOKEN`. The
+server required it on every non-`/health` request. The child is `aider`, `claude`, `codex` or
+`curl` — third-party software that has never heard of that variable and sends `authorization` or
+`x-api-key` and nothing else. **Nothing in `src/` read it either.**
+
+Reproduced by spawning a real child through `runExecCommand`: every request came back
+`401 Unauthorized: Invalid or missing gateway token`, and `exec` exited **0**. The flagship
+integration was non-functional end to end, and the existing test suite passed throughout because
+its gateway test presented the header that no real client sends.
+
+**Decision: trust loopback peers, keep the token for non-loopback binds.** The server binds to
+`127.0.0.1` by default, so a loopback peer was already the only peer that could connect; the
+token was protecting one local process from another on the same machine. That boundary is real
+but narrow, and it was being paid for with a mode nobody could use. Loopback is determined from
+`req.socket.remoteAddress` — never from a header, since `X-Forwarded-For` is attacker-supplied —
+and includes `::1` and the IPv4-mapped `::ffff:127.0.0.1` form Node reports on a dual-stack
+listener.
+
+**`HTTP_PROXY` and `HTTPS_PROXY` are no longer set.** `GatewayServer` implements neither HTTP
+proxy semantics (absolute-form request URIs) nor the `connect` event `CONNECT` tunnelling
+requires. Any child honouring `HTTPS_PROXY` — most HTTP clients — would have failed to reach the
+provider at all, independently of the 401 and masked by it. Setting a proxy variable for a server
+that is not a proxy is worse than setting nothing. Base-URL interception is now the only
+supported mechanism, and is documented as such.
+
+**Partial L2:** the `?token=` query parameter is removed (a credential in a query string lands in
+access logs, shell history and any error echoing the URL) and the header comparison is now
+constant-time.
+
+### H1 — the Gateway saves nothing across turns, and that is correct
+
+Measured over real sockets on realistic two-turn conversations, where a resent history contains
+each block exactly once: **0 bytes saved, fallback on every turn**, for code, prose and JSON tool
+results alike.
+
+This is not a bug. `cleanup:session-dedup` marks an elision `recoverable: true` only when an
+intact copy survives elsewhere in the same outbound payload (§16). A sole copy seen only in a
+previous turn is scored in full and refused — correctly, because Phase A established that the
+consumer is a stateless provider API with no rehydration mechanism, so such a marker is
+**deletion, not reference**.
+
+The consequence is that the Gateway has no cross-turn transform, and none is available without
+provider-side resolvability that does not exist.
+
+**Decision: document it as experimental and stop advertising the saving.** The mode delivers
+transparent interception, the full validation pipeline, byte-faithful forwarding (§38), metrics,
+and within-payload deduplication. That is a coherent product; "Cross-turn Session Deduplication"
+was not. README, ARCHITECTURE and CLAUDE.md invariant 8 are updated to say so.
+
+The measurement is pinned by `test/integration/gateway-dedup-reality.test.ts` rather than left
+as prose. **If a cross-turn saving ever appears, that is the signal to read**: either
+resolvability was implemented, in which case update the test deliberately, or the drift gate was
+relaxed and the Gateway is deleting content the model cannot recover, in which case do not.
+
+### Also corrected in the README
+
+The audit's M4 list of overstated claims is now resolved rather than deferred: "0/1 Knapsack
+Planning" is marked implemented-but-unreachable (H5, one-item bundles), "Reversible Token
+Hashing" is qualified as irreversible on the CLI by design, `TOKENDAMPER_RISK_TOLERANCE` is
+marked as having no effect on optimization (H4, still open), and `TOKENDAMPER_GATEWAY_TOKEN` is
+described accurately.
+
+### Not done here
+
+H1's underlying limitation is untouched by choice. C4 (structured message content flattened to a
+string) remains open and is still masked by the fallback; M7 (savings measured against a
+newline-joined render rather than the wire bytes) and M8 (two environment branches in the request
+path) remain open.
+
+---
+
+## 42. An Imperative Lives in a Comment, Not in an Expression
+
+**Date:** 2026-08-09 · **Status:** Accepted · **Closes:** max_audit.md H6
+
+`cleanup:constraint-preservation` scans content for nine keywords — `must`, `must not`, `never`,
+`always`, `only if`, `do not`, `required`, `except when`, `make sure to`, `critical` — and
+`validate()` fails the run if any extracted sentence is absent afterwards. The list is written for
+natural-language system prompts. It was applied to raw content of every kind, and in source
+`required` and `critical` are ordinary identifiers. On the audit's corpus, **24 of 40 fallbacks
+involved `CONSTRAINT_DIRECTIVE_LOST`** — the single largest cause of code not being optimized.
+
+### Neither extreme is right, and the measurement says why
+
+Over a frozen 293-file corpus at `targetReductionRatio: 0.3`, classifying every directive a run
+reported as dropped by where it came from:
+
+| bucket | from comments / docstrings | from code |
+|---|---|---|
+| Python | 16 | **38** — nearly all `logger.critical(...)` |
+| TypeScript | 38 | **13** — `readonly required?`, error-message literals |
+
+Trusting the check everywhere keeps 51 false positives. The audit's proposed remedy — *"scope
+directive extraction by content type (prose/markdown/prompt kinds only, not `code`)"* — discards
+54 genuine constraints, and specifically the Python docstring case that
+`docs/phase-1d-semantic-gate-disposition.md` measured to be the **only** thing this check
+actually catches.
+
+What separates the two populations is not the content **type** but the **region**. An instruction
+to a reader lives in a comment or a docstring; it never lives in an expression.
+
+### Decision
+
+1. **Extraction is scoped to prose regions.** `extractProseRegions` returns whole content for
+   prose content types, and for code returns line comments (`//`, `#`, `--`, `*`), block comment
+   bodies, and Python docstrings including their interior lines. It is deliberately
+   line-oriented and syntax-approximate rather than lexed: this is a *filter on what may raise a
+   constraint*, so over-inclusion costs a false positive — the pre-existing behaviour — and
+   under-inclusion costs a missed constraint. Requiring the comment leader at the **start** of a
+   trimmed line is exactly what excludes `logger.critical(exc)` while keeping
+   `# never call this twice`.
+
+2. **Retention is checked per item.** The check collected every item's directives into one list
+   and tested each against `after.items.map(i => i.content).join('\n')`. A directive extracted
+   from item A was therefore satisfied if the string happened to appear anywhere in item B — the
+   check could pass for content that was in fact destroyed — and a loss anywhere failed the whole
+   run with no way to say where. Matching by item id fixes both, and the message now names the
+   item. An item absent from `after` is skipped, on the same reasoning
+   `DriftTracker.findUnwitnessedItems` records: selection is not elision, and failing here would
+   make any prunable item carrying an imperative unprunable.
+
+### Measured
+
+| bucket / route | before | after | delta |
+|---|---|---|---|
+| python (file) | 14.98% | **23.14%** | +8.16pp |
+| python (stdin) | 14.88% | **22.66%** | +7.78pp |
+| typescript (file) | 23.38% | **27.33%** | +3.95pp |
+
+**20 rows changed of 586, and none regressed** — no file went from reducing to falling back.
+Every other bucket is byte-identical.
+
+### What remains, and why it is the check working
+
+After the change, TypeScript has **zero** remaining code-sourced directives; every remaining
+`CONSTRAINT_DIRECTIVE_LOST` is a genuine imperative in a comment or docstring that an elision
+would drop. Those files still fall back, and should: the run would otherwise silently delete an
+instruction. That is the check doing its job rather than misfiring, and it is why the category
+does not go to zero.
+
+### Ordering note
+
+This had to land **after** §37 (C1a). The audit observed that this check was "currently the only
+thing preventing markdown documents from being deleted" — a document survived if its author
+happened to use one of nine words. Narrowing it first would have widened that data loss. With
+§37 in place the drift measurement gate covers markdown on its own merits, which the corpus
+confirms: the prose bucket is unchanged at 28/28 fallbacks, now attributed to drift rather than
+to a coincidence of vocabulary.
+
+---
+
+## 43. The Knapsack Gets Something to Solve
+
+**Date:** 2026-08-09 · **Status:** Accepted · **Closes:** max_audit.md H5 (ingestion half)
+
+`ARCHITECTURE.md`, `README.md` and CLAUDE.md all put a "Stateless 0/1 Knapsack Planner" at the
+centre of the design, and invariant 6 promises cache-aligned selection as the differentiator. None
+of it could run. `createContextBundle` produces exactly **one** item;
+`applyCacheAwarePrefixLocking` pins everything inside the first 1,024 tokens; `solve01Knapsack`
+places pinned items outside the candidate set and always selects them. So item 0 was always
+pinned, `itemsPruned` was always 0, and `planner/knapsack.ts`, `planner/cache-aware.ts`,
+`topology/topology-scorer.ts`, `topology/dependency-graph.ts` and `topology/git-inspector.ts`
+could not affect any output the product was able to produce.
+
+`optimize` now accepts multiple paths and directories. Measured on `src/core` at
+`maxInputTokens: 4000`: **31 items, 15 pruned, 20,540 tokens saved by the planner.**
+
+### The output format, and the test that demanded a decision
+
+`test/unit/fallback-render.test.ts` pinned the success path's `items.join('\n')` as a latent
+defect and said in as many words that whoever made an `emittedOutput` consumer multi-item "should
+stop and read it". This is that change, so the defect is fixed rather than inherited.
+
+**One item renders as its content and nothing else**, which keeps CLI, MCP and bench byte-identical.
+More than one renders with a `==> path <==` header per item — `head`/`tail`'s convention, chosen
+because it is one a reader already knows. It is **not** collision-proof and nothing escapes it:
+the consumer is a model being given context, legibility is worth more than round-trip parsing,
+and anything needing to machine-parse should read `finalBundle` from the trace, which carries the
+items structurally.
+
+Fail-open is **per file** — the original bytes of each file, under the same headers, never a
+re-encoding of the decoded string (DECISIONS §35 holds per item). What is not byte-identical is
+the stream as a whole, because the headers are TokenDamper's and were in no input file.
+
+### Three defects this exposed, each fixed here
+
+1. **Pruning was scored as drift.** `findUnwitnessedItems` had always exempted an item absent from
+   `after` — selection is not elision — but the *ratios* compared whole bundles, so a pruned
+   item's symbols simply vanished and `R_AST` read the planner doing its job as semantic loss.
+   Invisible while every bundle held one item; decisive at 31. The ratios now score retained items
+   only, **guarded on ids actually corresponding** between the bundles: `id` is content-derived at
+   construction and preserved by the transforms, so a caller that rebuilds its `after` bundle
+   independently would otherwise leave nothing to compare and report `S_k = 0` for a gutted
+   bundle. With no correspondence the whole bundle is compared, as before. Failing open to *more*
+   measurement is the point.
+
+2. **Whole-item elision of a symbol-bearing item is refused every time**, so it is no longer
+   attempted. Since §40, `S_k = 1 - R_AST` for code, so destroying every symbol scores 1.0 against
+   a gate that fires above 0.40 — no threshold or flag lets it through. On a one-item bundle that
+   was invisible (the run fell back and emitted the input, which is what skipping produces anyway).
+   On a multi-item bundle two pure-`types.ts` files — interfaces to lose, no function bodies to
+   elide — were taking a 16-file batch down with them. Symbol-free items are unaffected and still
+   elided whole; that is the population the path exists for.
+
+3. **`TD_PRESERVE:` matched its own implementation.** `drift-tracker.ts` (the regex literal) and
+   `cli/html-reporter.ts` (the highlighter for the same directive) each acquired a content marker
+   they do not semantically have. Because `R_struct` is a bundle-scoped set, one phantom marker
+   being elided drove it to 0 and took a 16-file batch to `S_k = 0.4053` on a run whose real symbol
+   retention was **99.1%**. Harvesting is now scoped to prose regions **for `code` only** — not for
+   the prose types generally, because `TD_PRESERVE:` is an unambiguous token rather than an English
+   word, and the only way it appears without being a directive is as a literal inside an
+   expression, a construct that exists only in code. This also retires the `html-reporter.ts`
+   regression §40 recorded as left in deliberately.
+
+Also fixed: the envelope headers were counted on the output side only, so a multi-item fallback
+reported **72,973 → 73,667** tokens — a negative reduction, the same shape as the phantom −1.39%
+already diagnosed once in the Python bench harness (Issue 5). `tokenBefore` now renders the same
+envelope when the bundle holds more than one item. Single-item and Gateway paths are untouched;
+for the Gateway `rawInput` is the whole JSON body and the bundle is the extracted messages, which
+are genuinely different populations.
+
+### Measured
+
+Frozen 293-file corpus, 586 rows: **1 row changed, 0 regressions.** TypeScript 27.33% → **29.55%**.
+Fallback counts drop sharply (prose 28 → 9, TypeScript over stdin 57 → 0) because items whose
+elision was doomed are no longer transformed-then-reverted; the emitted bytes are the same, the
+wasted work is gone.
+
+### Not done: §3.1, which is now the binding constraint
+
+**Multi-file runs still fall back on real corpora, and not for any reason this change can fix.**
+On the 45-file Python corpus: drift 0.0359, AST clean, 169 KB elided — and it falls back, because
+**26 constraint failures across 14 items revert all 45**. Validation is bundle-scoped and fallback
+is all-or-nothing (audit §3.1, Phase 1c, unstarted).
+
+This delivers the mechanism; §3.1 stands between it and the outcome. The prerequisite Phase 1c was
+missing — attribution — now exists for the classes that matter: constraint failures name their
+item (§42), unwitnessed items name theirs (§37), and AST issues carry `itemId`. Drift remains
+bundle-scoped and would need its own rule.
+
+`ARCHITECTURE.md` is unchanged: multi-item bundles were always in the model (`createBundleFromItems`
+predates this), and nothing about the linear pipeline moved. What changed is that a shipping
+adapter finally builds one.

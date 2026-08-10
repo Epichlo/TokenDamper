@@ -105,7 +105,12 @@ Builds the lightweight explainability trace.
 Contains the built-in stage implementations.
 Stages must be deterministic, side-effect free, and built around the frozen core model.
 - `delta-compression`: Implements line-based Myers diff algorithm to transmit only changed lines across turns instead of full file blobs.
-- `session-dedup`: Implements cross-turn deduplication.
+- `session-dedup`: Deduplicates repeated content blocks, keyed by SHA-256 against the session
+  store. It marks an elision `recoverable: true` **only when an intact copy survives elsewhere
+  in the same outbound payload**. A sole copy seen only in a previous turn is elided but scored
+  in full by `DriftTracker`, which refuses it — the consumer is a stateless provider API with no
+  rehydration mechanism, so that marker would be deletion rather than reference. Measured saving
+  on ordinary two-turn conversations is therefore **0 bytes**. See DECISIONS §16 and §41.
 - `topology-pruner`: Implements workspace topology pruning.
 
 ### `src/core/hashing` & `src/core/ledger`

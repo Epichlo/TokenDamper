@@ -9,8 +9,22 @@ import {
   selectElisionRegions,
   type ElisionSkipReason,
 } from '../../core/elision';
+import { DriftTracker } from '../../core/ledger/drift-tracker';
 import { TokenHasher } from '../../core/hashing/token-hasher';
 import { DEFAULT_TOKENIZER, estimateBundleTokens, type TokenizerAdapter } from '../../core/hashing/tokenizer';
+
+/**
+ * Whether drift would have symbols to score for this item.
+ *
+ * Uses `DriftTracker.extractSymbols` rather than a second extractor on purpose: the question
+ * being asked is exactly "will the drift gate see symbols disappear here?", so asking any other
+ * implementation would let the two answers diverge — which is DECISIONS §19's lesson about a
+ * second token estimator, in a different place.
+ */
+function hasExtractableSymbols(item: ContextItem): boolean {
+  const probe = { items: [item] } as unknown as ContextBundle;
+  return new DriftTracker().extractSymbols(probe).size > 0;
+}
 
 export interface TokenHashingStageOptions {
   /**
@@ -152,6 +166,30 @@ export function runTokenHashingStage(
 
       itemsSkipped += 1;
       skipReasons[regionOutcome.reason] += 1;
+      return item;
+    }
+
+    // Whole-item elision of a symbol-bearing item is refused downstream **every time**, so it is
+    // not attempted — audit H5.
+    //
+    // Since DECISIONS §40, an unmeasured `R_struct` no longer contributes a free 0.40, so for a
+    // code item `S_k = 1 - R_AST`. Destroying every symbol makes `R_AST = 0` and `S_k = 1.0`,
+    // against a gate that fires above 0.40. There is no threshold, budget or flag under which
+    // this elision survives validation; performing it only guarantees a fallback.
+    //
+    // On a one-item bundle that was invisible — the run fell back and emitted the input, which is
+    // what skipping produces anyway, minus the wasted work. Multi-file ingestion made it matter:
+    // validation is bundle-scoped, so a single unsegmentable-but-symbol-bearing file (a pure
+    // `types.ts`, which has interfaces to lose and no function bodies to elide) took the whole
+    // batch down with it. Measured on `src/core` at `maxInputTokens: 4000`, two such files were
+    // destroying 100% of their symbols and forcing a fallback across all 16 retained items.
+    //
+    // Items with no symbols to lose are unaffected and still elided whole: JSON, prose, logs and
+    // truncated code are exactly the population this path was written for, and `R_AST` has
+    // nothing to score there. That case is governed by the measurement gate (§37) instead.
+    if (hasExtractableSymbols(item)) {
+      itemsSkipped += 1;
+      skipReasons.no_savings += 1;
       return item;
     }
 

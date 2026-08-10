@@ -1,3 +1,4 @@
+import { extractProseRegions } from '../constraints/directives';
 import type { ContentType, ContextBundle, ContextItem } from '../model';
 
 /**
@@ -172,7 +173,47 @@ export class DriftTracker {
 
     const effectiveAfter = resolveRecoverableElisions(beforeBundle, afterBundle);
 
-    const symbolsBefore = this.extractSymbols(beforeBundle);
+    // The ratios score **retained** items only — selection is not elision.
+    //
+    // `findUnwitnessedItems` has always exempted an item absent from `after`, on the grounds
+    // that the planner exists to drop items under a budget the caller set. The ratios did not
+    // apply the same rule: they compared whole bundles, so a pruned item's symbols simply
+    // vanished from the after set and `R_AST` read the planner doing its job as semantic loss.
+    //
+    // That was invisible while every shipping route built a one-item bundle — there was nothing
+    // to prune (audit H5). Multi-file ingestion makes it live and decisive: on a 31-item bundle
+    // at `maxInputTokens: 4000` the knapsack prunes 15 items and saves 20,540 tokens, roughly
+    // half the symbols go with them, and the run fell back on drift every time. The knapsack
+    // would have been reachable and still unable to emit anything.
+    //
+    // Scoping to the intersection keeps the gate's actual question intact — *was retained
+    // content corrupted?* — and leaves budget-driven selection to the planner, which is the
+    // component the caller pointed at it. An item dropped entirely is still covered, by the
+    // budget the caller set and by `itemsPruned` in the trace.
+    // Guarded on ids actually corresponding between the two bundles.
+    //
+    // `createContextItem` derives `id` from a content hash, and the transforms preserve it
+    // explicitly (`id: item.id` in `elideItem`/`elideRegions`), so in the pipeline an item keeps
+    // its identity across stages and "absent from after" really does mean pruned. A caller that
+    // builds its `after` bundle independently — several tests do, and any future embedder might —
+    // gets fresh ids for changed content, and filtering on them would leave *nothing* to compare
+    // and report `S_k = 0` for a bundle that had been gutted.
+    //
+    // So the exemption applies only when at least one id survives, which is the evidence that ids
+    // are being carried rather than regenerated. With no correspondence the whole bundle is
+    // compared, exactly as before. Failing open to *more* measurement rather than less is the
+    // point: invariant 10 says a check that silently stops looking is worse than one that is
+    // merely coarse.
+    const retainedIds = new Set(effectiveAfter.items.map((item) => item.id));
+    const idsCorrespond = beforeBundle.items.some((item) => retainedIds.has(item.id));
+    const retainedBefore: ContextBundle = idsCorrespond
+      ? {
+          ...beforeBundle,
+          items: Object.freeze(beforeBundle.items.filter((item) => retainedIds.has(item.id))),
+        }
+      : beforeBundle;
+
+    const symbolsBefore = this.extractSymbols(retainedBefore);
     const symbolsAfter = this.extractSymbols(effectiveAfter);
 
     let astSymbolRetentionRatio = 1.0;
@@ -187,7 +228,7 @@ export class DriftTracker {
     }
 
     // Reported for continuity and diagnostics; the *ratio* below deliberately does not use them.
-    const markersBefore = this.extractMarkers(beforeBundle);
+    const markersBefore = this.extractMarkers(retainedBefore);
     const markersAfter = this.extractMarkers(effectiveAfter);
 
     // `R_struct` measures content structure, and only content structure — C1b.
@@ -198,7 +239,7 @@ export class DriftTracker {
     // `filepath:` is usually the *only* marker, that pinned `R_struct` at exactly 1.0.
     // `extractContentMarkers` has existed since §28 for precisely this distinction, and its own
     // doc comment already said these markers "cannot serve as evidence that content was retained".
-    const contentMarkersBefore = this.extractContentMarkers(beforeBundle);
+    const contentMarkersBefore = this.extractContentMarkers(retainedBefore);
     const contentMarkersAfter = this.extractContentMarkers(effectiveAfter);
 
     let structuralIntegrityRatio = 1.0;
@@ -249,7 +290,9 @@ export class DriftTracker {
             ? structuralIntegrityRatio
             : 1.0;
     const driftScore = Math.max(0.0, Math.min(1.0, 1.0 - retentionScore));
-    const contentChanged = renderBundle(beforeBundle) !== renderBundle(effectiveAfter);
+    // Compared over retained items too: otherwise pruning alone reads as "content changed",
+    // which is the same conflation the ratios above just stopped making.
+    const contentChanged = renderBundle(retainedBefore) !== renderBundle(effectiveAfter);
 
     // Which items were destroyed without leaving any evidence they were retained?
     //
@@ -565,17 +608,35 @@ export class DriftTracker {
           markers.add(`fence:${trimmed}`);
         }
 
-        // Preserved directives — content-agnostic, harvested from every content type.
-        const directiveMatch = /(TD_PRESERVE:[^\s>\n]+)/g;
-        let match: RegExpExecArray | null;
-        while ((match = directiveMatch.exec(trimmed)) !== null) {
-          if (match[1]) markers.add(`directive:${match[1]}`);
-        }
-
         // Section delimiters
         if (harvestMarkdownMarkers && /^(---|===|System:|User:|Assistant:|\[Context\]|\[Instructions\])/i.test(trimmed)) {
           markers.add(`section:${trimmed}`);
         }
+      }
+
+      // Preserved directives, harvested from **prose regions only**.
+      //
+      // Same reasoning as imperative directives (DECISIONS §42): a preservation directive is an
+      // instruction, and instructions live in comments and documents, not in expressions.
+      //
+      // Scanned over raw content, the pattern matched its own implementation. Measured twice in
+      // this repository — `src/core/ledger/drift-tracker.ts` (the regex literal that used to sit
+      // in the line loop above) and `src/cli/html-reporter.ts` (the highlighter for the same
+      // directive) each acquired a content marker they do not semantically have. Because
+      // `R_struct` is a bundle-scoped set, one phantom marker being elided drove it to 0 and took
+      // a 16-file batch to `S_k = 0.4053`, on a run whose real symbol retention was **99.1%**.
+      // Narrowed to `code` specifically, not to the prose content types generally. `TD_PRESERVE:`
+      // is an unambiguous TokenDamper token rather than an English word, so the only way it
+      // appears without being a directive is as a literal inside an expression — a regex or a
+      // string — and that construct exists only in code. Filtering JSON or logs the same way
+      // would drop real directives for no measured benefit, since neither has comments for one
+      // to survive in.
+      const directiveSource =
+        item.contentType === 'code' ? extractProseRegions(item.content, item.contentType) : item.content;
+      const directivePattern = /(TD_PRESERVE:[^\s>\n]+)/g;
+      let directiveHit: RegExpExecArray | null;
+      while ((directiveHit = directivePattern.exec(directiveSource)) !== null) {
+        if (directiveHit[1]) markers.add(`directive:${directiveHit[1]}`);
       }
 
       // Metadata constraintDirectives

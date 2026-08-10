@@ -1,8 +1,33 @@
+import { timingSafeEqual } from 'node:crypto';
 import { once } from 'node:events';
 import { createServer, IncomingMessage, Server, ServerResponse } from 'node:http';
 import { handleProxyRequest } from './proxy';
 import { GatewaySessionStore } from './session-store';
 import type { GatewayConfig, ProxyRequestResult } from './types';
+
+/**
+ * Whether the peer on the other end of this socket is the local machine.
+ *
+ * `::ffff:127.0.0.1` is the IPv4-mapped IPv6 form Node reports on a dual-stack listener, and
+ * omitting it would make the carve-out silently fail on exactly the platforms that use it.
+ * Read from the socket, never from a header: `X-Forwarded-For` and friends are attacker-supplied.
+ */
+function isLoopbackPeer(req: IncomingMessage): boolean {
+  const addr = req.socket.remoteAddress;
+  if (!addr) return false;
+  return addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1' || addr.startsWith('127.');
+}
+
+/** Constant-time compare that tolerates absent/duplicated headers (audit L2). */
+function timingSafeEqualString(provided: string | string[] | undefined, expected: string): boolean {
+  if (typeof provided !== 'string') return false;
+  const a = Buffer.from(provided, 'utf8');
+  const b = Buffer.from(expected, 'utf8');
+  // `timingSafeEqual` throws on a length mismatch, which would itself be a length oracle; compare
+  // lengths first and keep the byte comparison constant-time for equal-length candidates.
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
 
 export class GatewayServer {
   private readonly server: Server;
@@ -82,19 +107,34 @@ export class GatewayServer {
       return;
     }
 
-    if (this.config.gatewayToken) {
+    // Authorization, with the loopback case carved out — audit C3.
+    //
+    // The token gate made `tokendamper exec` impossible **by construction**. `exec` generates a
+    // token and injects it as `TOKENDAMPER_GATEWAY_TOKEN`, a name no third-party client has ever
+    // heard of; the child is `aider`, `claude`, `codex` or `curl`, and it sends `authorization`
+    // or `x-api-key` and nothing else. Nothing in `src/` read that variable. Reproduced by
+    // spawning a real child through `runExecCommand`: every request came back
+    // `401 Unauthorized: Invalid or missing gateway token`.
+    //
+    // The server binds to `127.0.0.1` by default, so a loopback peer is already the only peer
+    // that could connect at all, and the token was protecting one local process from another on
+    // the same machine. That is a real but narrow boundary, and it was being paid for with a
+    // mode that could not be used. Loopback connections are therefore trusted, and the token is
+    // still enforced for any non-loopback bind — where the boundary is not narrow at all.
+    //
+    // The `?token=` query parameter is gone (audit L2): it put a credential into access logs,
+    // shell history and any error message that echoed the URL, and with loopback trust it buys
+    // nothing. The header comparison is now constant-time.
+    if (this.config.gatewayToken && !isLoopbackPeer(req)) {
       const headerToken = req.headers['x-tokendamper-token'];
-      let queryToken: string | null = null;
-      try {
-        const urlObj = new URL(url, `http://${this.config.host}`);
-        queryToken = urlObj.searchParams.get('token');
-      } catch {
-        // Ignore URL parse errors
-      }
-      
-      if (headerToken !== this.config.gatewayToken && queryToken !== this.config.gatewayToken) {
+      if (!timingSafeEqualString(headerToken, this.config.gatewayToken)) {
         res.writeHead(401, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Unauthorized: Invalid or missing gateway token' }));
+        res.end(
+          JSON.stringify({
+            error:
+              'Unauthorized: Invalid or missing gateway token. Send it as the x-tokendamper-token header. (Loopback connections do not require a token.)',
+          }),
+        );
         return;
       }
     }

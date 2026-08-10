@@ -717,23 +717,38 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
 });
 
 describe('GatewayServer Security & Limits', () => {
-  it('rejects requests missing valid gateway token with 401', async () => {
+  // **This assertion was inverted by C3, deliberately.**
+  //
+  // It asserted that a tokenless request gets 401. That is exactly what made
+  // `tokendamper exec` impossible: `exec` injects the token as `TOKENDAMPER_GATEWAY_TOKEN`,
+  // a name no third-party client reads, so `aider`/`claude`/`codex` sent `x-api-key` and
+  // nothing else and were rejected on every request — on the command the README documents as
+  // the primary usage. This test passed throughout, because it presented the header that the
+  // real clients never send.
+  //
+  // Loopback peers are now trusted (the server binds to 127.0.0.1, so a loopback peer was
+  // already the only peer that could connect). The token remains enforced for a non-loopback
+  // bind, which is the case where the boundary is not narrow. See DECISIONS §41.
+  //
+  // What this test can still verify from a loopback client is that the header path works and
+  // that `/health` stays open; the rejection path is covered where it is now reachable.
+  it('accepts a loopback request with or without a gateway token', async () => {
     const server = new GatewayServer({ port: 0, gatewayToken: 'secret-token' });
     const port = await server.start();
 
     try {
-      const protectedResponse = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+      const tokenless = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
         method: 'POST',
         body: JSON.stringify({ messages: [] }),
       });
-      expect(protectedResponse.status).toBe(401);
+      expect(tokenless.status).not.toBe(401);
 
-      const validResponse = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+      const withToken = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
         method: 'POST',
         headers: { 'x-tokendamper-token': 'secret-token' },
         body: JSON.stringify({ messages: [] }),
       });
-      expect(validResponse.status).not.toBe(401);
+      expect(withToken.status).not.toBe(401);
     } finally {
       await server.stop();
     }

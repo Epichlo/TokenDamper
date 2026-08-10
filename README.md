@@ -4,25 +4,32 @@ TokenDamper is a universal context optimization engine for AI coding assistants.
 
 It acts as an intelligent middleware proxy that compresses and deduplicates context before it reaches an LLM, reducing token usage, speeding up responses, and lowering API costs—while preserving bracket/quote integrity and falling open to the caller's original bytes whenever a check cannot certify the result. See the Gateway proxy status below.
 
-> **Gateway proxy status (measured 2026-08-09).** An earlier version of this notice said the Gateway "bypasses TokenDamper's validation pipeline" and that `fallbackUsed` is "hardcoded `false`". **That has been untrue since Phase 1.0b** and is corrected here: `src/gateway/proxy.ts` routes through `core/engine.optimize()`, so validators, `DriftTracker`, `ConfidenceLedger`, `DebtTracker` and the fallback resolver all run on proxy traffic, and `fallbackUsed` is computed.
+> ### Gateway mode is experimental
 >
-> What is true today is different, and you should read it before routing traffic:
+> It works, it forwards your bytes faithfully, and it runs the full validation pipeline. **What it does not do is save tokens across turns**, and the reason is a deliberate design conclusion rather than an unfinished feature.
 >
-> - **It saves approximately nothing on ordinary conversations.** The Gateway plans one stage, `cleanup:session-dedup`, which marks an elision recoverable only when an intact copy survives *within the same payload*. Cross-turn deduplication of a sole copy is scored in full and trips the drift gate, so it falls back. Measured over real sockets on three content types: **0 bytes saved, 100% fallback**. Within-payload duplication does save (43% on the case tested).
-> - **`tokendamper exec` does not currently work end to end.** It injects a gateway token into the child's environment under a variable name no third-party client reads, and the server then rejects every request with `401`.
-> - **Non-ASCII request bodies can be corrupted.** The server accumulates the body by string concatenation per chunk, so a multi-byte UTF-8 sequence split across a chunk boundary becomes replacement characters before the pipeline sees it.
+> `cleanup:session-dedup` — the only stage the Gateway plans — marks an elision recoverable **only when an intact copy survives elsewhere in the same payload**. Deduplicating a *sole* copy against a previous turn would leave the model a marker it has no way to resolve, because the consumer is a stateless provider API with no rehydration mechanism. That is deletion, not reference, so the drift gate refuses it and the request falls back unchanged.
 >
-> Treat Gateway mode as experimental. CLI (`tokendamper optimize`) and MCP (`tokendamper mcp`) are the supported paths.
+> Measured over real sockets, two-turn conversations, three content types:
+>
+> | shape | saving |
+> |---|---|
+> | the same block repeated **across turns** (the ordinary case) | **0 bytes**, falls back |
+> | the same block repeated **within one payload** | saves |
+>
+> So use Gateway mode for transparent interception, validation and metrics. Do not adopt it expecting a token reduction on conversational traffic. CLI (`tokendamper optimize`) and MCP (`tokendamper mcp`) are where the compression actually happens.
+>
+> **Two earlier warnings here were wrong and are retracted.** This notice used to say the Gateway "bypasses TokenDamper's validation pipeline" and that `fallbackUsed` is "hardcoded `false`" — untrue since Phase 1.0b; `src/gateway/proxy.ts` routes through `core/engine.optimize()`, so validators, `DriftTracker`, `ConfidenceLedger`, `DebtTracker` and the fallback resolver all run, and `fallbackUsed` is computed. A later revision reported that `tokendamper exec` returned `401` to its own child and that non-ASCII bodies could be corrupted at the socket; both were true when written and both are now fixed (DECISIONS §38, §41).
 
 ## Overview & Features
 
 TokenDamper addresses the problem of large and noisy context bundles (prompts, files, diffs, conversations) sent to LLMs by intelligently optimizing them:
 
-- **0/1 Knapsack Planning**: Evaluates value-density of context nodes and optimally packs them under strict token budgets.
-- **Cross-turn Session Deduplication**: Tracks LLM conversation state and deduplicates previously seen code blocks using robust SHA-256 caching.
-- **Reversible Token Hashing**: Safely elides repetitive files by injecting `<BLOCK_HASH>` placeholders, recovering them transparently.
+- **0/1 Knapsack Planning**: Evaluates value-density of context nodes and packs them under strict token budgets, preserving pinned prefixes for provider prompt-cache alignment. Reached by giving `optimize` more than one file — `tokendamper optimize ./src` or several paths. Measured on this repository's `src/core` at `--max-input-tokens 4000`: 31 files in, **15 pruned, 20,540 tokens saved** by the planner alone. A single-file run has nothing to select between, so the planner correctly prunes nothing there.
+- **Session Deduplication** *(within a payload)*: Tracks conversation state and elides content repeated inside a single outbound request, keyed by SHA-256. **Cross-turn deduplication of a sole copy is deliberately refused** — see the Gateway notice above.
+- **Token Hashing** *(reversible only when a hasher is supplied)*: Elides repetitive regions — function bodies, repeated blocks — replacing them with a self-describing marker carrying a SHA-256 digest. On the **CLI this is irreversible by design**: no `TokenHasher` is wired in, so the removed bytes are retained nowhere and the trace reports `irreversibleElisions`. Embedding callers that supply a hasher get rehydration.
 - **Delta Compression**: Compresses modified files using deterministic Myers diff algorithm.
-- **Local Gateway HTTP Proxy**: Intercepts OpenAI/Anthropic API calls transparently with full streaming support.
+- **Local Gateway HTTP Proxy** *(experimental)*: Intercepts OpenAI/Anthropic API calls transparently with full streaming support, running the same validators and fail-open fallback as the CLI. Interception is by **base URL** (`OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL`), not by `HTTP_PROXY` — it is an origin server, not an HTTP proxy, and implements neither absolute-form request URIs nor `CONNECT`.
 - **Model Context Protocol (MCP)**: Out-of-the-box support for the official MCP stdio standard to integrate seamlessly with Claude Desktop and Cursor.
 
 ## Installation & Quickstart
@@ -53,6 +60,22 @@ Or read from stdin:
 ```bash
 cat prompt.txt | tokendamper optimize -
 ```
+
+**Several files, or a whole directory.** More than one path builds a multi-item bundle, which is
+what gives the knapsack planner something to select between:
+
+```bash
+tokendamper optimize src/a.ts src/b.ts --max-input-tokens 4000
+tokendamper optimize ./src --max-input-tokens 8000
+```
+
+A directory is walked recursively, sorted (order matters — prefix locking pins the first ~1,024
+tokens), skipping `node_modules`, `dist`, `.git` and similar. Each file becomes one item and is
+emitted under a `==> path <==` header; a single file is emitted exactly as before, with no header.
+On fail-open each file is returned byte for byte.
+
+Note that validation is bundle-scoped: if any one file fails a check, the whole run falls back.
+On large, densely-commented trees that is common today — see `DECISIONS.md` §43.
 
 **Tell it what the content is when you pipe it.** Optimization is language-aware: the
 validators, the elision-region selector and the drift metric all dispatch on the item's
@@ -111,9 +134,9 @@ TokenDamper behavior can be configured dynamically using environment variables:
 
 | Variable | Description |
 |----------|-------------|
-| `TOKENDAMPER_GATEWAY_TOKEN` | Auth token for gateway proxy requests (auto-generated in `exec` mode). |
+| `TOKENDAMPER_GATEWAY_TOKEN` | Auth token for gateway requests, enforced only on a **non-loopback** bind. Auto-generated and injected by `exec`; loopback peers are trusted and need not present it. |
 | `TOKENDAMPER_MAX_INPUT_TOKENS` | Hard budget cap on the number of context tokens sent to the LLM. |
-| `TOKENDAMPER_RISK_TOLERANCE` | Sets optimization aggressiveness (`low`, `medium`, `high`). |
+| `TOKENDAMPER_RISK_TOLERANCE` | Accepted and validated, but **read only by the benchmark table renderer** — it has no effect on optimization (audit H4, not yet resolved). |
 | `TOKENDAMPER_PRESERVE_KINDS` | Comma-separated list of items to never prune (e.g. `prompt,file`). |
 | `TOKENDAMPER_LOG_LEVEL` | Logging verbosity (`debug`, `info`, `warn`, `error`, `silent`). |
 

@@ -92,8 +92,16 @@ and takes precedence over budget-derived knapsack selection.
    boundaries. Reordering the prefix busts provider prompt caches, which usually costs
    more than the tokens saved.
 7. **Pinned items (`isPinned`) bypass the knapsack and are always included.**
-8. **The Gateway plans exactly one stage (`cleanup:session-dedup`) on purpose** — it is
-   Issue 2 containment, not an unfinished implementation; do not widen that stage list.
+8. **The Gateway plans exactly one stage (`cleanup:session-dedup`) on purpose** — and that
+   stage saves **0 bytes** on ordinary cross-turn traffic, also on purpose. Do not widen the
+   stage list, and do not "fix" the 0. The original rationale was Issue 2 containment; the
+   live blocker is now drift (`token-hashing` measures `S_k = 0.60` on JSON). Cross-turn
+   dedup of a **sole** copy is refused because the consumer is a stateless provider API with
+   no rehydration mechanism, so the marker is deletion, not reference. Within-payload dedup
+   works and is exempt via `resolveRecoverableElisions`. Gateway mode is documented as
+   **experimental** on that basis (DECISIONS §41), and
+   `test/integration/gateway-dedup-reality.test.ts` pins the measurement: if a cross-turn
+   saving ever appears, either resolvability was implemented or the gate was relaxed.
 9. **The Gateway maps `finalBundle` back onto the parsed payload, never `emittedOutput`** —
    `emittedOutput` is a newline-joined blob, and using it reintroduces Issue 5.
 10. **When a check passes, confirm it ran.** A green result from a check that never executed

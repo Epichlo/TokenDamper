@@ -79,15 +79,20 @@ describe('fallback render', () => {
     expect(outcome.output).toBe(raw);
   });
 
-  it('KNOWN LIMITATION: flattens a multi-item bundle into a blob on success', () => {
-    // No consumer reaches this today. The assertion states what would happen if one did:
-    // roles, boundaries and any enclosing structure are gone, and what comes back is text.
-    //
-    // This is not asserting the behaviour is *correct*. It is asserting it is *this*, so that
-    // making an `emittedOutput` consumer multi-item changes a test rather than a payload.
-    // The middle item contains a newline of its own. That is what makes the loss provable
-    // rather than merely aesthetic: the separator and the content are the same character, so
-    // the boundaries are not recoverable from the output even in principle.
+  // **The limitation this test was written to pin is now fixed** — audit H5, DECISIONS §43.
+  //
+  // It used to assert that a multi-item bundle flattened to `items.join('\n')`, and said so
+  // deliberately: "This is not asserting the behaviour is *correct*. It is asserting it is
+  // *this*, so that making an `emittedOutput` consumer multi-item changes a test rather than a
+  // payload." Multi-file CLI ingestion is that consumer, so the test changed and the payload did
+  // not — which is exactly what it was for.
+  //
+  // The proof it used is preserved below and inverted. The middle item contains a newline of its
+  // own, so under the old join the separator and the content were the same character and the
+  // boundaries were unrecoverable *in principle*; the old render was not injective, and two
+  // different bundles produced byte-identical output. Both properties are now asserted the other
+  // way round.
+  it('renders a multi-item bundle with recoverable boundaries', () => {
     const bundle = createBundleFromItems(
       [
         createContextItem({ id: 'a', kind: 'prompt', content: 'system prompt', role: 'system' }),
@@ -106,13 +111,12 @@ describe('fallback render', () => {
 
     const outcome = resolveFallback(request, pass, bundle);
 
-    expect(outcome.output).toBe('system prompt\nfirst line\nsecond line\nuser question');
-
-    // Three items in, four lines out, and nothing in the string says which boundary was which.
-    // The render is not injective: a different bundle produces byte-identical output.
-    expect(outcome.output.split('\n')).toHaveLength(4);
+    // Every item is introduced by a header naming it, so three items produce three boundaries.
     expect(bundle.items).toHaveLength(3);
+    expect(outcome.output.split('==> ').length - 1).toBe(3);
+    expect(outcome.output).toContain('first line\nsecond line');
 
+    // The render is injective again: the two bundles that used to collide no longer do.
     const differentBundle = createBundleFromItems(
       [
         createContextItem({ id: 'x', kind: 'prompt', content: 'system prompt\nfirst line' }),
@@ -120,10 +124,31 @@ describe('fallback render', () => {
       ],
       'text',
     );
-    expect(resolveFallback(request, pass, differentBundle).output).toBe(outcome.output);
+    expect(resolveFallback(request, pass, differentBundle).output).not.toBe(outcome.output);
 
-    // And role is not carried at all — it lives on the item, never in the rendered string.
+    // Role is still not carried — it lives on the item, and the header names the item, not its
+    // role. That half of the original finding is unchanged and still worth knowing.
     expect(bundle.items[0]?.role).toBe('system');
     expect(outcome.output).not.toContain('role');
+  });
+
+  it('leaves a single-item bundle exactly as it was', () => {
+    // The compatibility guarantee that makes the change safe: CLI, MCP and bench all build
+    // one-item bundles, and none of them may acquire a header.
+    const only = createBundleFromItems(
+      [createContextItem({ id: 'solo', kind: 'file', content: 'export const a = 1;\n' })],
+      'text',
+    );
+    const request = createOptimizationRequest('irrelevant', config, {
+      requestId: 'r4',
+      adapterName: 'test',
+      adapterVersion: '0',
+      source: 'text',
+    });
+
+    const outcome = resolveFallback(request, pass, only);
+
+    expect(outcome.output).toBe('export const a = 1;\n');
+    expect(outcome.output).not.toContain('==>');
   });
 });
