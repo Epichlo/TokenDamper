@@ -83,6 +83,7 @@ export function runTokenHashingStage(
   let irreversibleElisions = 0;
   const skipReasons: Record<ElisionSkipReason, number> = {
     no_savings: 0,
+    structured_content: 0,
     post_condition_rejected: 0,
   };
 
@@ -242,13 +243,14 @@ export function runTokenHashingStage(
         itemsSkipped,
         skippedNoSavings: skipReasons.no_savings,
         skippedPostConditionRejected: skipReasons.post_condition_rejected,
+        skippedStructuredContent: skipReasons.structured_content,
         bytesSaved: 0,
         tokenEstimateSaved: 0,
         irreversibleElisions: 0,
       },
       notes:
         itemsSkipped > 0
-          ? `No context items eligible for token hashing; skipped ${itemsSkipped} (${skipReasons.post_condition_rejected} rejected by post-condition, ${skipReasons.no_savings} for no savings).`
+          ? `No context items eligible for token hashing; skipped ${itemsSkipped} (${skipReasons.post_condition_rejected} rejected by post-condition, ${skipReasons.no_savings} for no savings, ${skipReasons.structured_content} for structured content).`
           : 'No context items eligible for token hashing.',
     });
   }
@@ -290,13 +292,14 @@ export function runTokenHashingStage(
       itemsSkipped,
       skippedNoSavings: skipReasons.no_savings,
       skippedPostConditionRejected: skipReasons.post_condition_rejected,
+      skippedStructuredContent: skipReasons.structured_content,
       bytesSaved,
       tokenEstimateSaved,
       irreversibleElisions,
     },
     notes:
       `Successfully token-hashed ${itemsHashed} context item(s) (${regionsHashed} sub-item region(s)); ` +
-      `skipped ${itemsSkipped} (${skipReasons.post_condition_rejected} rejected by post-condition, ${skipReasons.no_savings} for no savings).` +
+      `skipped ${itemsSkipped} (${skipReasons.post_condition_rejected} rejected by post-condition, ${skipReasons.no_savings} for no savings, ${skipReasons.structured_content} for structured content).` +
       (irreversibleElisions > 0
         ? ` ${irreversibleElisions} elision(s) are irreversible: no token hasher was supplied, so the removed content is not retained anywhere.`
         : ''),

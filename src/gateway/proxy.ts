@@ -17,6 +17,7 @@ import type {
   ResolvedConfig,
 } from '../core/model/types';
 import { optimize } from '../core/engine';
+import { CONTENT_SHAPE_METADATA_KEY, type ContentShapeTag } from '../core/elision';
 import { estimateBundleTokens } from '../core/hashing/tokenizer';
 import { ConfidenceLedger } from '../core/ledger/confidence-ledger';
 import { TOKENDAMPER_VERSION } from '../version';
@@ -531,6 +532,77 @@ function classifyGatewayContent(content: string): ContentShape {
   return classifyContentShape(content, 'text');
 }
 
+/**
+ * Metadata key marking which slot of the parsed payload an item came from, so egress can put it
+ * back where it belongs instead of trusting array position.
+ */
+const PAYLOAD_SLOT_KEY = 'payloadSlot';
+
+/** The slot name for Anthropic's top-level `system` field, which is not in `messages`. */
+const SYSTEM_SLOT = 'system';
+
+/**
+ * Flattens a provider message's content to the string the pipeline needs, and records whether
+ * anything was lost in doing so.
+ *
+ * The flattening itself is unavoidable — every stage, validator and estimator downstream reads
+ * `item.content` as a string. What was missing is the *record* that it happened: egress wrote
+ * the optimized item back as a plain string regardless of what the caller had sent, so a
+ * message whose content was `[{"type":"tool_result","tool_use_id":"toolu_01ABC",…}]` could come
+ * back as `content: "[TokenDamper Elided: …]"`. The Anthropic Messages API requires a
+ * `tool_use` block to be answered by a `tool_result` block carrying the matching
+ * `tool_use_id`; a bare string there is a `400 invalid_request_error`, and the same shape
+ * breaks OpenAI multimodal content parts (audit C4).
+ *
+ * `contentShape` travels with the item and `core/elision` refuses to elide anything carrying
+ * `'structured'`, so no transform can reach these until a structure-preserving substitution
+ * exists.
+ */
+function flattenMessageContent(content: unknown): { text: string; shape: ContentShapeTag } {
+  return typeof content === 'string'
+    ? { text: content, shape: 'string' }
+    : { text: JSON.stringify(content), shape: 'structured' };
+}
+
+/**
+ * Indexes the optimized bundle by the payload slot each item was ingested from.
+ *
+ * Egress used to be `messages.map((msg, idx) => finalBundle.items[idx])` — positional. Ingestion
+ * skips falsy entries with `if (!msg) continue;`, so a single hole in `messages` shifted every
+ * later item onto the wrong message, silently. Invariant 9 requires this mapping to be faithful,
+ * and a filtered push cannot supply the precondition it assumes (audit C4).
+ *
+ * Keyed on the slot recorded at ingestion, so it survives holes, and would survive a stage that
+ * reorders or drops items — which the Gateway's single stage does not do today, but the
+ * correspondence should not depend on that.
+ */
+function indexBySlot(items: ReadonlyArray<ContextItem>): Map<string, ContextItem> {
+  const bySlot = new Map<string, ContextItem>();
+  for (const item of items) {
+    const slot = item.metadata[PAYLOAD_SLOT_KEY];
+    if (typeof slot === 'string') {
+      bySlot.set(slot, item);
+    }
+  }
+  return bySlot;
+}
+
+/**
+ * The optimized replacement for a payload slot, or `undefined` to leave the original alone.
+ *
+ * Returns `undefined` for an unchanged item, for a slot no item claims, and — defensively — for
+ * a *structured* item that changed anyway. That last case is unreachable while `core/elision`
+ * refuses structured content, and it is written down rather than assumed: if some future
+ * transform does change one, the correct behaviour is still to leave the caller's structure
+ * intact rather than overwrite it with a string.
+ */
+function replacementFor(item: ContextItem | undefined, originalText: string): string | undefined {
+  if (!item || item.content === originalText) {
+    return undefined;
+  }
+  return item.metadata[CONTENT_SHAPE_METADATA_KEY] === 'structured' ? undefined : item.content;
+}
+
 function processOpenAiRequest(
   rawBody: string,
   session: ReturnType<GatewaySessionStore['getOrCreateSession']>,
@@ -556,11 +628,13 @@ function processOpenAiRequest(
     const msg = messages[i];
     if (!msg) continue;
 
-    const textContent = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+    const { text: textContent, shape } = flattenMessageContent(msg.content);
     const kind: ContextItemKind = msg.role === 'system' ? 'prompt' : 'conversation';
     const metadata = freeze({
       messageIndex: i,
       role: msg.role,
+      [CONTENT_SHAPE_METADATA_KEY]: shape,
+      [PAYLOAD_SLOT_KEY]: `messages[${i}]`,
     });
 
     const contentHash = hashContent({
@@ -613,15 +687,11 @@ function processOpenAiRequest(
   const outcome = runGatewayOptimization(rawBody, initialBundle, session, options);
 
   let finalBody = rawBody;
+  const bySlot = indexBySlot(outcome.finalBundle.items);
   const updatedMessages = messages.map((msg, idx) => {
-    const updatedItem = outcome.finalBundle.items[idx];
-    if (updatedItem && msg && updatedItem.content !== (typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content))) {
-      return {
-        ...msg,
-        content: updatedItem.content,
-      };
-    }
-    return msg;
+    if (!msg) return msg;
+    const replacement = replacementFor(bySlot.get(`messages[${idx}]`), flattenMessageContent(msg.content).text);
+    return replacement === undefined ? msg : { ...msg, content: replacement };
   });
 
   if (updatedMessages.some((msg, idx) => msg !== messages[idx])) {
@@ -672,7 +742,7 @@ function processAnthropicRequest(
   const items: ContextItem[] = [];
 
   if (parsedPayload.system) {
-    const systemText = typeof parsedPayload.system === 'string' ? parsedPayload.system : JSON.stringify(parsedPayload.system);
+    const { text: systemText, shape } = flattenMessageContent(parsedPayload.system);
     const contentHash = hashContent({ role: 'system', content: systemText });
     items.push(
       createContextItem({
@@ -683,7 +753,11 @@ function processAnthropicRequest(
         origin: 'anthropic:system',
         contentHash,
         role: 'system',
-        metadata: freeze({ role: 'system' }),
+        metadata: freeze({
+          role: 'system',
+          [CONTENT_SHAPE_METADATA_KEY]: shape,
+          [PAYLOAD_SLOT_KEY]: SYSTEM_SLOT,
+        }),
       }),
     );
   }
@@ -693,7 +767,7 @@ function processAnthropicRequest(
     const msg = messages[i];
     if (!msg) continue;
 
-    const textContent = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+    const { text: textContent, shape } = flattenMessageContent(msg.content);
     const contentHash = hashContent({ role: msg.role, content: textContent });
 
     items.push(
@@ -705,7 +779,12 @@ function processAnthropicRequest(
         origin: `anthropic:messages[${i}]`,
         contentHash,
         role: msg.role,
-        metadata: freeze({ messageIndex: i, role: msg.role }),
+        metadata: freeze({
+          messageIndex: i,
+          role: msg.role,
+          [CONTENT_SHAPE_METADATA_KEY]: shape,
+          [PAYLOAD_SLOT_KEY]: `messages[${i}]`,
+        }),
       }),
     );
   }
@@ -737,21 +816,28 @@ function processAnthropicRequest(
   const outcome = runGatewayOptimization(rawBody, initialBundle, session, options);
 
   let finalBody = rawBody;
-  const itemOffset = parsedPayload.system ? 1 : 0;
+  const bySlot = indexBySlot(outcome.finalBundle.items);
   const updatedMessages = messages.map((msg, idx) => {
-    const updatedItem = outcome.finalBundle.items[idx + itemOffset];
-    if (updatedItem && msg && updatedItem.content !== (typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content))) {
-      return {
-        ...msg,
-        content: updatedItem.content,
-      };
-    }
-    return msg;
+    if (!msg) return msg;
+    const replacement = replacementFor(bySlot.get(`messages[${idx}]`), flattenMessageContent(msg.content).text);
+    return replacement === undefined ? msg : { ...msg, content: replacement };
   });
 
-  if (updatedMessages.some((msg, idx) => msg !== messages[idx])) {
+  // The system prompt is mapped back too.
+  //
+  // It was ingested as `items[0]` and the egress map started at `itemOffset`, so a change to it
+  // was silently dropped from `finalBody` — while `optimizedTokens`, and therefore the reported
+  // `tokensSaved` and `dedupRatio`, still counted it as saved. The turn's metrics described a
+  // saving that never reached the wire (audit C4).
+  const updatedSystem = parsedPayload.system
+    ? replacementFor(bySlot.get(SYSTEM_SLOT), flattenMessageContent(parsedPayload.system).text)
+    : undefined;
+
+  const messagesChanged = updatedMessages.some((msg, idx) => msg !== messages[idx]);
+  if (messagesChanged || updatedSystem !== undefined) {
     finalBody = JSON.stringify({
       ...parsedPayload,
+      ...(updatedSystem === undefined ? {} : { system: updatedSystem }),
       messages: updatedMessages,
     });
   }

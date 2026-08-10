@@ -15,16 +15,17 @@ typecheck and lint clean.
 | **0** | H3, M3, M4a | ✅ merged |
 | **1** | C1a, C1b, C2, M6 | ✅ merged |
 | **2** | M5a, M5b, H4, M8, M9, M10 + M5 minor | ✅ **done — DECISIONS §44** |
-| **3** | C3/H1 ✅, H6 ✅, H5 ✅, C4 ⬜ | mostly merged |
+| **3** | C3/H1 ✅, H6 ✅, H5 ✅, C4 ✅ | ✅ **done — C4 in DECISIONS §45** |
 | Decisions | H2, M1, M11 | ⬜ not addressed |
 
-**C4 is the only unstarted audit item left.** After that the board is decisions (H2, M1, M11)
-and the architectural work in §5 — chiefly Phase 1c, which is now the binding constraint on
+**Every task-shaped audit item is now closed.** What remains is three *decisions* (H2, M1, M11)
+and the architectural work in §5 — chiefly Phase 1c, which is the binding constraint on
 multi-file value.
 
 ### Corresponding DECISIONS entries
 
-§36 license · §37 C1a · §38 C2 · §39 M6 · §40 C1b · §41 C3/H1 · §42 H6 · §43 H5 · §44 Wave 2
+§36 license · §37 C1a · §38 C2 · §39 M6 · §40 C1b · §41 C3/H1 · §42 H6 · §43 H5 · §44 Wave 2 ·
+§45 C4
 
 ---
 
@@ -160,6 +161,21 @@ Learned the hard way during Waves 0–3.
   that failed left the previous `dist/` in place so an engine was compared against itself, and a
   diff keyed on a non-existent field collapsed 594 rows to 2 and reported no differences. Both
   produced a green result. Assert the row count and the artefact you think you built.
+- **Build the comparison engine with an `src`-only tsconfig.** `npm run build` typechecks `test/`
+  too, so a branch whose new tests reference new APIs fails to build and silently leaves the
+  previous `dist/` in place. `{"extends":"./tsconfig.json","include":["src"]}` is the whole file.
+- **Aggregate reduction figures are not comparable across a commit, let alone across waves.**
+  C4 measured TypeScript file at 23.16% against Wave 2's 23.26%, same recipe, same counts — and
+  the *pre-C4* engine also read 23.16%. The cause was **line endings**: Wave 2's corpus was frozen
+  from working-tree files written with LF, and committing normalized them to CRLF, adding a byte
+  per line to the repo's own sources, which are the corpus. Only the per-row A/B over one frozen
+  corpus means anything.
+- **The audit's findings hold; its reachability assessments have not.** Three now: §40's proposed
+  `filepath:` fix was measured inert, §42's imperative scoping was wrong, and §45 found C4 live
+  on the one path the Gateway saves anything on, against an audit that called it masked and "that
+  is luck". Reachability here depends on interactions between the drift exemption, the planner
+  mode and the stage list that are not local to the code being read. **Measure before believing
+  a defect is latent** — that belief is what defers it.
 
 ---
 
@@ -170,9 +186,13 @@ Learned the hard way during Waves 0–3.
   items revert all 45**. Phase 1c's stated prerequisite was attribution, and that now exists —
   constraint failures name their item (§42), unwitnessed items name theirs (§37), AST issues carry
   `itemId`. Drift remains bundle-scoped and would need its own rule.
-- **C4 — structured message content flattened to a string** (`src/gateway/proxy.ts`). Still
-  masked by the drift gate refusing the elision first. **It stops being masked the moment anyone
-  relaxes cross-turn drift to chase the saving H1 withdrew** — the two are coupled.
+- ~~**C4 — structured message content flattened to a string.**~~ **Done, DECISIONS §45** — and
+  the premise recorded here was wrong. It was *not* "still masked by the drift gate": that holds
+  for a cross-turn sole copy, but content duplicated **within one payload** is elided
+  `recoverable: true`, which drift exempts, so it shipped. Measured on the pre-fix engine,
+  `messages[2].content` came back as the string `"{\"__td_block__\":\"[TokenDamper Elided: …]\"}"`
+  with `fallbackUsed: false` and `tokensSaved: 42`. That is the one case the Gateway saves
+  anything on at all, so C4 was live on precisely the path the mode exists for.
 - **H2 — language coverage.** 3 of 19 declared languages can produce a non-zero reduction.
   Decision, not a task: narrow the accepted set, or make a declared-but-unsupported language
   report *why* instead of falling back mutely.

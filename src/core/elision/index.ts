@@ -19,7 +19,33 @@ export const JSON_BLOCK_KEY = '__td_block__';
  */
 export type ElisionSyntax = 'json' | 'raw';
 
-export type ElisionSkipReason = 'no_savings' | 'post_condition_rejected';
+export type ElisionSkipReason = 'no_savings' | 'post_condition_rejected' | 'structured_content';
+
+/**
+ * Metadata key recording whether an item's `content` is the text a caller actually sent, or a
+ * *serialization* of a structured value that has to be put back in its original shape.
+ */
+export const CONTENT_SHAPE_METADATA_KEY = 'contentShape';
+
+/** `'string'` — content is the caller's own text. `'structured'` — content is a serialization. */
+export type ContentShapeTag = 'string' | 'structured';
+
+/**
+ * Whether this item's content stands in for structured data rather than being it.
+ *
+ * The Gateway ingests a provider message by stringifying non-string content
+ * (`JSON.stringify(msg.content)`), because the pipeline is string-based. That is fine going in
+ * and wrong coming out: an Anthropic `tool_result` block answered by a plain string is a
+ * `400 invalid_request_error`, and the same shape breaks OpenAI multimodal content parts —
+ * which is the entire target market (audit C4).
+ *
+ * So the tag travels on the item, and elision refuses to touch anything carrying it. An item
+ * with no tag is treated as plain text, which is correct for every non-Gateway producer: CLI,
+ * MCP and bench all ingest text that was text.
+ */
+export function hasStructuredContent(item: ContextItem): boolean {
+  return item.metadata[CONTENT_SHAPE_METADATA_KEY] === 'structured';
+}
 
 export type ElisionOutcome =
   | { readonly status: 'elided'; readonly item: ContextItem; readonly bytesSaved: number }
@@ -127,6 +153,17 @@ export function unwrapElisionContent(content: string): string | undefined {
 export function elideItem(params: ElideItemParams): ElisionOutcome {
   const { item, marker, contentHash, metadata } = params;
 
+  // Checked before anything else, so the refusal names its actual reason.
+  //
+  // A structured item's content is `JSON.stringify(...)` of an array, which classifies as JSON,
+  // so this would *usually* be refused downstream anyway — by the JSON path, for being JSON.
+  // That is the kind of accidental safety this codebase keeps having to un-learn: right
+  // outcome, wrong reason, and it evaporates the moment the classification changes. The item is
+  // refused here for the reason that is actually true of it (audit C4).
+  if (hasStructuredContent(item)) {
+    return { status: 'skipped', reason: 'structured_content', item };
+  }
+
   const syntax = resolveElisionSyntax(item);
   const content = renderElisionContent(marker, syntax);
 
@@ -217,6 +254,13 @@ export interface ElideRegionsParams {
  */
 export function elideRegions(params: ElideRegionsParams): ElisionOutcome {
   const { item, regions, markerFor, contentHash, metadata } = params;
+
+  // Same refusal as `elideItem`, for the same reason (audit C4). Sub-item elision is if anything
+  // worse for structured content: splicing a marker into the middle of a serialized array
+  // corrupts the serialization as well as the shape.
+  if (hasStructuredContent(item)) {
+    return { status: 'skipped', reason: 'structured_content', item };
+  }
 
   if (regions.length === 0) {
     return { status: 'skipped', reason: 'no_savings', item };

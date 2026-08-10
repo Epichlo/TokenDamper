@@ -53,6 +53,7 @@ export function runSessionDedupStage(
   let bytesSaved = 0;
   const skipReasons: Record<ElisionSkipReason, number> = {
     no_savings: 0,
+    structured_content: 0,
     post_condition_rejected: 0,
   };
 
@@ -173,12 +174,13 @@ export function runSessionDedupStage(
         itemsSkipped,
         skippedNoSavings: skipReasons.no_savings,
         skippedPostConditionRejected: skipReasons.post_condition_rejected,
+        skippedStructuredContent: skipReasons.structured_content,
         bytesSaved: 0,
         tokenEstimateSaved: 0,
       },
       notes:
         itemsSkipped > 0
-          ? `No context blocks deduplicated; skipped ${itemsSkipped} (${skipReasons.post_condition_rejected} rejected by post-condition, ${skipReasons.no_savings} for no savings).`
+          ? `No context blocks deduplicated; skipped ${itemsSkipped} (${skipReasons.post_condition_rejected} rejected by post-condition, ${skipReasons.no_savings} for no savings, ${skipReasons.structured_content} for structured content).`
           : 'No matching context blocks found for deduplication or rehydration.',
     });
   }
@@ -226,6 +228,7 @@ export function runSessionDedupStage(
       itemsPreservedAsReferent,
       skippedNoSavings: skipReasons.no_savings,
       skippedPostConditionRejected: skipReasons.post_condition_rejected,
+      skippedStructuredContent: skipReasons.structured_content,
       bytesSaved,
       tokenEstimateSaved,
     },
