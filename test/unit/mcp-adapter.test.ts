@@ -1,6 +1,6 @@
 import { PassThrough } from 'node:stream';
 import { describe, expect, it, beforeEach } from 'vitest';
-import { createMcpServer, MCP_PROTOCOL_VERSION, SERVER_NAME, SERVER_VERSION, getStoredTrace, clearTraceStore } from '../../src/adapters/mcp';
+import { createMcpServer, MCP_PROTOCOL_VERSION, SERVER_NAME, SERVER_VERSION, createTraceStore, getStoredTrace, clearTraceStore } from '../../src/adapters/mcp';
 import { GatewaySessionStore } from '../../src/gateway/session-store';
 import { TokenHasher } from '../../src/core/hashing/token-hasher';
 import { runCli } from '../../src/cli/main';
@@ -314,7 +314,11 @@ describe('MCP Adapter', () => {
   });
 
   it('bounds traceStore to 100 entries and evicts oldest', async () => {
-    const server = createMcpServer({ input, output, log, sessionStore, tokenHasher });
+    // The store is now per-server rather than per-process (audit M5, minor), so the test holds
+    // the one this server was given instead of reading a module-level map that every other
+    // server in the process was also writing to.
+    const traceStore = createTraceStore();
+    const server = createMcpServer({ input, output, log, sessionStore, tokenHasher, traceStore });
     server.start();
     clearTraceStore();
 
@@ -337,10 +341,36 @@ describe('MCP Adapter', () => {
 
     // Check that we only have 100 entries max.
     // The first 5 should be evicted.
-    expect(getStoredTrace(requestIds[0]!)).toBeUndefined();
-    expect(getStoredTrace(requestIds[4]!)).toBeUndefined();
-    expect(getStoredTrace(requestIds[5]!)).toBeDefined();
-    expect(getStoredTrace(requestIds[104]!)).toBeDefined();
+    expect(traceStore.size).toBe(100);
+    expect(traceStore.get(requestIds[0]!)).toBeUndefined();
+    expect(traceStore.get(requestIds[4]!)).toBeUndefined();
+    expect(traceStore.get(requestIds[5]!)).toBeDefined();
+    expect(traceStore.get(requestIds[104]!)).toBeDefined();
+
+    // And nothing leaked into the process-wide default store.
+    expect(getStoredTrace(requestIds[104]!)).toBeUndefined();
+  });
+
+  it('gives each server its own trace store', async () => {
+    const storeA = createTraceStore();
+    const storeB = createTraceStore();
+
+    const serverA = createMcpServer({ input, output, log, sessionStore, tokenHasher, traceStore: storeA });
+    serverA.start();
+    sendRpcRequest(input, {
+      jsonrpc: '2.0',
+      id: 'iso-1',
+      method: 'tools/call',
+      params: { name: 'optimize_context', arguments: { rawInput: 'Isolation check input' } },
+    });
+    const res = (await readRpcResponse(output)) as { result: { content: Array<{ text: string }> } };
+    const { requestId } = JSON.parse(res.result.content[0]!.text) as { requestId: string };
+    serverA.stop();
+
+    expect(storeA.get(requestId)).toBeDefined();
+    // A second server must not see it. Before the split, both read one module-level map, so a
+    // request id minted by one server was retrievable through the other.
+    expect(storeB.get(requestId)).toBeUndefined();
   });
 
   it('rejects input chunk exceeding 10MB buffer size', async () => {

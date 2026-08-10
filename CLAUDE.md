@@ -157,15 +157,20 @@ and takes precedence over budget-derived knapsack selection.
 ## Known bugs — highest-priority work
 
 > **Start at `docs/audit-remediation-status.md`.** It carries the current state of the
-> `max_audit.md` remediation — what is merged, the measured corpus baseline, exactly what the
-> next batch (Wave 2) requires, and the traps this codebase has for anyone changing it. The
-> entries below are the older per-issue history and several are now closed; the status doc is
-> the one that is kept current.
+> `max_audit.md` remediation — what is merged, the measured corpus baseline, what remains, and
+> the traps this codebase has for anyone changing it. The entries below are the older per-issue
+> history and several are now closed; the status doc is the one that is kept current.
 >
-> As of `main` = `dd540fe`: Waves 0, 1 and most of 3 are merged (DECISIONS §36–§43).
-> **Wave 2 — M5a, M5b, H4, M8, M9, M10 — is not started and is next.** The highest-value item
-> in it is M5a: `optimize_context` has no budget parameter, so the MCP entry mode is a
-> guaranteed 0% no-op.
+> Waves 0, 1, 2 and most of 3 are merged (DECISIONS §36–§44). **Wave 2 is done** — the MCP entry
+> mode is no longer a guaranteed 0% no-op (`optimize_context` takes `targetReductionRatio`, and
+> reports `budgetApplied` when it does not), MCP session rehydration matches a marker the product
+> actually emits, the Gateway no longer reads test seams from `process.env` or returns the
+> caller's credentials as response headers, `bench` runs when installed, and three knobs that did
+> nothing are gone from the surface. **C4 is the only unstarted audit item left.**
+>
+> Two things Wave 2 established that outlive it: a 0% result now has to say whether anything ran
+> (this is invariant 10 applied to budgets, and H2 is the same question one layer down), and the
+> corpus A/B method in the status doc §2 is the one that caught its own two false greens.
 
 Full detail in `tokendamper-headroom-known-issues.md`; proposed fixes in
 `purposed architecture changes.md`. Summary:

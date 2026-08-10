@@ -68,13 +68,13 @@ export async function handleProxyRequest(
   // Handle OpenAI API endpoint
   if (routePath === '/v1/chat/completions') {
     const optimized = bodyIsLossless
-      ? processOpenAiRequest(rawBody, cleanHeaders, session, options)
-      : passThroughUnrepresentable(bodyBytes as Buffer, rawBody, cleanHeaders, session);
-    if (optimized.statusCode !== 200 || shouldUseMockUpstream()) {
+      ? processOpenAiRequest(rawBody, session, options)
+      : passThroughUnrepresentable(bodyBytes as Buffer, rawBody, session);
+    if (optimized.statusCode !== 200 || shouldUseMockUpstream(options)) {
       return optimized;
     }
     if (!hasAuthHeaders(cleanHeaders)) {
-      if (process.env.NODE_ENV === 'test') {
+      if (options.allowMissingUpstreamCredentials === true) {
         return optimized;
       }
       return {
@@ -100,13 +100,13 @@ export async function handleProxyRequest(
   // Handle Anthropic API endpoint
   if (routePath === '/v1/messages') {
     const optimized = bodyIsLossless
-      ? processAnthropicRequest(rawBody, cleanHeaders, session, options)
-      : passThroughUnrepresentable(bodyBytes as Buffer, rawBody, cleanHeaders, session);
-    if (optimized.statusCode !== 200 || shouldUseMockUpstream()) {
+      ? processAnthropicRequest(rawBody, session, options)
+      : passThroughUnrepresentable(bodyBytes as Buffer, rawBody, session);
+    if (optimized.statusCode !== 200 || shouldUseMockUpstream(options)) {
       return optimized;
     }
     if (!hasAuthHeaders(cleanHeaders)) {
-      if (process.env.NODE_ENV === 'test') {
+      if (options.allowMissingUpstreamCredentials === true) {
         return optimized;
       }
       return {
@@ -224,8 +224,36 @@ function buildUpstreamUrl(upstreamBase: string, requestUrl: URL): string {
   return `${base}${requestUrl.pathname}${requestUrl.search}`;
 }
 
-function shouldUseMockUpstream(): boolean {
-  return process.env.TOKENDAMPER_MOCK_UPSTREAM === 'true';
+/**
+ * The headers a locally-produced 200 carries back to the caller.
+ *
+ * Constructed, never derived from the request. The two optimize paths used to return
+ * `{ ...cleanHeaders, 'content-type': 'application/json' }`, and `cleanHeaders` strips only
+ * `host` and `content-length` — so `authorization` and `x-api-key` came straight back out as
+ * *response* headers, reproducible under mock upstream as `x-api-key: sk-test` on the way out
+ * (audit M9).
+ *
+ * On the normal path those values were overwritten by the upstream response's headers, which
+ * made this latent rather than live — but "latent" here meant one environment variable away,
+ * and a response header is a value that gets logged, cached and proxied onward. Nothing about
+ * an inbound request header makes it a correct thing to say on the way back, so the fix is to
+ * stop deriving one from the other rather than to lengthen a strip-list.
+ */
+function localResponseHeaders(): Record<string, string> {
+  return { 'content-type': 'application/json' };
+}
+
+/**
+ * Whether to answer locally with the optimized request instead of calling a provider.
+ *
+ * Read from the injected options and from nowhere else. This used to be
+ * `process.env.TOKENDAMPER_MOCK_UPSTREAM === 'true'`, an undocumented ambient switch that made
+ * the proxy return the caller's own optimized prompt with a 200 as though a model had produced
+ * it. A test seam reachable by an environment variable is reachable in production; a parameter
+ * is not (audit M8).
+ */
+function shouldUseMockUpstream(options: ProxyHandlerOptions): boolean {
+  return options.mockUpstream === true;
 }
 
 function hasAuthHeaders(headers: Record<string, string>): boolean {
@@ -358,12 +386,11 @@ function getSessionIdFromHeaders(headers: IncomingHttpHeaders, body: string): st
 function passThroughUnrepresentable(
   bytes: Buffer,
   lossyBody: string,
-  headers: Record<string, string>,
   session: GatewaySession,
 ): ProxyRequestResult {
   return {
     statusCode: 200,
-    headers,
+    headers: localResponseHeaders(),
     body: lossyBody,
     bodyBytes: bytes,
     session,
@@ -506,7 +533,6 @@ function classifyGatewayContent(content: string): ContentShape {
 
 function processOpenAiRequest(
   rawBody: string,
-  headers: Record<string, string>,
   session: ReturnType<GatewaySessionStore['getOrCreateSession']>,
   options: ProxyHandlerOptions,
 ): ProxyRequestResult {
@@ -619,7 +645,7 @@ function processOpenAiRequest(
 
   return {
     statusCode: 200,
-    headers: { ...headers, 'content-type': 'application/json' },
+    headers: localResponseHeaders(),
     body: finalBody,
     session,
   };
@@ -627,7 +653,6 @@ function processOpenAiRequest(
 
 function processAnthropicRequest(
   rawBody: string,
-  headers: Record<string, string>,
   session: ReturnType<GatewaySessionStore['getOrCreateSession']>,
   options: ProxyHandlerOptions,
 ): ProxyRequestResult {
@@ -745,7 +770,7 @@ function processAnthropicRequest(
 
   return {
     statusCode: 200,
-    headers: { ...headers, 'content-type': 'application/json' },
+    headers: localResponseHeaders(),
     body: finalBody,
     session,
   };

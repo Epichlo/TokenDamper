@@ -45,6 +45,8 @@ export class GatewayServer {
       upstreamOpenAiUrl: config?.upstreamOpenAiUrl,
       upstreamAnthropicUrl: config?.upstreamAnthropicUrl,
       gatewayToken: config?.gatewayToken,
+      mockUpstream: config?.mockUpstream,
+      allowMissingUpstreamCredentials: config?.allowMissingUpstreamCredentials,
     };
 
     this.sessionStore = new GatewaySessionStore({
@@ -198,6 +200,13 @@ export class GatewayServer {
           // it does not make a body that was never valid UTF-8 representable. The CLI applies
           // the same round-trip test for the same reason (`main.ts`, `inputSurvivesDecoding`).
           rawBodyBytes: rawBuffer,
+          // Explicitly plumbed rather than read from `process.env` down in the request path.
+          // Both default to absent, so a server nobody deliberately configured this way calls
+          // real upstreams and enforces the credential check (audit M8).
+          ...(this.config.mockUpstream !== undefined ? { mockUpstream: this.config.mockUpstream } : {}),
+          ...(this.config.allowMissingUpstreamCredentials !== undefined
+            ? { allowMissingUpstreamCredentials: this.config.allowMissingUpstreamCredentials }
+            : {}),
         });
 
         await this.writeProxyResult(res, result);
@@ -214,8 +223,8 @@ export class GatewayServer {
 
     if (!result.upstreamBody) {
       // Prefer the bytes when the result carries them. This is the locally-returned branch —
-      // mock upstream, and the `NODE_ENV === 'test'` no-credentials path — where writing
-      // `result.body` would re-encode the lossy decode and undo the pass-through.
+      // `mockUpstream`, and the `allowMissingUpstreamCredentials` no-credentials path — where
+      // writing `result.body` would re-encode the lossy decode and undo the pass-through.
       res.end(result.bodyBytes ?? result.body);
       return;
     }

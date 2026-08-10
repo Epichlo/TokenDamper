@@ -67,12 +67,21 @@ export function runCli(
     }
 
     if (parsed.command === 'bench') {
-      const rawDatasetPath = parsed.datasetPath || (parsed.inputPath !== '-' ? parsed.inputPath : undefined) || 'test/fixtures/bench';
-      const resolvedPath = resolve(cwd, rawDatasetPath);
+      // No default path. It used to fall back to the literal `test/fixtures/bench`, which
+      // exists only in a checkout of this repository — for an installed user that resolved to
+      // nothing and `bench` threw before running a fixture (audit M10). Absent, the loader
+      // uses the datasets bundled with the package, which is what the repo path resolved to
+      // anyway.
+      const rawDatasetPath = parsed.datasetPath || (parsed.inputPath !== '-' ? parsed.inputPath : undefined);
       let loadArg: string | undefined = rawDatasetPath;
 
-      if (existsSync(resolvedPath) && statSync(resolvedPath).isDirectory()) {
-        loadArg = undefined;
+      // Resolved against `cwd` rather than `process.cwd()`: `runCli` takes its working
+      // directory as a parameter, and the loader's own directory check cannot see it.
+      if (rawDatasetPath !== undefined) {
+        const resolvedPath = resolve(cwd, rawDatasetPath);
+        if (existsSync(resolvedPath) && statSync(resolvedPath).isDirectory()) {
+          loadArg = undefined;
+        }
       }
 
       const fixtures = loadBenchmarkFixtures(loadArg);
@@ -351,6 +360,24 @@ export interface ParsedArguments {
  * That is the shape DECISIONS §29 rejects for `--language`, and it was never specific to
  * `--language`. An unsupported flag is now an error naming where it *is* supported.
  */
+/**
+ * Three flags are absent from this list on purpose, and their absence is the fix.
+ *
+ * `--max-output-tokens` and `--max-latency-ms` were parsed, range-validated, merged into the
+ * budget — and then read by nothing at all, anywhere in the pipeline. `--risk-tolerance` was
+ * read by exactly one thing, `bench-table-renderer.ts`, which prints it in a column; no stage,
+ * validator or planner consults it, so setting it changed a label and nothing else.
+ *
+ * They are removed from the *surface*, not from `OptimizationBudget`, which `ARCHITECTURE.md`
+ * pins as a frozen model. A field awaiting an implementation is a different thing from a
+ * command-line dial that reports success and does nothing (audit H4).
+ *
+ * `--target-reduction-ratio` deliberately stays despite being nearly as inert — the planner
+ * reads it only as `> 0`, so it is an on/off switch wearing the name of a dial. Making it a
+ * real proportional target is a planner change, and removing it would take the only budget
+ * flag every doc and example uses. It is called out as its own decision in
+ * `docs/audit-remediation-status.md`.
+ */
 const COMMON_FLAGS = [
   '--config',
   '--mode',
@@ -359,10 +386,7 @@ const COMMON_FLAGS = [
   '--minimum-confidence',
   '--log-level',
   '--max-input-tokens',
-  '--max-output-tokens',
   '--target-reduction-ratio',
-  '--max-latency-ms',
-  '--risk-tolerance',
   '--preserve-kinds',
 ] as const;
 
@@ -555,16 +579,6 @@ export function parseArguments(argv: readonly string[], cwd: string): ParsedArgu
       continue;
     }
 
-    if (flag === '--max-output-tokens') {
-      const value = args.shift();
-      const parsedValue = parseBudgetNumber(value, '--max-output-tokens');
-      budgetOverrides = {
-        ...(budgetOverrides ?? {}),
-        maxOutputTokens: parsedValue,
-      };
-      continue;
-    }
-
     if (flag === '--target-reduction-ratio') {
       const value = args.shift();
       const parsedValue = parseBudgetRatio(value);
@@ -573,28 +587,6 @@ export function parseArguments(argv: readonly string[], cwd: string): ParsedArgu
         targetReductionRatio: parsedValue,
       };
       continue;
-    }
-
-    if (flag === '--max-latency-ms') {
-      const value = args.shift();
-      const parsedValue = parseBudgetNumber(value, '--max-latency-ms');
-      budgetOverrides = {
-        ...(budgetOverrides ?? {}),
-        maxLatencyMs: parsedValue,
-      };
-      continue;
-    }
-
-    if (flag === '--risk-tolerance') {
-      const value = args.shift();
-      if (value === 'low' || value === 'medium' || value === 'high') {
-        budgetOverrides = {
-          ...(budgetOverrides ?? {}),
-          riskTolerance: value,
-        };
-        continue;
-      }
-      throw new Error('Invalid value for --risk-tolerance.');
     }
 
     if (flag === '--preserve-kinds') {

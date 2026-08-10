@@ -22,6 +22,22 @@ export class GatewaySessionStore {
   }
 
   /**
+   * Retrieves an existing session without creating one, and without touching `lastActiveAt`.
+   *
+   * The read-only counterpart to `getOrCreateSession`. The MCP `get_session_metrics` tool and
+   * the `tokendamper://session/<id>` resource both used the creating variant, so *asking about*
+   * a session brought it into existence — an inspection call could evict a real session under
+   * `maxSessions`, and a typo'd id reported a plausible all-zero session rather than saying it
+   * did not exist (audit M5, minor).
+   *
+   * Expiry is still honoured: an expired session is not a session.
+   */
+  public getSession(sessionId: string): GatewaySession | undefined {
+    this.pruneExpired();
+    return this.sessions.get(sessionId);
+  }
+
+  /**
    * Retrieves an existing session or creates a new session if it does not exist.
    */
   public getOrCreateSession(sessionId: string): GatewaySession {

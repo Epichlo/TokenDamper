@@ -6,6 +6,13 @@ export interface ExecOptions {
   readonly port?: number | undefined;
   readonly env?: Record<string, string> | undefined;
   readonly io?: { readonly stdout: NodeJS.WritableStream; readonly stderr: NodeJS.WritableStream } | undefined;
+  /**
+   * Test seam, forwarded to the embedded `GatewayServer`. See `ProxyHandlerOptions.mockUpstream`
+   * — it replaces the `TOKENDAMPER_MOCK_UPSTREAM` environment read (audit M8), and a test that
+   * wants a child process to reach a gateway with no real provider behind it needs a way to say
+   * so that does not involve setting a process-wide variable.
+   */
+  readonly mockUpstream?: boolean | undefined;
 }
 
 /**
@@ -39,7 +46,11 @@ export async function runExecCommand(
   }
 
   const gatewayToken = randomBytes(16).toString('hex');
-  const server = new GatewayServer({ port: options.port ?? 0, gatewayToken });
+  const server = new GatewayServer({
+    port: options.port ?? 0,
+    gatewayToken,
+    ...(options.mockUpstream !== undefined ? { mockUpstream: options.mockUpstream } : {}),
+  });
   const port = await server.start();
   const gatewayUrl = `http://127.0.0.1:${port}`;
 

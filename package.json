@@ -30,6 +30,7 @@
   },
   "files": [
     "dist",
+    "test/fixtures/bench",
     "README.md",
     "ARCHITECTURE.md",
     "ROADMAP.md",

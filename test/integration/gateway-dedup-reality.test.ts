@@ -26,9 +26,7 @@ import { GatewayServer } from '../../src/gateway/server';
  */
 describe('what the Gateway saves, measured', () => {
   let server: GatewayServer;
-  let port: number;
-  let priorMock: string | undefined;
-
+  let port: number;
   const BLOCK = Array.from(
     { length: 30 },
     (_, i) => `export function helper${i}(input) {\n  const scaled = input * ${i};\n  return scaled + ${i};\n}`,
@@ -64,10 +62,9 @@ describe('what the Gateway saves, measured', () => {
 
   beforeAll(async () => {
     // Mock upstream echoes the outgoing body back, which is what makes "bytes actually
-    // forwarded" observable without a provider.
-    priorMock = process.env.TOKENDAMPER_MOCK_UPSTREAM;
-    process.env.TOKENDAMPER_MOCK_UPSTREAM = 'true';
-    server = new GatewayServer({ port: 0 });
+    // forwarded" observable without a provider. Set on the server, not via
+    // `TOKENDAMPER_MOCK_UPSTREAM` in the environment — that read is gone (audit M8).
+    server = new GatewayServer({ port: 0, mockUpstream: true });
     await server.start();
     const bound = server.port;
     expect(bound).toBeTypeOf('number');
@@ -76,8 +73,6 @@ describe('what the Gateway saves, measured', () => {
 
   afterAll(async () => {
     await server.stop();
-    if (priorMock === undefined) delete process.env.TOKENDAMPER_MOCK_UPSTREAM;
-    else process.env.TOKENDAMPER_MOCK_UPSTREAM = priorMock;
   });
 
   it('saves nothing across turns when the repeated block appears once per payload', async () => {

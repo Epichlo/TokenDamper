@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createOptimizationRequest } from '../../core/model/constructors';
 import type {
@@ -16,7 +16,7 @@ import type { BenchmarkFixture, BenchmarkFixtureSet } from './types';
  * Universal dataset loader that loads HumanEval, CodeXGLUE, or a combined benchmark fixture set.
  */
 export function loadBenchmarkFixtures(datasetPathOrName?: string): BenchmarkFixtureSet {
-  if (!datasetPathOrName || datasetPathOrName.trim().length === 0) {
+  if (!datasetPathOrName || datasetPathOrName.trim().length === 0 || namesADirectory(datasetPathOrName)) {
     const humaneval = loadHumanEvalFixtures();
     const codexglue = loadCodeXGLUEFixtures();
     const combinedFixtures = [...humaneval.fixtures, ...codexglue.fixtures];
@@ -51,6 +51,19 @@ export function loadBenchmarkFixtures(datasetPathOrName?: string): BenchmarkFixt
   }
 
   throw new Error(`Unknown benchmark dataset path or identifier: "${datasetPathOrName}"`);
+}
+
+/**
+ * A directory argument means "the datasets under here", not "this file".
+ *
+ * Handled before the name checks below because the path this most often carries is
+ * `test/fixtures/bench`, whose contents are exactly the bundled pair. Without it the branch
+ * below reached `readFileSync` on a directory and threw `EISDIR` — the CLI has always
+ * pre-empted that at its own call site, so only direct API callers ever saw it (audit M10).
+ */
+function namesADirectory(datasetPathOrName: string): boolean {
+  const absPath = resolve(process.cwd(), datasetPathOrName);
+  return existsSync(absPath) && statSync(absPath).isDirectory();
 }
 
 /**

@@ -219,7 +219,7 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
       '/v1/chat/completions',
       { 'x-session-id': 'test-openai-session' },
       JSON.stringify(turn1Payload),
-      { sessionStore },
+      { sessionStore, mockUpstream: true },
     );
 
     expect(res1.statusCode).toBe(200);
@@ -248,7 +248,7 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
       '/v1/chat/completions',
       { 'x-session-id': 'test-openai-session' },
       JSON.stringify(turn2Payload),
-      { sessionStore },
+      { sessionStore, mockUpstream: true },
     );
 
     expect(res2.statusCode).toBe(200);
@@ -279,7 +279,7 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
       '/v1/chat/completions',
       { 'x-session-id': 'sole-copy-session' },
       JSON.stringify({ model: 'gpt-4o', messages: [{ role: 'user', content: soleContext }] }),
-      { sessionStore },
+      { sessionStore, mockUpstream: true },
     );
 
     const turn2Body = JSON.stringify({
@@ -295,7 +295,7 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
       '/v1/chat/completions',
       { 'x-session-id': 'sole-copy-session' },
       turn2Body,
-      { sessionStore },
+      { sessionStore, mockUpstream: true },
     );
 
     expect(res2.statusCode).toBe(200);
@@ -321,7 +321,7 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
         model: 'claude-sonnet-5',
         messages: [{ role: 'user', content: 'A single turn of context.' }],
       }),
-      { sessionStore },
+      { sessionStore, mockUpstream: true },
     );
 
     const session = sessionStore.getOrCreateSession('fallback-honesty-session');
@@ -349,7 +349,7 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
       '/v1/chat/completions',
       { 'x-session-id': 'fail-open-session' },
       turn1,
-      { sessionStore },
+      { sessionStore, mockUpstream: true },
     );
 
     const turn2 = JSON.stringify({
@@ -364,7 +364,7 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
       '/v1/chat/completions',
       { 'x-session-id': 'fail-open-session' },
       turn2,
-      { sessionStore },
+      { sessionStore, mockUpstream: true },
     );
 
     expect(res2.statusCode).toBe(200);
@@ -392,7 +392,7 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
     // the elision is lossy and drift is right to score it.
     const turn1 = JSON.stringify({ model: 'gpt-4o', messages: [{ role: 'user', content: CODE_BLOCK }] });
     await handleProxyRequest(
-      'POST', '/v1/chat/completions', { 'x-session-id': 'sole-copy-session' }, turn1, { sessionStore },
+      'POST', '/v1/chat/completions', { 'x-session-id': 'sole-copy-session' }, turn1, { sessionStore, mockUpstream: true },
     );
 
     const turn2 = JSON.stringify({
@@ -403,7 +403,7 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
       ],
     });
     const res2 = await handleProxyRequest(
-      'POST', '/v1/chat/completions', { 'x-session-id': 'sole-copy-session' }, turn2, { sessionStore },
+      'POST', '/v1/chat/completions', { 'x-session-id': 'sole-copy-session' }, turn2, { sessionStore, mockUpstream: true },
     );
 
     // Fail-open: the caller gets their payload back untouched rather than a marker the
@@ -422,7 +422,7 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
 
     const turn1 = JSON.stringify({ model: 'gpt-4o', messages: [{ role: 'user', content: CODE_BLOCK }] });
     await handleProxyRequest(
-      'POST', '/v1/chat/completions', { 'x-session-id': 'redundant-copy-session' }, turn1, { sessionStore },
+      'POST', '/v1/chat/completions', { 'x-session-id': 'redundant-copy-session' }, turn1, { sessionStore, mockUpstream: true },
     );
 
     // Three copies in one payload. The first is preserved so the other two reference
@@ -437,7 +437,7 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
       ],
     });
     const res2 = await handleProxyRequest(
-      'POST', '/v1/chat/completions', { 'x-session-id': 'redundant-copy-session' }, turn2, { sessionStore },
+      'POST', '/v1/chat/completions', { 'x-session-id': 'redundant-copy-session' }, turn2, { sessionStore, mockUpstream: true },
     );
 
     const body = JSON.parse(res2.body);
@@ -470,7 +470,7 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
 
     const turn1 = JSON.stringify({ model: 'gpt-4o', messages: [{ role: 'user', content: JSON_TOOL_RESULT }] });
     await handleProxyRequest(
-      'POST', '/v1/chat/completions', { 'x-session-id': 'json-relabel-session' }, turn1, { sessionStore },
+      'POST', '/v1/chat/completions', { 'x-session-id': 'json-relabel-session' }, turn1, { sessionStore, mockUpstream: true },
     );
 
     const turn2 = JSON.stringify({
@@ -481,7 +481,7 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
       ],
     });
     const res2 = await handleProxyRequest(
-      'POST', '/v1/chat/completions', { 'x-session-id': 'json-relabel-session' }, turn2, { sessionStore },
+      'POST', '/v1/chat/completions', { 'x-session-id': 'json-relabel-session' }, turn2, { sessionStore, mockUpstream: true },
     );
 
     // This is the sole copy of the content in the payload, so the elision is lossy and
@@ -508,7 +508,7 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
 
     const turn1 = JSON.stringify({ model: 'gpt-4o', messages: [{ role: 'user', content: JSON_TOOL_RESULT }] });
     await handleProxyRequest(
-      'POST', '/v1/chat/completions', { 'x-session-id': 'json-wrapper-session' }, turn1, { sessionStore },
+      'POST', '/v1/chat/completions', { 'x-session-id': 'json-wrapper-session' }, turn1, { sessionStore, mockUpstream: true },
     );
 
     // Two copies: the first is preserved as the referent, so the second is recoverable and
@@ -521,7 +521,7 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
       ],
     });
     const res2 = await handleProxyRequest(
-      'POST', '/v1/chat/completions', { 'x-session-id': 'json-wrapper-session' }, turn2, { sessionStore },
+      'POST', '/v1/chat/completions', { 'x-session-id': 'json-wrapper-session' }, turn2, { sessionStore, mockUpstream: true },
     );
 
     const body = JSON.parse(res2.body) as { messages: Array<{ content: string }> };
@@ -560,7 +560,7 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
     const body = JSON.stringify({ model: 'gpt-4o', messages: [{ role: 'user', content: message }] });
 
     const res = await handleProxyRequest(
-      'POST', '/v1/chat/completions', { 'x-session-id': 'fenced-prose-session' }, body, { sessionStore },
+      'POST', '/v1/chat/completions', { 'x-session-id': 'fenced-prose-session' }, body, { sessionStore, mockUpstream: true },
     );
 
     expect(res.body).toBe(body);
@@ -664,7 +664,7 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
       '/v1/messages',
       { 'x-session-id': 'test-anthropic-session' },
       JSON.stringify(turn1Payload),
-      { sessionStore },
+      { sessionStore, mockUpstream: true },
     );
 
     expect(res1.statusCode).toBe(200);
@@ -686,7 +686,7 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
       '/v1/messages',
       { 'x-session-id': 'test-anthropic-session' },
       JSON.stringify(turn2Payload),
-      { sessionStore },
+      { sessionStore, mockUpstream: true },
     );
 
     expect(res2.statusCode).toBe(200);
@@ -708,7 +708,7 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
       '/v1/messages',
       {},
       'invalid json string',
-      { sessionStore },
+      { sessionStore, mockUpstream: true },
     );
 
     expect(res.statusCode).toBe(400);
@@ -733,19 +733,28 @@ describe('GatewayServer Security & Limits', () => {
   // What this test can still verify from a loopback client is that the header path works and
   // that `/health` stays open; the rejection path is covered where it is now reachable.
   it('accepts a loopback request with or without a gateway token', async () => {
-    const server = new GatewayServer({ port: 0, gatewayToken: 'secret-token' });
+    // Two different 401s live on this path, and only one of them is what this test is about.
+    // The *gateway token* check is the subject. The *upstream credentials* check is not, so
+    // both requests below present an `x-api-key`, and `mockUpstream` keeps the assertion from
+    // depending on reaching api.openai.com.
+    //
+    // Until audit M8 this test presented neither, and passed because `NODE_ENV === 'test'`
+    // silently waived the credentials check — vitest sets that variable, so the waiver was
+    // load-bearing for a test that never mentioned it.
+    const server = new GatewayServer({ port: 0, gatewayToken: 'secret-token', mockUpstream: true });
     const port = await server.start();
 
     try {
       const tokenless = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
         method: 'POST',
+        headers: { 'x-api-key': 'sk-test' },
         body: JSON.stringify({ messages: [] }),
       });
       expect(tokenless.status).not.toBe(401);
 
       const withToken = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
         method: 'POST',
-        headers: { 'x-tokendamper-token': 'secret-token' },
+        headers: { 'x-api-key': 'sk-test', 'x-tokendamper-token': 'secret-token' },
         body: JSON.stringify({ messages: [] }),
       });
       expect(withToken.status).not.toBe(401);

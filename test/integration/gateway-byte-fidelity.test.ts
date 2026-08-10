@@ -26,14 +26,14 @@ import { GatewayServer } from '../../src/gateway/server';
 describe('the Gateway forwards the caller bytes it was given', () => {
   let server: GatewayServer;
   let port: number;
-  let priorMock: string | undefined;
 
   beforeAll(async () => {
     // Mock upstream echoes the outgoing request body back as the response, which is what makes
-    // "what would have been forwarded" observable without a real provider.
-    priorMock = process.env.TOKENDAMPER_MOCK_UPSTREAM;
-    process.env.TOKENDAMPER_MOCK_UPSTREAM = 'true';
-    server = new GatewayServer({ port: 0 });
+    // "what would have been forwarded" observable without a real provider. Configured on the
+    // server rather than through `TOKENDAMPER_MOCK_UPSTREAM` in the ambient environment: the
+    // env read is gone from the request path entirely (audit M8), and setting a process-wide
+    // variable from a test leaks into anything else sharing the process.
+    server = new GatewayServer({ port: 0, mockUpstream: true });
     await server.start();
     const boundPort = server.port;
     expect(boundPort).toBeTypeOf('number');
@@ -42,8 +42,6 @@ describe('the Gateway forwards the caller bytes it was given', () => {
 
   afterAll(async () => {
     await server.stop();
-    if (priorMock === undefined) delete process.env.TOKENDAMPER_MOCK_UPSTREAM;
-    else process.env.TOKENDAMPER_MOCK_UPSTREAM = priorMock;
   });
 
   /** POSTs `body` as two separate TCP writes split at `splitAt`. */
