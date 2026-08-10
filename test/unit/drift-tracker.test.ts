@@ -217,14 +217,27 @@ describe('DriftTracker', () => {
       expect(markers.has('heading:## Section')).toBe(true);
     });
 
-    it('keeps drift on commented code inside the ceiling that applies to code', () => {
-      // The measured consequence. Eliding this file destroys every symbol, so R_AST = 0 and
-      // S_k must land on exactly w_AST = 0.60 — the ceiling for code established in
-      // DECISIONS.md §18, since `filepath:` survives and pins R_struct at 1.0.
+    it('scores drift on commented code by symbol loss alone, not by comment density', () => {
+      // This test's original assertion was `S_k === 0.60`, described as "the ceiling for code
+      // established in DECISIONS.md §18, since `filepath:` survives and pins R_struct at 1.0".
       //
-      // Before the fix the two comments were counted as markers, destroyed along with the
-      // content, and drift read R_struct = 0.3333 / S_k = 0.8667 — above a ceiling it should
-      // not have been able to exceed, scaling with comment density rather than with loss.
+      // **C1b abolished that ceiling deliberately, so the number moved to 1.0.** The ceiling was
+      // never a safety property — it was the symptom. `R_struct` scored 1.0 for code because its
+      // only marker was `filepath:`, derived from `item.path` and indestructible by any content
+      // transform, so 40% of the metric voted "perfectly retained" on evidence it had not
+      // looked at. Total symbol destruction capped at 0.60 as a result, and the maximum symbol
+      // loss that could pass the 0.40 gate was 1 - 0.40/0.60 = 66.7%. Under C1b an unmeasured
+      // ratio does not vote, so for code `S_k = 1 - R_AST`: destroying every symbol scores 1.0
+      // and the passing ceiling falls to 40%. See DECISIONS §40.
+      //
+      // What this test was written to catch is unchanged and still asserted below: the two `#`
+      // comments in a Python file must not be harvested as markdown headings. Before that fix
+      // they were counted as markers, destroyed with the content, and drift read
+      // R_struct = 0.3333 — drift scaling with comment density rather than with loss.
+      //
+      // Note the property is now *stronger* than a ceiling. `structuralIntegrityRatio` stays 1
+      // as an empty-set default, but because `structMeasured` is false it contributes nothing at
+      // all, so no number of comments can move this score by any amount.
       const tracker = new DriftTracker();
       const before = createContextBundle(commented, 'file', 'src/widget.py');
       const elided = createContextItem({
@@ -244,8 +257,15 @@ describe('DriftTracker', () => {
 
       const report = tracker.calculateDrift(before, after);
       expect(report.astSymbolRetentionRatio).toBe(0);
+
+      // Still 1, but now as an empty-set default that is explicitly *excluded* from the score.
       expect(report.structuralIntegrityRatio).toBe(1);
-      expect(report.driftScore).toBeCloseTo(0.6, 10);
+      expect(report.structMeasured).toBe(false);
+      expect(report.astMeasured).toBe(true);
+
+      // `S_k = 1 - R_AST` for code. Every symbol destroyed is 1.0, not 0.60.
+      expect(report.driftScore).toBeCloseTo(1.0, 10);
+      expect(report.retentionGate).toBe('refuse');
     });
   });
 });

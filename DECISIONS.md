@@ -2365,3 +2365,91 @@ The note now distinguishes the three cases and names the mechanism, and the metr
 This does not fix H5 — the knapsack is still unreachable on every shipping path. It stops the
 trace from concealing that behind a reassuring sentence, which is the necessary first step:
 the defect is now visible in the one place a user would look.
+
+---
+
+## 40. A Ratio That Measured Nothing Does Not Vote, and a Local Variable Is Not a Symbol
+
+**Date:** 2026-08-09 · **Status:** Accepted · **Closes:** max_audit.md C1b, §3.2
+
+Two changes that only work together. Landing either alone is measurably worse than landing both.
+
+### The audit's proposed fix is inert
+
+max_audit.md §3.2 proposed using `extractContentMarkers` in `R_struct`, excluding the
+`filepath:` marker that no content transform can destroy, and stated this "would fix both cases
+at once". Measured, it fixes neither: removing the only marker an item had leaves the before-set
+**empty**, and an empty set defaults `R_struct` back to **1.0** — the identical free 0.40,
+arriving by a different route. That change alone was byte-identical across all 586 rows of a
+frozen 293-file corpus.
+
+The free 0.40 comes from the **empty-set default**, not from `filepath:`. This is §33's argument
+("`0.0000` means 'retained everything' and 'found nothing to look at' indistinguishably") applied
+to the *score* rather than to the gate.
+
+### Decision, part 1: an unmeasured ratio is excluded, not defaulted
+
+`R_struct` is computed over `extractContentMarkers`, and the weight of a ratio whose before-set
+is empty is redistributed to the ratio that did measure something. For code, `S_k = 1 - R_AST`,
+so the maximum symbol loss that can pass the 0.40 gate falls from **66.7%** to **40%**. When
+neither ratio measured, retention returns 1.0 and stays silent — that case belongs to the
+measurement gate (§37), and having both refuse would attribute the refusal to the wrong question.
+
+### Decision, part 2: `extractSymbols` counts semantic surface, not locals
+
+Applied on its own, part 1 costs **14 TypeScript files and 11.75pp** — and the loss it was
+guarding against turned out to be almost entirely fictitious. Measured at
+`targetReductionRatio: 0.5`:
+
+| file | symbols "lost" | of which function-local |
+|---|---|---|
+| `src/core/engine/index.ts` | 42 of 63 (66.7%) | **41** |
+| `src/core/hashing/tokenizer.ts` | 9 of 17 (52.9%) | **9** |
+
+Not one exported function, type or interface was lost in either case — `selectElisionRegions`
+retains signatures by construction. The locals rule matched `const|let|var` anywhere, so every
+`const i`, `const result`, `const msg` inside a function body counted as a semantic symbol on par
+with an exported function, and body elision is precisely the transform that removes them. So the
+audit's "you can destroy two-thirds of every symbol in a file and pass" was measuring temporaries
+inside bodies the caller asked to have elided.
+
+**Python is the control.** Its extractor never had a locals rule, its measured symbol loss under
+the same elision is **0.0%**, and it is unaffected by either half of this change. That asymmetry
+is what identified the defect: a safety metric should not depend on which language's extractor
+happens to harvest block-scoped bindings.
+
+The rule is now anchored with `^…/gm`. In TypeScript and JavaScript a top-level declaration *is*
+a column-0 declaration; indented ones are inside a function, class or block, and are body content.
+
+### Measured, over a frozen 293-file corpus (586 rows, both routes)
+
+| arm | TS files reducing | TS saved | Python saved |
+|---|---|---|---|
+| before (§37 only) | 22 | 14.00% | 14.98% |
+| C1b alone | 8 | **2.25%** | 14.98% |
+| symbol fix alone | 30 | **25.59%** | 14.98% |
+| **both (shipped)** | **29** | **23.38%** | 14.98% |
+
+The gate is **stricter** and reduction is **higher** — because the gate is now measuring semantic
+loss instead of noise. Python, prose and every uncovered-language bucket are unchanged.
+
+### The one file it costs, and why it is left alone
+
+`src/cli/html-reporter.ts` goes from reducing to falling back. Its sole content marker is
+`directive:TD_PRESERVE:[^\s&]+)/g,` — harvested from a **regex literal** in the file that
+implements syntax highlighting for that directive. Its own pattern source is its only structural
+evidence, eliding it drives `R_struct` to 0, and the file is refused.
+
+That is a false positive, and it is left in deliberately. It fails **conservatively** (fallback,
+byte-identical output, no data loss), it is 1 file in 57, and special-casing it would be
+over-fitting the metric to one file in this repository. Recorded rather than patched.
+
+### Known residue
+
+`extractSymbols` still harvests from **comments**, because it is regex over raw content with no
+lexer. Measured artifacts: `fn:of` from the prose "pure function of its input", and `type:of`
+from "that class of bug". After the locals fix this is the entire remaining symbol loss on
+`src/core/engine/index.ts` — 1 symbol of 22, 4.5%. Small, but it means symbol counts on a heavily
+commented codebase carry noise proportional to how often the words `function` and `class` appear
+in English. Not fixed here: making extraction comment-aware is a per-language lexing problem,
+and the measured cost does not yet justify it.

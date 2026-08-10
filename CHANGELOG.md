@@ -10,6 +10,47 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
 `git log v1.1.0..HEAD` to confirm current scope before relying on this list.
 
 ### Fixed
+- **`R_struct` no longer votes on evidence it never gathered, and a local variable is no longer
+  a symbol — audit C1b, §3.2**: two changes that only work together.
+
+  **The audit's proposed fix is inert on its own.** §3.2 proposed computing `R_struct` over
+  `extractContentMarkers` to exclude the indestructible `filepath:` marker, and said this "would
+  fix both cases at once". Measured, it fixes neither: removing the only marker an item had
+  leaves the before-set empty, and an empty set defaults `R_struct` back to **1.0** — the
+  identical free 0.40 by another route. That change alone was byte-identical across all 586 rows
+  of a frozen 293-file corpus. The free 0.40 comes from the **empty-set default**.
+
+  So an unmeasured ratio is now *excluded* from the score rather than defaulted, with its weight
+  redistributed. For code `S_k = 1 - R_AST`, and the maximum symbol loss that can pass falls from
+  **66.7% to 40%**. When neither ratio measured, retention stays silent — that case belongs to
+  the measurement gate (§37).
+
+  **Applied alone, that cost 14 TypeScript files and 11.75pp — guarding against loss that was
+  almost entirely fictitious.** `extractSymbols` matched `const|let|var` anywhere, so function
+  locals counted as semantic symbols on par with exports, and body elision is exactly what
+  removes them. On `src/core/engine/index.ts`, 42 of 63 symbols "lost" — **41 function-local**;
+  on `tokenizer.ts`, 9 of 17 — **all 9**. No exported function, type or interface was lost in
+  either case, because `selectElisionRegions` retains signatures by construction. Python is the
+  control: no locals rule, 0.0% measured symbol loss, unaffected by either half.
+
+  | arm | TS files reducing | TS saved | Python |
+  |---|---|---|---|
+  | before | 22 | 14.00% | 14.98% |
+  | C1b alone | 8 | 2.25% | 14.98% |
+  | symbol fix alone | 30 | 25.59% | 14.98% |
+  | **both (shipped)** | **29** | **23.38%** | 14.98% |
+
+  The gate is stricter *and* reduction is higher, because it now measures semantic loss instead
+  of noise. One file regresses — `src/cli/html-reporter.ts`, whose sole content marker is
+  `TD_PRESERVE:` harvested from a **regex literal** in the file implementing that directive's
+  highlighting. Left in deliberately: it fails conservatively (byte-identical fallback, no data
+  loss) and special-casing it would over-fit the metric to one file.
+
+  Two hazard-pinning tests asserted properties this abolishes and were updated with their
+  findings preserved: the 0.60 "ceiling for code" (which was the symptom, not a safety property)
+  and C1a's note that the retention gate could never fire for markdown (it now does). See
+  DECISIONS §40.
+
 - **The explainability trace now explains — audit M6**: `buildTrace` projected every
   `StageResult` down to `{ stageId, status, durationMs: 0, changed }`, discarding each stage's
   `metrics` and `notes` and hardcoding the duration. `StageTrace` now carries `metrics` and
