@@ -8,6 +8,7 @@ import type {
 import { createOptimizationTrace } from '../model';
 import type { FallbackOutcome } from '../fallback';
 import { estimateTokens } from '../hashing/tokenizer';
+import { renderBundleOutput } from '../render';
 
 /**
  * Builds the lightweight execution trace for the final engine result.
@@ -26,6 +27,26 @@ export function buildTrace(
     readonly stageDurationsMs?: ReadonlyArray<number>;
   },
 ): OptimizationTrace {
+  // Both sides must measure the same *kind* of thing, or the ratio is a comparison of a bundle
+  // against a rendered string — DECISIONS §19's lesson, which was about two estimators but
+  // applies just as much to one estimator pointed at two different texts.
+  //
+  // Multi-file ingestion (audit H5) made that live: `emittedOutput` carries `==> path <==`
+  // headers between items, and `bundle.summary.tokenEstimate` is the sum of item contents with
+  // no headers at all. Measured on `src/core`, a fallback — where nothing changed — reported
+  // 72,973 -> 73,667 tokens, a **negative** reduction, purely because the output side counted
+  // framing the input side did not. That is the exact shape of the phantom -1.39% the project
+  // already diagnosed once in the Python bench harness (Issue 5).
+  //
+  // For a single-item bundle `rawInput` and the item content are the same text, so this leaves
+  // CLI, MCP and bench byte-identical; only the multi-item render gains its own headers on both
+  // sides. Gateway payloads keep the bundle estimate, because there `rawInput` is the whole JSON
+  // envelope and the bundle is the extracted messages — genuinely different populations.
+  const tokenBefore =
+    request.bundle.items.length > 1
+      ? estimateTokens(renderBundleOutput(request.bundle))
+      : request.bundle.summary.tokenEstimate;
+
   // Carry the stage's own telemetry through instead of discarding it.
   //
   // This used to project away `metrics` and `notes` and hardcode `durationMs: 0`, so the trace
@@ -53,9 +74,9 @@ export function buildTrace(
     // one by the other to report `reductionRatio`. When `tokenAfter` was an inline
     // `ceil(len / 4)` while bundles used the tokenizer, MCP reported a saving on every
     // request including pure fallbacks, where the emitted text is the raw input verbatim.
-    inputTokenEstimate: request.bundle.summary.tokenEstimate,
+    inputTokenEstimate: tokenBefore,
     outputTokenEstimate: estimateTokens(finalOutput),
-    tokenBefore: request.bundle.summary.tokenEstimate,
+    tokenBefore,
     tokenAfter: estimateTokens(finalOutput),
     bundleStatistics: request.bundle.statistics,
     fallbackUsed: fallback.used,

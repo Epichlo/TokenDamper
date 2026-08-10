@@ -1,4 +1,5 @@
 import type { OptimizationRequest, ValidationReport, ContextBundle } from '../model';
+import { renderBundleOutput } from '../render';
 
 /**
  * The explicit fallback outcome for the frozen MVP.
@@ -37,7 +38,10 @@ export function resolveFallback(request: OptimizationRequest, validation: Valida
   if (!validation.shouldFallback) {
     return {
       used: false,
-      output: currentBundle.items.map(i => i.content).join('\n'),
+      // `renderBundleOutput` rather than a bare newline join. For a single item the two are
+      // identical, so every pre-existing route is unchanged; for more than one the join erased
+      // the boundaries between files and was not injective. See `core/render` and DECISIONS §43.
+      output: renderBundleOutput(currentBundle),
     };
   }
 

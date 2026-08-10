@@ -9,7 +9,41 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or released; run
 `git log v1.1.0..HEAD` to confirm current scope before relying on this list.
 
+### Added
+- **`optimize` accepts multiple paths and directories — audit H5**: `tokendamper optimize a.ts
+  b.ts` and `tokendamper optimize ./src`. This is what makes the 0/1 knapsack reachable:
+  `createContextBundle` produced exactly one item for every shipping entry point, prefix locking
+  pinned item 0, the solver always selected it, and `itemsPruned` was always 0 — so the knapsack,
+  cache-aware prefix locking, topology scoring, the dependency graph and the git inspector could
+  not affect any output the product could produce. Measured on `src/core` at
+  `maxInputTokens: 4000`: **31 items, 15 pruned, 20,540 tokens saved by the planner.**
+
+  One item renders as its content and nothing else, so CLI, MCP and bench stay byte-identical.
+  More than one renders with a `==> path <==` header per item. Fail-open is **per file** — each
+  file's original bytes, never a re-encoding — so DECISIONS §35 holds per item; the stream as a
+  whole is not byte-identical because the headers are TokenDamper's. Directory walks are sorted
+  (prefix locking pins the first ~1,024 tokens, so order decides what bypasses the knapsack) and
+  skip `node_modules`, `dist`, `.git` and friends.
+
+  **Multi-file runs still fall back on real corpora**, and not for any reason this change can fix:
+  on the 45-file Python corpus, drift 0.0359 and AST clean, but 26 constraint failures across 14
+  items revert all 45. Validation is bundle-scoped and fallback is all-or-nothing (audit §3.1,
+  Phase 1c). This delivers the mechanism; §3.1 stands between it and the outcome. See DECISIONS §43.
+
 ### Fixed
+- **Three defects H5 exposed, each fixed with it**: pruning was scored as semantic drift
+  (`findUnwitnessedItems` exempted pruned items but the ratios compared whole bundles — now scored
+  over retained items, guarded on ids corresponding so a caller that rebuilds its bundle gets more
+  measurement rather than none); whole-item elision of a symbol-bearing item is no longer attempted
+  (since §40 it scores `S_k = 1.0` and can never survive validation — two pure-`types.ts` files
+  were taking a 16-file batch down); and `TD_PRESERVE:` no longer matches its own implementation
+  (`drift-tracker.ts` and `cli/html-reporter.ts` each acquired a phantom content marker, and one
+  such marker being elided drove `R_struct` to 0 and a 16-file batch to `S_k = 0.4053` on a run
+  with **99.1%** real symbol retention — this also retires the `html-reporter.ts` regression §40
+  recorded as deliberate). Also: envelope headers were counted on the output side only, so a
+  multi-item fallback reported 72,973 → 73,667 tokens, the same shape as the phantom −1.39%
+  (Issue 5). Corpus: **1 row changed, 0 regressions**, TypeScript 27.33% → **29.55%**.
+
 - **Constraint directives are extracted from prose regions, and checked per item — audit H6**:
   the nine-keyword imperative scan (`must`, `never`, `required`, `critical`, …) is written for
   natural-language prompts and was applied to raw content of every kind. In source, `required`

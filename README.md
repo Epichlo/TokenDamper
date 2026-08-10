@@ -25,7 +25,7 @@ It acts as an intelligent middleware proxy that compresses and deduplicates cont
 
 TokenDamper addresses the problem of large and noisy context bundles (prompts, files, diffs, conversations) sent to LLMs by intelligently optimizing them:
 
-- **0/1 Knapsack Planning** *(implemented, not yet reachable)*: Evaluates value-density of context nodes and packs them under strict token budgets. The solver, cache-aware prefix locking and topology scoring are all implemented and unit-tested, but every shipping entry point builds a **one-item** bundle, so the planner has nothing to select between and prunes nothing. Reaching it needs a multi-item ingestion path (a directory, a manifest, a conversation file), which does not exist yet.
+- **0/1 Knapsack Planning**: Evaluates value-density of context nodes and packs them under strict token budgets, preserving pinned prefixes for provider prompt-cache alignment. Reached by giving `optimize` more than one file — `tokendamper optimize ./src` or several paths. Measured on this repository's `src/core` at `--max-input-tokens 4000`: 31 files in, **15 pruned, 20,540 tokens saved** by the planner alone. A single-file run has nothing to select between, so the planner correctly prunes nothing there.
 - **Session Deduplication** *(within a payload)*: Tracks conversation state and elides content repeated inside a single outbound request, keyed by SHA-256. **Cross-turn deduplication of a sole copy is deliberately refused** — see the Gateway notice above.
 - **Token Hashing** *(reversible only when a hasher is supplied)*: Elides repetitive regions — function bodies, repeated blocks — replacing them with a self-describing marker carrying a SHA-256 digest. On the **CLI this is irreversible by design**: no `TokenHasher` is wired in, so the removed bytes are retained nowhere and the trace reports `irreversibleElisions`. Embedding callers that supply a hasher get rehydration.
 - **Delta Compression**: Compresses modified files using deterministic Myers diff algorithm.
@@ -60,6 +60,22 @@ Or read from stdin:
 ```bash
 cat prompt.txt | tokendamper optimize -
 ```
+
+**Several files, or a whole directory.** More than one path builds a multi-item bundle, which is
+what gives the knapsack planner something to select between:
+
+```bash
+tokendamper optimize src/a.ts src/b.ts --max-input-tokens 4000
+tokendamper optimize ./src --max-input-tokens 8000
+```
+
+A directory is walked recursively, sorted (order matters — prefix locking pins the first ~1,024
+tokens), skipping `node_modules`, `dist`, `.git` and similar. Each file becomes one item and is
+emitted under a `==> path <==` header; a single file is emitted exactly as before, with no header.
+On fail-open each file is returned byte for byte.
+
+Note that validation is bundle-scoped: if any one file fails a check, the whole run falls back.
+On large, densely-commented trees that is common today — see `DECISIONS.md` §43.
 
 **Tell it what the content is when you pipe it.** Optimization is language-aware: the
 validators, the elision-region selector and the drift metric all dispatch on the item's

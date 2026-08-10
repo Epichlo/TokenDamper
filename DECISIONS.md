@@ -2612,3 +2612,98 @@ happened to use one of nine words. Narrowing it first would have widened that da
 §37 in place the drift measurement gate covers markdown on its own merits, which the corpus
 confirms: the prose bucket is unchanged at 28/28 fallbacks, now attributed to drift rather than
 to a coincidence of vocabulary.
+
+---
+
+## 43. The Knapsack Gets Something to Solve
+
+**Date:** 2026-08-09 · **Status:** Accepted · **Closes:** max_audit.md H5 (ingestion half)
+
+`ARCHITECTURE.md`, `README.md` and CLAUDE.md all put a "Stateless 0/1 Knapsack Planner" at the
+centre of the design, and invariant 6 promises cache-aligned selection as the differentiator. None
+of it could run. `createContextBundle` produces exactly **one** item;
+`applyCacheAwarePrefixLocking` pins everything inside the first 1,024 tokens; `solve01Knapsack`
+places pinned items outside the candidate set and always selects them. So item 0 was always
+pinned, `itemsPruned` was always 0, and `planner/knapsack.ts`, `planner/cache-aware.ts`,
+`topology/topology-scorer.ts`, `topology/dependency-graph.ts` and `topology/git-inspector.ts`
+could not affect any output the product was able to produce.
+
+`optimize` now accepts multiple paths and directories. Measured on `src/core` at
+`maxInputTokens: 4000`: **31 items, 15 pruned, 20,540 tokens saved by the planner.**
+
+### The output format, and the test that demanded a decision
+
+`test/unit/fallback-render.test.ts` pinned the success path's `items.join('\n')` as a latent
+defect and said in as many words that whoever made an `emittedOutput` consumer multi-item "should
+stop and read it". This is that change, so the defect is fixed rather than inherited.
+
+**One item renders as its content and nothing else**, which keeps CLI, MCP and bench byte-identical.
+More than one renders with a `==> path <==` header per item — `head`/`tail`'s convention, chosen
+because it is one a reader already knows. It is **not** collision-proof and nothing escapes it:
+the consumer is a model being given context, legibility is worth more than round-trip parsing,
+and anything needing to machine-parse should read `finalBundle` from the trace, which carries the
+items structurally.
+
+Fail-open is **per file** — the original bytes of each file, under the same headers, never a
+re-encoding of the decoded string (DECISIONS §35 holds per item). What is not byte-identical is
+the stream as a whole, because the headers are TokenDamper's and were in no input file.
+
+### Three defects this exposed, each fixed here
+
+1. **Pruning was scored as drift.** `findUnwitnessedItems` had always exempted an item absent from
+   `after` — selection is not elision — but the *ratios* compared whole bundles, so a pruned
+   item's symbols simply vanished and `R_AST` read the planner doing its job as semantic loss.
+   Invisible while every bundle held one item; decisive at 31. The ratios now score retained items
+   only, **guarded on ids actually corresponding** between the bundles: `id` is content-derived at
+   construction and preserved by the transforms, so a caller that rebuilds its `after` bundle
+   independently would otherwise leave nothing to compare and report `S_k = 0` for a gutted
+   bundle. With no correspondence the whole bundle is compared, as before. Failing open to *more*
+   measurement is the point.
+
+2. **Whole-item elision of a symbol-bearing item is refused every time**, so it is no longer
+   attempted. Since §40, `S_k = 1 - R_AST` for code, so destroying every symbol scores 1.0 against
+   a gate that fires above 0.40 — no threshold or flag lets it through. On a one-item bundle that
+   was invisible (the run fell back and emitted the input, which is what skipping produces anyway).
+   On a multi-item bundle two pure-`types.ts` files — interfaces to lose, no function bodies to
+   elide — were taking a 16-file batch down with them. Symbol-free items are unaffected and still
+   elided whole; that is the population the path exists for.
+
+3. **`TD_PRESERVE:` matched its own implementation.** `drift-tracker.ts` (the regex literal) and
+   `cli/html-reporter.ts` (the highlighter for the same directive) each acquired a content marker
+   they do not semantically have. Because `R_struct` is a bundle-scoped set, one phantom marker
+   being elided drove it to 0 and took a 16-file batch to `S_k = 0.4053` on a run whose real symbol
+   retention was **99.1%**. Harvesting is now scoped to prose regions **for `code` only** — not for
+   the prose types generally, because `TD_PRESERVE:` is an unambiguous token rather than an English
+   word, and the only way it appears without being a directive is as a literal inside an
+   expression, a construct that exists only in code. This also retires the `html-reporter.ts`
+   regression §40 recorded as left in deliberately.
+
+Also fixed: the envelope headers were counted on the output side only, so a multi-item fallback
+reported **72,973 → 73,667** tokens — a negative reduction, the same shape as the phantom −1.39%
+already diagnosed once in the Python bench harness (Issue 5). `tokenBefore` now renders the same
+envelope when the bundle holds more than one item. Single-item and Gateway paths are untouched;
+for the Gateway `rawInput` is the whole JSON body and the bundle is the extracted messages, which
+are genuinely different populations.
+
+### Measured
+
+Frozen 293-file corpus, 586 rows: **1 row changed, 0 regressions.** TypeScript 27.33% → **29.55%**.
+Fallback counts drop sharply (prose 28 → 9, TypeScript over stdin 57 → 0) because items whose
+elision was doomed are no longer transformed-then-reverted; the emitted bytes are the same, the
+wasted work is gone.
+
+### Not done: §3.1, which is now the binding constraint
+
+**Multi-file runs still fall back on real corpora, and not for any reason this change can fix.**
+On the 45-file Python corpus: drift 0.0359, AST clean, 169 KB elided — and it falls back, because
+**26 constraint failures across 14 items revert all 45**. Validation is bundle-scoped and fallback
+is all-or-nothing (audit §3.1, Phase 1c, unstarted).
+
+This delivers the mechanism; §3.1 stands between it and the outcome. The prerequisite Phase 1c was
+missing — attribution — now exists for the classes that matter: constraint failures name their
+item (§42), unwitnessed items name theirs (§37), and AST issues carry `itemId`. Drift remains
+bundle-scoped and would need its own rule.
+
+`ARCHITECTURE.md` is unchanged: multi-item bundles were always in the model (`createBundleFromItems`
+predates this), and nothing about the linear pipeline moved. What changed is that a shipping
+adapter finally builds one.

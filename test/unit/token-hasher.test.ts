@@ -285,8 +285,23 @@ describe('runTokenHashingStage — sub-item granularity', () => {
   });
 
   it('refuses a docstring-only body rather than deleting the specification', () => {
-    // The Phase 1d precondition. Whole-item hashing is still attempted and still refused
-    // by drift downstream; what must not happen is a "successful" 55% reduction here.
+    // The Phase 1d precondition, and the assertion moved one step earlier — audit H5, §43.
+    //
+    // This used to read "whole-item hashing is still attempted and still refused by drift
+    // downstream; what must not happen is a 'successful' 55% reduction here", and asserted that
+    // the content *became* a marker. The intent — never a successful-looking reduction that
+    // deletes the specification — is unchanged and better served: the elision is no longer
+    // attempted at all.
+    //
+    // Since DECISIONS §40 an unmeasured `R_struct` contributes nothing, so for code
+    // `S_k = 1 - R_AST`; destroying every symbol gives `S_k = 1.0` against a gate that fires
+    // above 0.40. There is no configuration in which this elision survives validation, so
+    // performing it only guaranteed a fallback. On a one-item bundle that was invisible — the run
+    // fell back and emitted the input, which is what skipping produces anyway. On a multi-item
+    // bundle it took every other file down with it.
+    //
+    // `has_close_elements` is the symbol that makes this item ineligible; a symbol-free item is
+    // still elided whole, which is what the whole-item path exists for.
     const docOnly = [
       'def has_close_elements(numbers, threshold):',
       '    """ Check if in given list of numbers, any two numbers are closer to each',
@@ -306,8 +321,36 @@ describe('runTokenHashingStage — sub-item granularity', () => {
     });
     const result = runTokenHashingStage(bundleOf(item), budget, { tokenHasher: new TokenHasher() });
 
-    expect(result.metrics.regionsHashed).toBe(0);
-    expect(result.bundle.items[0]!.content).not.toContain('""" Check if');
+    expect(result.metrics.regionsHashed ?? 0).toBe(0);
+    expect(result.changed).toBe(false);
+
+    // The specification survives intact — which is the property the test is named for.
+    expect(result.bundle.items[0]!.content).toBe(docOnly);
+    expect(result.bundle.items[0]!.content).toContain('""" Check if');
+    expect(result.bundle.items[0]!.content).not.toMatch(/\[TokenDamper: /);
+  });
+
+  it('still elides a symbol-free item whole — that is what the whole-item path is for', () => {
+    // The other side of the rule above. No symbols means `R_AST` has nothing to score, so the
+    // elision is not doomed, and the measurement gate (§37) governs the case instead.
+    const prose = [
+      'Release notes for the 2.1 series.',
+      'The queue drains in the background and the dashboard lags by about a minute.',
+      'Contact the platform team with questions about capacity planning.',
+      '',
+    ].join('\n');
+    const item = createContextItem({
+      id: 'f6',
+      kind: 'file',
+      contentType: 'text',
+      content: prose,
+      origin: 'notes.txt',
+      path: 'notes.txt',
+    });
+
+    const result = runTokenHashingStage(bundleOf(item), budget, { tokenHasher: new TokenHasher() });
+
+    expect(result.changed).toBe(true);
     expect(result.bundle.items[0]!.content).toMatch(/^\[TokenDamper: \d+ [a-z-]+ lines? elided, \d+ bytes, sha256:[a-f0-9]{12}\]$/);
   });
 });

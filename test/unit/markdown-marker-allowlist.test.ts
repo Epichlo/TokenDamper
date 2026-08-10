@@ -68,11 +68,20 @@ describe('only markdown yields markdown markers', () => {
     }
   });
 
-  it('still harvests directives from every type, because that branch is not gated', () => {
-    // The gate is about markdown *syntax*. `TD_PRESERVE:` is a TokenDamper directive and means
-    // the same thing wherever it appears — removing it from the ungated branch would silently
-    // drop constraint markers from every non-markdown item.
-    for (const contentType of ['text', 'code', 'json', 'logs', 'markdown'] as const) {
+  // **This test's premise was narrowed by H5, and the narrowing is not the same as gating it by
+  // content type.** It read: "`TD_PRESERVE:` is a TokenDamper directive and means the same thing
+  // wherever it appears — removing it from the ungated branch would silently drop constraint
+  // markers from every non-markdown item." That reasoning still holds and is still asserted: the
+  // directive is harvested from every content *type*, including code.
+  //
+  // What changed is the *region*. Scanned over raw content the pattern matched its own
+  // implementation — `src/core/ledger/drift-tracker.ts` and `src/cli/html-reporter.ts` each
+  // acquired a marker from a regex literal mentioning the directive. Since `R_struct` is a
+  // bundle-scoped set, one phantom marker being elided drove it to 0 and took a 16-file batch to
+  // `S_k = 0.4053` on a run whose real symbol retention was 99.1%. A directive is an instruction,
+  // and instructions live in prose — the same argument as DECISIONS §42, applied here. §43.
+  it('harvests directives from every content type, but only from prose regions', () => {
+    for (const contentType of ['text', 'json', 'logs', 'markdown'] as const) {
       const markers = [
         ...tracker.extractContentMarkers(
           itemOf(contentType, 'keep this TD_PRESERVE:budget-note\n'),
@@ -81,6 +90,19 @@ describe('only markdown yields markdown markers', () => {
 
       expect(markers).toEqual(['directive:TD_PRESERVE:budget-note']);
     }
+
+    // In code the directive must be in a comment, which is where an instruction to a reader is.
+    expect([
+      ...tracker.extractContentMarkers(itemOf('code', '// keep this TD_PRESERVE:budget-note\n')),
+    ]).toEqual(['directive:TD_PRESERVE:budget-note']);
+
+    // …and an expression that merely mentions the pattern is not a directive. This is the exact
+    // shape that was failing real batches.
+    expect(
+      tracker.extractContentMarkers(
+        itemOf('code', 'const directiveMatch = /(TD_PRESERVE:[^\\s>\\n]+)/g;\n'),
+      ).size,
+    ).toBe(0);
   });
 });
 

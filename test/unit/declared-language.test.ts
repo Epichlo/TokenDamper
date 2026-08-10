@@ -326,7 +326,16 @@ describe('end to end: the declared route reaches what the file route reaches', (
       unchecked: 1,
       uncheckedContentTypes: ['text'],
     });
-    expect(probed.fallbackUsed).toBe(true);
+
+    // The outcome this test is named for is unchanged: undeclared TypeScript over stdin gives
+    // you your content back, byte for byte, and only the declaration unlocks the reduction.
+    //
+    // **How it arrives there changed** — audit H5, §43. It used to whole-item elide (no regions
+    // are selected for an item classified `text`), be refused by drift, and fall back. Since
+    // whole-item elision of a symbol-bearing item can never survive validation, it is no longer
+    // attempted, so the content is never transformed and no fallback is needed. Asserting
+    // `emittedOutput` rather than `fallbackUsed` states the guarantee that actually matters, and
+    // stops the test depending on which of two mechanisms produced an identical result.
     expect(probed.emittedOutput).toBe(content);
 
     expect(declared.trace.astCoverage).toEqual({

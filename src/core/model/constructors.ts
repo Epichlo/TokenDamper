@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { renderItemsOutput } from '../render';
 import type {
   BundleStatistics,
   ContextBundle,
@@ -49,6 +50,62 @@ export interface CreateRequestOptions {
 /**
  * Creates an immutable optimization request from raw adapter input.
  */
+/** One ingested file, for `createMultiItemRequest`. */
+export interface RequestFileInput {
+  readonly path: string;
+  readonly content: string;
+  /** `--language`, applied to every file in the request. See `createContextBundle`. */
+  readonly language?: string | undefined;
+}
+
+/**
+ * Builds a request whose bundle holds **one item per file**.
+ *
+ * This is what makes the 0/1 knapsack reachable (audit H5). `createContextBundle` produces
+ * exactly one item, and every shipping entry point went through it, so
+ * `applyCacheAwarePrefixLocking` pinned item 0, `solve01Knapsack` always selected it, and
+ * `itemsPruned` was always 0 — the planner, the topology scorer, the dependency graph and the
+ * cache-alignment guarantee had no effect on any output the product could produce.
+ *
+ * Each item is built by calling `createContextBundle` per file and taking its single item,
+ * deliberately rather than by constructing items directly: classification is subtle
+ * (declaration > extension > probe, and `language`/`contentType` must be set together or not at
+ * all), and duplicating it here would let the one-file and many-file routes disagree about what
+ * a file *is*. The single-file route stays the definition; this composes it.
+ *
+ * `rawInput` is the rendered envelope of the **original** contents, because that is what
+ * fail-open echoes. Byte identity on that path is therefore per item rather than over the whole
+ * stream — the headers are TokenDamper's, not the caller's. For one file the envelope is just
+ * the content and the guarantee is unchanged.
+ */
+export function createMultiItemRequest(
+  files: ReadonlyArray<RequestFileInput>,
+  config: ResolvedConfig,
+  options: CreateRequestOptions,
+  tokenizer: TokenizerAdapter = DEFAULT_TOKENIZER,
+): OptimizationRequest {
+  const items = files.map((file) => {
+    const single = createContextBundle(file.content, 'file', file.path, tokenizer, file.language);
+    const item = single.items[0];
+    if (!item) {
+      throw new Error(`createContextBundle produced no item for ${file.path}`);
+    }
+    return item;
+  });
+
+  const bundle = createBundleFromItems(items, options.source, tokenizer);
+
+  return freeze({
+    requestId: options.requestId,
+    rawInput: renderItemsOutput(items),
+    bundle,
+    budget: createOptimizationBudget(config.budget),
+    config,
+    adapterName: options.adapterName,
+    adapterVersion: options.adapterVersion,
+  });
+}
+
 export function createOptimizationRequest(
   rawInput: string,
   config: ResolvedConfig,

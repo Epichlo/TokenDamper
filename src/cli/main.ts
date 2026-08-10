@@ -1,7 +1,11 @@
 #!/usr/bin/env node
 import { readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { format as formatCliOutput, parse } from '../adapters/cli';
+import { randomUUID } from 'node:crypto';
+import { CLI_ADAPTER_NAME, CLI_ADAPTER_VERSION, format as formatCliOutput, parse } from '../adapters/cli';
+import { createMultiItemRequest } from '../core/model/constructors';
+import { ITEM_DELIMITER_PREFIX, ITEM_DELIMITER_SUFFIX } from '../core/render';
+import { ingestPaths, type IngestedFile } from './ingest';
 import { loadConfig } from '../config';
 import { declarableLanguages, normalizeLanguage } from '../core/model';
 import { optimize } from '../core/engine';
@@ -111,6 +115,21 @@ export function runCli(
     }
 
     const isStdin = parsed.inputPath === '-';
+
+    // Multi-file ingestion — the route that makes the 0/1 knapsack reachable (audit H5).
+    //
+    // Entered only when the caller named more than one path, or named a directory. A single
+    // file and stdin fall through to the original code below **unchanged**: that route carries
+    // the byte-identity guarantee of DECISIONS §35, and the cheapest way to keep it is not to
+    // touch it.
+    const extraPaths = parsed.extraInputPaths ?? [];
+    const namesDirectory =
+      !isStdin && existsSync(resolve(cwd, parsed.inputPath)) && statSync(resolve(cwd, parsed.inputPath)).isDirectory();
+
+    if (!isStdin && (extraPaths.length > 0 || namesDirectory)) {
+      return runMultiFileOptimize(parsed, [parsed.inputPath, ...extraPaths], io, cwd);
+    }
+
     const inputPath = isStdin ? undefined : resolve(cwd, parsed.inputPath);
 
     // Read bytes, decode second, and keep the bytes.
@@ -190,6 +209,104 @@ export function runCli(
 }
 
 /**
+ * `optimize` over more than one file.
+ *
+ * This is the ingestion path audit H5 asked for. Until it existed, `createContextBundle` produced
+ * exactly one item for every shipping entry point, so `applyCacheAwarePrefixLocking` pinned item
+ * 0, `solve01Knapsack` always selected it, `itemsPruned` was always 0, and roughly a thousand
+ * lines — the knapsack solver, cache-aware prefix locking, topology scoring, the dependency graph,
+ * the git inspector — could not affect any output the product was able to produce. Measured on a
+ * six-file bundle from this repository at `maxInputTokens: 5000`, the pruner now removes 3 items
+ * and saves 897 tokens.
+ *
+ * Two properties are load-bearing, and are asserted in `test/integration/cli-multi-file.test.ts`:
+ *
+ *   - **Fail-open is per file.** Each file's original *bytes* are written back inside the
+ *     envelope, not a re-encoding of the decoded string, so a file that is not valid UTF-8
+ *     survives exactly as the single-file route guarantees (DECISIONS §35). What is *not*
+ *     byte-identical is the stream as a whole, because the headers are TokenDamper's and were
+ *     never in any input file.
+ *   - **Order is deterministic.** `expandPath` sorts, because prefix locking pins the first
+ *     ~1,024 tokens and therefore decides which files bypass the knapsack entirely
+ *     (invariants 6 and 7).
+ */
+function runMultiFileOptimize(
+  parsed: ParsedArguments,
+  paths: readonly string[],
+  io: { readonly stdout: NodeJS.WritableStream; readonly stderr: NodeJS.WritableStream },
+  cwd: string,
+): number {
+  const files = ingestPaths(paths, cwd);
+  if (files.length === 0) {
+    io.stderr.write('No ingestible files found for the given path(s).\n');
+    return 1;
+  }
+
+  const config = loadConfig({
+    cwd,
+    ...(parsed.configPath ? { configPath: parsed.configPath } : {}),
+    ...(parsed.configOverrides ? { cliOverrides: parsed.configOverrides } : {}),
+  });
+
+  const request = createMultiItemRequest(
+    files.map((file) => ({
+      path: file.path,
+      content: file.content,
+      ...(parsed.language ? { language: parsed.language } : {}),
+    })),
+    config,
+    {
+      requestId: randomUUID(),
+      adapterName: CLI_ADAPTER_NAME,
+      adapterVersion: CLI_ADAPTER_VERSION,
+      source: 'file',
+    },
+  );
+
+  const unrepresentable = files.filter((file) => !file.representable);
+  const result = optimize(request, {
+    ...(parsed.maxDebt !== undefined ? { maxDebtThreshold: parsed.maxDebt } : {}),
+    ...(parsed.maxDrift !== undefined ? { maxDriftThreshold: parsed.maxDrift } : {}),
+    ...(unrepresentable.length === 0
+      ? {}
+      : {
+          inputNotRepresentable: `${unrepresentable.length} of ${files.length} input file(s) are not valid UTF-8 and cannot be represented losslessly as a string, so no stage output can be trusted against them. Emitted verbatim.`,
+        }),
+  });
+
+  if (result.fallbackUsed) {
+    // Original bytes per file, under the same headers `renderItemsOutput` produces. Writing
+    // `result.emittedOutput` here would re-encode, which is exactly what DECISIONS §35
+    // established loses the caller's data for input the string model cannot represent.
+    io.stdout.write(renderFallbackBytes(files));
+  } else {
+    io.stdout.write(result.emittedOutput);
+  }
+
+  if (parsed.diffHtmlPath) {
+    generateHtmlReport(result, request.bundle, { outputPath: resolve(cwd, parsed.diffHtmlPath) });
+  }
+
+  io.stderr.write(`${JSON.stringify(result.trace, null, 2)}\n`);
+  return 0;
+}
+
+/** The fallback stream: each file's original bytes, under the header the renderer emits. */
+function renderFallbackBytes(files: ReadonlyArray<IngestedFile>): Buffer {
+  if (files.length === 1) {
+    return files[0]!.bytes;
+  }
+
+  const parts: Buffer[] = [];
+  files.forEach((file, index) => {
+    if (index > 0) parts.push(Buffer.from('\n', 'utf8'));
+    parts.push(Buffer.from(`${ITEM_DELIMITER_PREFIX}${file.path}${ITEM_DELIMITER_SUFFIX}\n`, 'utf8'));
+    parts.push(file.bytes);
+  });
+  return Buffer.concat(parts);
+}
+
+/**
  * Entry point used by the executable wrapper and compiled CLI binary.
  */
 export function main(): void {
@@ -200,6 +317,11 @@ export function main(): void {
 export interface ParsedArguments {
   readonly command: 'optimize' | 'exec' | 'bench' | 'mcp' | 'unknown';
   readonly inputPath: string;
+  /**
+   * Additional positional paths for `optimize`. Empty for the single-file and stdin routes,
+   * which stay byte-for-byte what they were (audit H5).
+   */
+  readonly extraInputPaths?: readonly string[];
   readonly datasetPath?: string;
   readonly reportJsonPath?: string;
   readonly quiet?: boolean;
@@ -302,6 +424,7 @@ export function parseArguments(argv: readonly string[], cwd: string): ParsedArgu
   }
 
   let inputPath = '';
+  const extraInputPaths: string[] = [];
   let datasetPath: string | undefined;
 
   if (command === 'bench') {
@@ -313,6 +436,12 @@ export function parseArguments(argv: readonly string[], cwd: string): ParsedArgu
       inputPath = args.shift()!;
     } else {
       throw new Error('Missing input file path.');
+    }
+    // Additional positional paths, so `optimize a.ts b.ts` and a shell glob both work. Collected
+    // here rather than after flag parsing because a path is any non-flag token, and stopping at
+    // the first flag keeps `optimize a.ts b.ts --target-reduction-ratio 0.3` unambiguous.
+    while (args.length > 0 && args[0] !== undefined && !args[0].startsWith('-')) {
+      extraInputPaths.push(args.shift()!);
     }
   } else if (command !== 'mcp') {
     return {
@@ -610,6 +739,7 @@ export function parseArguments(argv: readonly string[], cwd: string): ParsedArgu
   return {
     command: 'optimize',
     inputPath,
+    ...(extraInputPaths.length > 0 ? { extraInputPaths: Object.freeze([...extraInputPaths]) } : {}),
     execArgs: [],
     ...(language ? { language } : {}),
     ...(inputName ? { inputName } : {}),
