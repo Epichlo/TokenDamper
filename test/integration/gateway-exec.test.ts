@@ -23,14 +23,6 @@ import { GatewayServer } from '../../src/gateway/server';
 describe('tokendamper exec reaches its own gateway', () => {
   let tempDir: string;
 
-  beforeAll(() => {
-    process.env.TOKENDAMPER_MOCK_UPSTREAM = 'true';
-  });
-
-  afterAll(() => {
-    delete process.env.TOKENDAMPER_MOCK_UPSTREAM;
-  });
-
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), 'tokendamper-exec-'));
   });
@@ -63,7 +55,10 @@ describe('tokendamper exec reaches its own gateway', () => {
       'utf8',
     );
 
-    const exitCode = await runExecCommand(['node', JSON.stringify(agentPath)]);
+    // `mockUpstream` on the call rather than `TOKENDAMPER_MOCK_UPSTREAM` in the environment:
+    // the env read is gone from the request path (audit M8), and it never belonged in a test
+    // that also spawns a child process inheriting `process.env`.
+    const exitCode = await runExecCommand(['node', JSON.stringify(agentPath)], { mockUpstream: true });
     expect(exitCode).toBe(0);
 
     const result = JSON.parse(readFileSync(resultPath, 'utf8')) as {
@@ -86,9 +81,7 @@ describe('tokendamper exec reaches its own gateway', () => {
 
 describe('gateway authorization', () => {
   let server: GatewayServer;
-  let port: number;
-  let priorMock: string | undefined;
-
+  let port: number;
   const post = (headers: Record<string, string>, path = '/v1/messages') =>
     new Promise<{ status: number; body: string }>((resolve, reject) => {
       const body = JSON.stringify({ model: 'm', messages: [{ role: 'user', content: 'hi' }] });
@@ -111,10 +104,8 @@ describe('gateway authorization', () => {
     });
 
   beforeAll(async () => {
-    priorMock = process.env.TOKENDAMPER_MOCK_UPSTREAM;
-    process.env.TOKENDAMPER_MOCK_UPSTREAM = 'true';
     // A token IS configured — the point is that loopback does not need to present it.
-    server = new GatewayServer({ port: 0, gatewayToken: 'secret-token-value' });
+    server = new GatewayServer({ port: 0, gatewayToken: 'secret-token-value', mockUpstream: true });
     await server.start();
     const bound = server.port;
     expect(bound).toBeTypeOf('number');
@@ -123,8 +114,6 @@ describe('gateway authorization', () => {
 
   afterAll(async () => {
     await server.stop();
-    if (priorMock === undefined) delete process.env.TOKENDAMPER_MOCK_UPSTREAM;
-    else process.env.TOKENDAMPER_MOCK_UPSTREAM = priorMock;
   });
 
   it('accepts a loopback request carrying no gateway token', async () => {

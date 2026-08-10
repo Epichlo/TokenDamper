@@ -51,6 +51,13 @@ export interface GatewayConfig {
   readonly maxSessions: number;
   readonly maxContentEntriesPerSession?: number | undefined;
   readonly gatewayToken?: string | undefined;
+  /**
+   * Test seams, forwarded to `ProxyHandlerOptions`. See the fields of the same names there —
+   * both replace ambient environment reads that used to sit inside the request path (audit M8),
+   * and neither belongs in a deployed configuration.
+   */
+  readonly mockUpstream?: boolean | undefined;
+  readonly allowMissingUpstreamCredentials?: boolean | undefined;
 }
 
 /**
@@ -75,10 +82,33 @@ export interface ProxyHandlerOptions {
    * behaviour was before.
    */
   readonly rawBodyBytes?: Buffer | undefined;
+  /**
+   * Answer locally with the optimized request body instead of calling a provider.
+   *
+   * A test seam, and the only way to reach that behaviour. It was previously triggered by
+   * `TOKENDAMPER_MOCK_UPSTREAM=true` read from the ambient environment inside the request
+   * path — which meant an agent pointed at a misconfigured process received its own prompt
+   * back with a 200, indistinguishable from a completion (audit M8).
+   *
+   * Never enable this against real traffic.
+   */
+  readonly mockUpstream?: boolean | undefined;
+  /**
+   * Forward — or rather, return — a request that carries no upstream credentials, instead of
+   * refusing it with a 401.
+   *
+   * Also a test seam. It was previously `process.env.NODE_ENV === 'test'`, a variable set by
+   * a great many CI systems and process managers for reasons having nothing to do with this
+   * proxy, so the credential check could switch itself off in an environment nobody had
+   * chosen it for (audit M8).
+   */
+  readonly allowMissingUpstreamCredentials?: boolean | undefined;
 }
 
 export interface GatewaySessionStoreInterface {
   getOrCreateSession(sessionId: string): GatewaySession;
+  /** Read-only lookup — returns `undefined` rather than bringing a session into existence. */
+  getSession(sessionId: string): GatewaySession | undefined;
   recordTurn(
     sessionId: string,
     turn: Omit<SessionTurn, 'turnIndex' | 'timestamp'>,

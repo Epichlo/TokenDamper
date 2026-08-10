@@ -27,6 +27,17 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
   **25.35%** (file) over 59 files. That last figure is *not* comparable to §43's 29.55%: same
   engine, larger denominator.
 
+- **Corpus harness recipe, again after Wave 2: `typescript` 59 → 60, `prose` 28 → 29.** The
+  TypeScript file is `src/bench/fixtures/bundled-path.ts` (M10); the prose file is
+  `docs/audit-remediation-status.md`, which landed in `7a1b5a7` **after** the `dd540fe` baseline
+  was recorded and was therefore already outstanding. `collect.js` refused on both before
+  measuring anything.
+
+  TypeScript file reads **23.26%** over 60 files, down from 25.35% over 59 — and that movement is
+  entirely the denominator: `reduced` is unchanged at 33, and a per-row A/B against the
+  pre-Wave-2 engine over the *same frozen corpus* found **594 of 594 rows identical** across 15
+  fields. Wave 2 changes no stage output. See DECISIONS §44.
+
 ### Added
 - **`optimize` accepts multiple paths and directories — audit H5**: `tokendamper optimize a.ts
   b.ts` and `tokendamper optimize ./src`. This is what makes the 0/1 knapsack reachable:
@@ -48,7 +59,63 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
   items revert all 45. Validation is bundle-scoped and fallback is all-or-nothing (audit §3.1,
   Phase 1c). This delivers the mechanism; §3.1 stands between it and the outcome. See DECISIONS §43.
 
+### Removed
+- **Three knobs that were parsed, validated and then read by nothing — audit H4.**
+  `--max-output-tokens` and `--max-latency-ms` (with `TOKENDAMPER_MAX_OUTPUT_TOKENS` and
+  `TOKENDAMPER_MAX_LATENCY_MS`) reached no consumer anywhere in the pipeline;
+  `--risk-tolerance` / `TOKENDAMPER_RISK_TOLERANCE` / the MCP `riskTolerance` property reached
+  exactly one, `cli/bench-table-renderer.ts:97`, which prints it in a column. Setting any of them
+  exited 0 and changed nothing.
+
+  Removed from the **surface only** — the `OptimizationBudget` fields stay, because
+  `ARCHITECTURE.md` pins that model as frozen; each now carries a doc comment naming its consumer
+  or stating it has none. A removed flag is a hard `Unknown argument` error, not a silent no-op.
+
+  `--target-reduction-ratio` deliberately stays despite the planner reading it only as `> 0`:
+  it is the only budget flag every doc and example uses, and making it a real proportional target
+  is a planner change. See `docs/audit-remediation-status.md`.
+
 ### Fixed
+- **The MCP entry mode did nothing — audit M5a.** `optimize_context` had no
+  `targetReductionRatio` parameter, so a client calling the tool as documented got
+  `pass_through`, zero stages, the input back unchanged and `reductionRatio: 0` with **no
+  error**. The parameter is now in the schema (range-checked, and rejected rather than clamped),
+  the description states that a budget is required, and the response carries `budgetApplied`,
+  `planMode`, `stagesExecuted` and a `notice` when no budget was in effect — so a 0% result can
+  no longer hide whether anything ran. Measured through the stdio server on
+  `src/core/planner/index.ts`: **0.0% / 0 stages without a budget, 69.1% / 4 stages at
+  `targetReductionRatio: 0.3`**, cross-checked against the CLI's `tokenEstimateSaved: 586` on the
+  same file.
+
+- **MCP session rehydration had never worked — audit M5b.** `rehydrate_context` looked for
+  `<ELIDED: ref=… >`; `cleanup:session-dedup` emits `[TokenDamper Elided: ref=… bytes=… kind=…]`.
+  The pattern could not match any marker the product produces, so the tool returned its input
+  unchanged on every call. `renderSessionElisionMarker` and `SESSION_ELISION_MARKER_PATTERN` now
+  live together in `core/elision/marker.ts` and are used by both sides; the new test builds its
+  marker by **running the stage** rather than restating the format, which is how the two drifted
+  apart in the first place.
+
+- **Gateway response headers were the caller's request headers — audit M9.** Both optimize paths
+  spread `cleanHeaders` into the response, and `cleanHeaders` strips only `host` and
+  `content-length` — so `authorization`, `x-api-key` and cookies came back out on the way down.
+  Response headers are now constructed explicitly.
+
+- **`bench` threw for every installed user — audit M10.** The bundled datasets resolved against
+  `process.cwd()` only, and `test/` was not in `package.json`'s `files`. Fixtures now ship, and
+  resolve against the working directory first and the package root second — the root found by
+  walking up to the nearest `package.json`, because this module runs at two different depths
+  (`src/…` under vitest, `dist/src/…` compiled) and a fixed `..` offset is right for exactly one.
+  Verified by running the built CLI from a directory with no `test/` tree. Also:
+  `loadBenchmarkFixtures` no longer throws `EISDIR` when handed a directory.
+
+- **MCP reads no longer create state, and traces no longer leak between servers — audit M5
+  (minor).** `get_session_metrics` and `resources/read` called `getOrCreateSession`, so asking
+  about an unknown session invented it — reporting a plausible all-zero record and, under
+  `maxSessions`, potentially evicting a live one; both now use the new read-only
+  `GatewaySessionStore.getSession` and report a miss. `traceStore` was a module-level `Map`
+  shared by every server in the process and is now per-server. `initialize` now negotiates
+  against the client's requested protocol version instead of asserting its own unconditionally.
+
 - **Three defects H5 exposed, each fixed with it**: pruning was scored as semantic drift
   (`findUnwitnessedItems` exempted pruned items but the ratios compared whole bundles — now scored
   over retained items, guarded on ids corresponding so a caller that rebuilds its bundle gets more
@@ -114,6 +181,17 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
   constant-time.
 
 ### Changed
+- **Gateway test seams are parameters, not environment variables — audit M8.**
+  `TOKENDAMPER_MOCK_UPSTREAM=true` made the proxy return the caller's own optimized prompt with a
+  200 as though a model had written it, and `NODE_ENV === 'test'` waived the missing-credentials
+  401 — a variable many CI systems set for unrelated reasons. Both env reads are **removed**, not
+  demoted to fallbacks, and replaced by `mockUpstream` and `allowMissingUpstreamCredentials` on
+  `ProxyHandlerOptions`, `GatewayConfig` and `ExecOptions`.
+
+  Ten tests in `test/unit/gateway.test.ts` failed the moment the `NODE_ENV` branch went — they
+  had been passing *because vitest sets that variable*, none of them mentioning it. That is the
+  finding, demonstrated.
+
 - **Gateway mode is documented as experimental, and the cross-turn saving claim is withdrawn —
   audit H1, M4**: measured over real sockets on two-turn conversations where a resent history
   contains each block once, the Gateway saves **0 bytes and falls back on every turn**, for code,

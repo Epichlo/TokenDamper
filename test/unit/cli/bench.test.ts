@@ -179,6 +179,8 @@ describe('CLI Bench Subcommand & Renderer', () => {
         } as never,
       };
 
+      // `--risk-tolerance` is gone (audit H4) — it reached the budget and no further, so a
+      // sweep configured with it produced numbers identical to one without.
       const exitCode = runCli(
         [
           'bench',
@@ -187,8 +189,6 @@ describe('CLI Bench Subcommand & Renderer', () => {
           '200',
           '--target-reduction-ratio',
           '0.4',
-          '--risk-tolerance',
-          'low',
           '--report-json',
           tempReportPath,
         ],
@@ -201,7 +201,6 @@ describe('CLI Bench Subcommand & Renderer', () => {
       const jsonReport = JSON.parse(readFileSync(tempReportPath, 'utf8')) as BenchmarkReport;
       expect(jsonReport.sweepResults[0]?.budget.maxInputTokens).toBe(200);
       expect(jsonReport.sweepResults[0]?.budget.targetReductionRatio).toBe(0.4);
-      expect(jsonReport.sweepResults[0]?.budget.riskTolerance).toBe('low');
     });
 
     it('executes bench mode via --mode bench flag', () => {

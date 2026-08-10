@@ -1,6 +1,6 @@
 import type { ContextBundle, ContextItem, OptimizationBudget, StageResult } from '../../core/model/types';
 import { createBundleStatistics, createContextItem, createStageResult, freeze, hashContent } from '../../core/model/constructors';
-import { elideItem, type ElisionSkipReason } from '../../core/elision';
+import { elideItem, renderSessionElisionMarker, type ElisionSkipReason } from '../../core/elision';
 import { estimateBundleTokens } from '../../core/hashing/tokenizer';
 
 export interface SessionDedupContext {
@@ -100,7 +100,14 @@ export function runSessionDedupStage(
       const isRecoverable = survivingHashes.has(item.contentHash);
       const originalLength = item.content.length;
       const refId = item.contentHash.slice(0, 12);
-      const elidedContent = `[TokenDamper Elided: ref=${refId} bytes=${originalLength} kind=${item.kind}]`;
+      // Rendered by `core/elision/marker`, not spelled out here. The MCP `rehydrate_context`
+      // tool has to recognize whatever this line produces, and while the two were written
+      // independently it looked for a marker shape that never existed (audit M5b).
+      const elidedContent = renderSessionElisionMarker({
+        refId,
+        originalBytes: originalLength,
+        kind: item.kind,
+      });
 
       // Routed through the shared chokepoint: this marker is no more valid JSON than
       // `<BLOCK_HASH:...>` is. It only looked safe because the Gateway hardcoded

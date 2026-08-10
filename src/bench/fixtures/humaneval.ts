@@ -1,5 +1,5 @@
-import { readFileSync, existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { resolveBundledFixture } from './bundled-path';
 import type { BenchmarkFixture, BenchmarkFixtureSet, HumanEvalFixtureRaw } from './types';
 
 /**
@@ -59,21 +59,17 @@ export function loadHumanEvalFixtures(
 }
 
 function resolveFilePath(customPath?: string): string {
-  if (customPath && customPath.trim().length > 0) {
-    const absPath = resolve(process.cwd(), customPath);
-    if (existsSync(absPath)) {
-      return absPath;
+  const candidates = [
+    ...(customPath && customPath.trim().length > 0 ? [customPath] : []),
+    DEFAULT_HUMANEVAL_PATH,
+    FALLBACK_HUMANEVAL_PATH,
+  ];
+
+  for (const candidate of candidates) {
+    const resolved = resolveBundledFixture(candidate);
+    if (resolved !== undefined) {
+      return resolved;
     }
-  }
-
-  const defaultAbs = resolve(process.cwd(), DEFAULT_HUMANEVAL_PATH);
-  if (existsSync(defaultAbs)) {
-    return defaultAbs;
-  }
-
-  const fallbackAbs = resolve(process.cwd(), FALLBACK_HUMANEVAL_PATH);
-  if (existsSync(fallbackAbs)) {
-    return fallbackAbs;
   }
 
   throw new Error(`HumanEval dataset file not found at ${customPath ?? DEFAULT_HUMANEVAL_PATH}`);

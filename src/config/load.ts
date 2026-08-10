@@ -148,6 +148,17 @@ function mergeBudget(
   });
 }
 
+/**
+ * `TOKENDAMPER_MAX_OUTPUT_TOKENS`, `TOKENDAMPER_MAX_LATENCY_MS` and
+ * `TOKENDAMPER_RISK_TOLERANCE` are gone from here alongside their command-line counterparts
+ * (audit H4). All three set a budget field that no stage, validator or planner reads, so the
+ * only thing they ever changed was the contents of the config object — and, for risk
+ * tolerance, one column of the benchmark table.
+ *
+ * A config *file* may still carry the fields, because `OptimizationBudget` still declares them
+ * and `ARCHITECTURE.md` is frozen. What is withdrawn is the claim, implicit in offering an
+ * environment variable, that setting one does something.
+ */
 function buildBudgetOverridesFromEnv(env: NodeJS.ProcessEnv): Partial<TokenDamperConfig['budget']> {
   const override: Record<string, unknown> = {};
 
@@ -156,24 +167,9 @@ function buildBudgetOverridesFromEnv(env: NodeJS.ProcessEnv): Partial<TokenDampe
     override.maxInputTokens = maxInputTokens;
   }
 
-  const maxOutputTokens = parseNumber(env.TOKENDAMPER_MAX_OUTPUT_TOKENS);
-  if (maxOutputTokens !== undefined) {
-    override.maxOutputTokens = maxOutputTokens;
-  }
-
   const targetReductionRatio = parseNumber(env.TOKENDAMPER_TARGET_REDUCTION_RATIO);
   if (targetReductionRatio !== undefined) {
     override.targetReductionRatio = targetReductionRatio;
-  }
-
-  const maxLatencyMs = parseNumber(env.TOKENDAMPER_MAX_LATENCY_MS);
-  if (maxLatencyMs !== undefined) {
-    override.maxLatencyMs = maxLatencyMs;
-  }
-
-  const riskTolerance = parseRiskTolerance(env.TOKENDAMPER_RISK_TOLERANCE);
-  if (riskTolerance !== undefined) {
-    override.riskTolerance = riskTolerance;
   }
 
   const preserveKinds = parsePreserveKinds(env.TOKENDAMPER_PRESERVE_KINDS);
@@ -232,10 +228,3 @@ function parsePreserveKinds(value: string | undefined): TokenDamperConfig['budge
     );
 }
 
-function parseRiskTolerance(value: string | undefined): TokenDamperConfig['budget']['riskTolerance'] | undefined {
-  if (value === 'low' || value === 'medium' || value === 'high') {
-    return value;
-  }
-
-  return undefined;
-}

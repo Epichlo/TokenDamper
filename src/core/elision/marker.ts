@@ -84,3 +84,34 @@ export function renderElisionMarker(elidedText: string, describes: string, conte
 export function containsElisionMarker(text: string): boolean {
   return text.includes('[TokenDamper: ') && new RegExp(ELISION_MARKER_PATTERN.source).test(text);
 }
+
+/**
+ * Renders the marker `cleanup:session-dedup` leaves where a block from an earlier turn was.
+ *
+ * Distinct from `renderElisionMarker` above because it names a *reference* rather than a
+ * quantity: the reverse path for this one is a session-store lookup by `ref`, not a hash the
+ * reader can verify against content they already hold.
+ *
+ * It lives here, rather than inline in the stage, because two places have to agree on it —
+ * the stage that writes it and the MCP `rehydrate_context` tool that reads it. They did not.
+ * The stage emitted this, and the tool looked for `<ELIDED: ref=… >`: square brackets against
+ * angle brackets, different prefix, no overlap. Session rehydration through MCP could never
+ * have matched a marker the product actually produces (audit M5b). One renderer and one
+ * pattern, derived from each other, is the only arrangement in which that cannot recur.
+ */
+export function renderSessionElisionMarker(params: {
+  readonly refId: string;
+  readonly originalBytes: number;
+  readonly kind: string;
+}): string {
+  return `[TokenDamper Elided: ref=${params.refId} bytes=${params.originalBytes} kind=${params.kind}]`;
+}
+
+/**
+ * Matches a marker `renderSessionElisionMarker` produced, capturing its `ref`.
+ *
+ * Carries `g` for the replace-all call sites. Construct a fresh `RegExp` from `.source` before
+ * calling `.test()` on it — a global regex carries `lastIndex` between calls.
+ */
+export const SESSION_ELISION_MARKER_PATTERN =
+  /\[TokenDamper Elided: ref=([A-Za-z0-9_-]+) bytes=\d+ kind=[A-Za-z0-9_-]+\]/g;

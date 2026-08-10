@@ -2707,3 +2707,188 @@ bundle-scoped and would need its own rule.
 `ARCHITECTURE.md` is unchanged: multi-item bundles were always in the model (`createBundleFromItems`
 predates this), and nothing about the linear pipeline moved. What changed is that a shipping
 adapter finally builds one.
+
+---
+
+## 44. Three Entry Modes, Three Kinds of Untruth
+
+Audit Wave 2 — M5a, M5b, M8, M9, M10, H4, plus the M5 minor items. Six independent findings
+that share one shape: **a surface that reports success while doing nothing, or doing something
+other than what it says.** They are grouped here because the grouping is the finding.
+
+### M5a — the MCP entry mode was a guaranteed no-op
+
+`optimize_context` exposed `rawInput`, `language`, `path`, `maxInputTokens`, `riskTolerance`
+and `preserveKinds`. It did not expose `targetReductionRatio`, and its description promised
+compression unconditionally.
+
+With no budget, `plan()` returns `pass_through` with an empty `stageIds`. Zero stages run. The
+tool returned the input unchanged, `reductionRatio: 0`, and **no error** — so a client calling
+the tool exactly as documented received a clean success for work that never happened. One of
+three advertised entry modes did nothing, and nothing in its output said so.
+
+`targetReductionRatio` is now a schema property, range-checked and **rejected rather than
+clamped** (§29's argument: a value silently coerced into range is a run the caller believes
+they configured and did not). The description states that a budget is required.
+
+The second half matters as much as the first. The response now carries `budgetApplied`,
+`planMode` and `stagesExecuted`, and a `notice` when no budget was in effect. This is
+invariant 10 applied to a budget rather than to a validator: `reductionRatio: 0` alone cannot
+distinguish *"nothing was compressible"* from *"nothing ran"*, and only one of those is the
+caller's to fix. Measured end to end through the stdio server on `src/core/planner/index.ts`:
+
+```
+no budget    budgetApplied false  pass_through       0 stages   0.0%   + notice
+ratio 0.3    budgetApplied true   topology_knapsack  4 stages  69.1%
+```
+
+The 586 tokens saved on the second row match `tokenEstimateSaved: 586` from the CLI on the same
+file — same engine, cross-checked across routes rather than trusted from one.
+
+Gated on C1a (§37) so that turning MCP on could not start deleting markdown documents. C1a is
+merged, so it is safe now.
+
+### M5b — a marker the product has never produced
+
+`rehydrate_context` matched `/<ELIDED:\s*ref=([A-Za-z0-9_-]+)[^>]*>/g`.
+`cleanup:session-dedup` emits `[TokenDamper Elided: ref=... bytes=... kind=...]`.
+
+Angle brackets against square brackets, different prefix, no overlap. The regex could not match
+any marker the product emits, so session rehydration through MCP matched nothing on every input
+and returned the text unchanged — again with no error. It had never worked.
+
+The fix is not the pattern. Both sides were internally consistent and independently plausible;
+what broke was that **each restated the format the other owned**. `renderSessionElisionMarker`
+and `SESSION_ELISION_MARKER_PATTERN` now live together in `core/elision/marker.ts`, the stage
+calls the renderer, and the tool builds its regex from the exported source. The adapter reaches
+core, not `src/stages/` — invariant 4 is intact.
+
+`test/unit/mcp-session-rehydration.test.ts` takes its marker from **running the stage**, never
+from a literal. A test that restated either format would have passed while the pair was broken,
+which is the property that made this survive.
+
+### H4 — knobs parsed, validated, then discarded
+
+| knob | read by |
+|---|---|
+| `--max-output-tokens` / `TOKENDAMPER_MAX_OUTPUT_TOKENS` | nothing, anywhere |
+| `--max-latency-ms` / `TOKENDAMPER_MAX_LATENCY_MS` | nothing, anywhere |
+| `--risk-tolerance` / `TOKENDAMPER_RISK_TOLERANCE` / MCP `riskTolerance` | `cli/bench-table-renderer.ts:97` — one display column |
+
+All three were parsed, range-validated, merged into the budget, and then read by no stage,
+validator or planner. Setting one exited 0 and changed nothing. Risk tolerance was the worst of
+the three because it was *nearly* real: it reached a benchmark table, where a column implies the
+row's numbers depend on it.
+
+**Removed from the surface, not from the model.** The CLI flags, the environment variables and
+the MCP schema property are gone; `OptimizationBudget` keeps the fields, because
+`ARCHITECTURE.md` pins that model as frozen and a field awaiting an implementation is a
+different thing from a dial that reports success. Each field now carries a doc comment naming
+its consumer or stating it has none — so the next person to add one has to answer the question
+this finding is about.
+
+`--target-reduction-ratio` **deliberately stays**, despite being nearly as inert: the planner
+reads it only as `> 0`, making it an on/off switch wearing the name of a dial. Removing it would
+take the only budget flag every doc and example uses, and making it a real proportional target
+is a planner change. It stays a named decision rather than a silent one.
+
+Removal is a hard error, not a shrug — `Unknown argument: --risk-tolerance`. A withdrawn flag
+that parsed and did nothing would be the same defect wearing a new hat.
+
+### M8 — test seams in the request path
+
+`TOKENDAMPER_MOCK_UPSTREAM=true` made the proxy answer with the caller's own optimized request
+body and a 200, as though a model had produced it. `NODE_ENV === 'test'` waived the
+missing-credentials 401 — and `NODE_ENV=test` is set by a great many CI systems and process
+managers that mean nothing by it. Neither was documented.
+
+Both are now `ProxyHandlerOptions` fields — `mockUpstream` and
+`allowMissingUpstreamCredentials` — plumbed through `GatewayConfig` and `ExecOptions`. **The
+environment reads are gone entirely**, not kept as a fallback: retaining
+`TOKENDAMPER_MOCK_UPSTREAM` would have preserved precisely the hazard the finding names.
+
+The evidence arrived on its own. Ten tests in `test/unit/gateway.test.ts` failed the moment the
+`NODE_ENV` branch was removed — they had been passing *because vitest sets that variable*, and
+none of them mentioned it. That is the finding demonstrated rather than argued: a waiver
+reachable by ambient configuration was already load-bearing somewhere nobody had chosen.
+
+### M9 — request headers returned as response headers
+
+Both optimize paths returned `{ ...cleanHeaders, 'content-type': 'application/json' }`, and
+`cleanHeaders` strips only `host` and `content-length`. `authorization`, `x-api-key` and cookies
+came back out **on the response**. Reproduced under mock upstream as `x-api-key: sk-test`.
+
+Latent, because the normal path overwrites these with the upstream response's headers — but
+"latent" meant one environment variable away (M8), and a response header is a value that gets
+logged, cached and proxied onward. Response headers are now constructed by
+`localResponseHeaders()`, which returns exactly `content-type`. The fix is to stop deriving one
+from the other, not to lengthen a strip-list: no property of an inbound request header makes it
+a correct thing to say on the way back.
+
+### M10 — `bench` threw for every installed user
+
+`humaneval.ts` and `codexglue.ts` resolved `test/fixtures/bench/...` against `process.cwd()`,
+and `test/` was not in `package.json`'s `files`. The CLI additionally defaulted to the literal
+path `test/fixtures/bench`, which exists only in a checkout.
+
+Every existing bench test runs with the repository as its working directory, which is exactly
+why none of them saw it.
+
+`resolveBundledFixture` tries the working directory first — preserving checkout behaviour, and
+letting a user's own copy win — then the package root. The package root is found by **walking
+up from `__dirname` to the nearest `package.json`**, not by a fixed number of `..` segments:
+this module runs from `src/bench/fixtures/` under vitest and `dist/src/bench/fixtures/` when
+compiled, so a constant offset is correct for exactly one of them and would have reintroduced
+the bug on the other route. The fixtures now ship in `files`.
+
+Verified by running the built CLI from a temporary directory with no `test/` tree: 10 fixtures
+loaded, exit 0.
+
+Adjacent, and fixed with it: `loadBenchmarkFixtures('test/fixtures/bench')` threw `EISDIR`
+because a directory reached `readFileSync`. The CLI had always pre-empted this at its own call
+site, so only direct API callers hit it. A directory argument now means "the datasets under
+here", handled in the loader — one place instead of two.
+
+### M5 minor — reads that write, and a handshake that does not shake
+
+Three smaller items in the same file:
+
+- **`traceStore` was a module-level `Map`** serving every `createMcpServer` in a process. Two
+  servers shared one 100-entry budget, each could evict the other's traces, and a request id
+  minted by one was retrievable through the other. Now created per server and injectable.
+- **`get_session_metrics` and `resources/read` called `getOrCreateSession`**, so *asking about*
+  a session created it: an unknown id answered with a plausible all-zero record instead of
+  saying it did not exist, and under `maxSessions` an inspection call could evict a live
+  session. `getSession` is the read-only counterpart; both callers use it and report a miss.
+- **`initialize` returned `MCP_PROTOCOL_VERSION` unconditionally**, ignoring the client's
+  requested version. That is not a negotiation — a client asking for a revision this server does
+  not implement was told it had been agreed to. `negotiateProtocolVersion` echoes a supported
+  request and otherwise answers with this server's own. `SUPPORTED_PROTOCOL_VERSIONS` lists the
+  single revision actually implemented, because negotiation claiming more than the code does
+  would be this same finding with extra steps.
+
+### Measurement
+
+**594 of 594 corpus rows are identical to the pre-Wave-2 engine**, across `outputSha`,
+`byteIdentical`, `tokenBefore`, `tokenAfter`, `reduction`, `fallbackUsed`, `driftScore`,
+`debtScore`, `planMode`, `stageCount`, `contentType`, `astChecked`, `astUnchecked`,
+`driftMeasured` and `unwitnessedItems`. Nothing in this wave touches a stage's output, and that
+is now measured rather than assumed — both engines run against the *same frozen corpus*, varying
+only `dist/`, per the method in CLAUDE.md.
+
+The bucket table moved anyway, and the reason is the trap that method exists to catch:
+**typescript file went 25.35% → 23.26% with `reduced` unchanged at 33.** The denominator grew by
+one file — `src/bench/fixtures/bundled-path.ts`, added by M10 — which falls back and contributes
+zero. No file that reduced before stopped reducing. An aggregate compared across two different
+corpora is not a comparison, which is why the per-row check above is the one that counts.
+
+The prose bucket also went 28 → 29, and that one was **already outstanding**:
+`docs/audit-remediation-status.md` landed in `7a1b5a7`, after the `dd540fe` baseline was
+recorded. `collect.js` refused on both mismatches before measuring anything — working exactly as
+designed — and `recipe.json` records each step with its cause.
+
+One near-miss worth recording, because it is the same class of error as the findings above: the
+first per-file diff keyed rows on `r.file`, a field the harness does not emit. Every row
+collapsed onto one undefined key, and the script cheerfully reported **"compared 2 rows,
+differing: 0"** — a green result from a comparison that never happened. The row count is what
+gave it away, which is why the corrected script asserts 594 and refuses duplicate keys.

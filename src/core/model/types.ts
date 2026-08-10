@@ -94,13 +94,31 @@ export interface BundleStatistics {
 
 /**
  * The immutable optimization constraint model.
+ *
+ * Three of these fields are **declared but unconsumed**, and saying so here is the point —
+ * audit H4 found them wired end to end through the CLI, the environment and the MCP schema
+ * while no stage, validator or planner read them. The command-line and environment surfaces
+ * were withdrawn; the fields remain because `ARCHITECTURE.md` pins this model as frozen and a
+ * field awaiting an implementation is not the same defect as a dial that reports success.
+ *
+ * Anything added here should be readable from somewhere in `src/core/` before it is offered
+ * to a user.
  */
 export interface OptimizationBudget {
+  /** Read by `planner.plan` — any value `> 0` selects knapsack mode over pass-through. */
   readonly maxInputTokens?: number;
+  /** Unconsumed. No stage, validator or planner reads this. */
   readonly maxOutputTokens?: number;
+  /**
+   * Read by `planner.plan`, but **only as `> 0`** — it selects knapsack mode and is never used
+   * as a proportional target. Making it one is a planner change, tracked separately.
+   */
   readonly targetReductionRatio?: number;
+  /** Unconsumed. No stage, validator or planner reads this. */
   readonly maxLatencyMs?: number;
+  /** Unconsumed by the pipeline; `cli/bench-table-renderer` prints it in a column. */
   readonly riskTolerance: 'low' | 'medium' | 'high';
+  /** Read by `cleanup:session-dedup` and `compression:delta-compression`. */
   readonly preserveKinds: ReadonlyArray<ContextItemKind>;
 }
 

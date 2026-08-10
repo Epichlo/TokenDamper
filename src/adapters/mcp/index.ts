@@ -1,6 +1,6 @@
 import type { Readable, Writable } from 'node:stream';
 import { McpStdioServer } from './server';
-import { TOOL_DEFINITIONS, handleToolCall } from './tools';
+import { TOOL_DEFINITIONS, createTraceStore, handleToolCall } from './tools';
 import type {
   McpInitializeResult,
   McpResourceDefinition,
@@ -12,11 +12,35 @@ import type {
 import { JSON_RPC_ERROR_CODES } from './types';
 import { GatewaySessionStore } from '../../gateway/session-store';
 import { TokenHasher } from '../../core/hashing/token-hasher';
-import type { ResolvedConfig } from '../../core/model/types';
+import type { OptimizationTrace, ResolvedConfig } from '../../core/model/types';
 import { loadConfig } from '../../config';
 import { TOKENDAMPER_VERSION } from '../../version';
 
 export const MCP_PROTOCOL_VERSION = '2024-11-05';
+
+/**
+ * Protocol revisions this server will speak, newest first.
+ *
+ * `initialize` used to answer `MCP_PROTOCOL_VERSION` unconditionally, ignoring whatever the
+ * client asked for. That is not a handshake — a client requesting a revision this server does
+ * not implement was told it had been agreed to (audit M5, minor). The list is deliberately the
+ * single revision actually implemented: negotiation that claims more than the code does would
+ * be the same defect with extra steps.
+ */
+export const SUPPORTED_PROTOCOL_VERSIONS: ReadonlyArray<string> = [MCP_PROTOCOL_VERSION];
+
+/**
+ * Resolves the revision to answer `initialize` with.
+ *
+ * Echoes the client's request when it is one this server implements; otherwise answers with
+ * this server's own, which is what the specification prescribes for an unsupported request —
+ * the client then decides whether it can proceed.
+ */
+export function negotiateProtocolVersion(requested: unknown): string {
+  return typeof requested === 'string' && SUPPORTED_PROTOCOL_VERSIONS.includes(requested)
+    ? requested
+    : MCP_PROTOCOL_VERSION;
+}
 export const SERVER_NAME = 'tokendamper-mcp';
 export const SERVER_VERSION = TOKENDAMPER_VERSION;
 
@@ -27,6 +51,12 @@ export interface CreateMcpServerOptions {
   readonly sessionStore?: GatewaySessionStore;
   readonly tokenHasher?: TokenHasher;
   readonly config?: ResolvedConfig;
+  /**
+   * Trace store for this server. Defaults to a fresh one, which is the point — it used to be
+   * a single module-level map shared by every server in the process. Injectable on the same
+   * terms as `sessionStore`, so a caller that wants to inspect traces can hold the map.
+   */
+  readonly traceStore?: Map<string, OptimizationTrace>;
 }
 
 const STATIC_RESOURCES: ReadonlyArray<McpResourceDefinition> = [
@@ -73,6 +103,9 @@ export function createMcpServer(options: CreateMcpServerOptions = {}): McpStdioS
   const sessionStore = options.sessionStore ?? new GatewaySessionStore();
   const tokenHasher = options.tokenHasher ?? new TokenHasher();
   const config = options.config ?? loadConfig({ cwd: process.cwd() });
+  // One store per server rather than one per process, so two servers in a process cannot
+  // evict each other's traces or read each other's request ids (audit M5, minor).
+  const traceStore = options.traceStore ?? createTraceStore();
 
   const requestHandler = async (
     method: string,
@@ -81,7 +114,7 @@ export function createMcpServer(options: CreateMcpServerOptions = {}): McpStdioS
     switch (method) {
       case 'initialize': {
         const result: McpInitializeResult = {
-          protocolVersion: MCP_PROTOCOL_VERSION,
+          protocolVersion: negotiateProtocolVersion(params?.protocolVersion),
           capabilities: {
             tools: { listChanged: false },
             resources: { subscribe: false, listChanged: false },
@@ -110,6 +143,7 @@ export function createMcpServer(options: CreateMcpServerOptions = {}): McpStdioS
           sessionStore,
           tokenHasher,
           config,
+          traceStore,
         });
       }
 
@@ -142,7 +176,16 @@ export function createMcpServer(options: CreateMcpServerOptions = {}): McpStdioS
         const sessionMatch = /^tokendamper:\/\/session\/([^/]+)$/.exec(uri);
         if (sessionMatch && sessionMatch[1]) {
           const sessionId = sessionMatch[1];
-          const session = sessionStore.getOrCreateSession(sessionId);
+          // Reading a resource must not create one. `getOrCreateSession` here meant every
+          // `resources/read` of a session URI materialized that session, so the resource
+          // could never report "no such session" and an inspecting client mutated the store
+          // it was inspecting (audit M5, minor).
+          const session = sessionStore.getSession(sessionId);
+          if (!session) {
+            const missing = new Error(`Session not found: ${sessionId}`) as Error & { code?: number };
+            missing.code = JSON_RPC_ERROR_CODES.INVALID_PARAMS;
+            throw missing;
+          }
           const sessionData = {
             sessionId: session.sessionId,
             createdAt: session.createdAt,

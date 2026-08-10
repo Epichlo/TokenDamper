@@ -183,7 +183,6 @@ describe('Empirical Challenger M2 - CLI & JSON Exporter Stress Testing Suite', (
         'test/fixtures/bench',
         '--max-input-tokens', '800',
         '--target-reduction-ratio', '0.45',
-        '--risk-tolerance', 'low',
         '--report-json', overrideReportPath,
       ],
       { stdout: stdout as never, stderr: stderr as never },
@@ -197,22 +196,26 @@ describe('Empirical Challenger M2 - CLI & JSON Exporter Stress Testing Suite', (
 
     expect(budget.maxInputTokens).toBe(800);
     expect(budget.targetReductionRatio).toBe(0.45);
-    expect(budget.riskTolerance).toBe('low');
 
     if (existsSync(overrideReportPath)) unlinkSync(overrideReportPath);
   });
 
-  it('8. Invalid budget override flags (risk tolerance, ratio range, non-integer tokens)', () => {
-    // Bad risk tolerance
-    {
+  it('8. Invalid budget override flags (ratio range, non-integer tokens)', () => {
+    // The withdrawn knobs are now rejected as unknown rather than range-checked (audit H4).
+    // Rejected, not ignored: a flag that silently does nothing is what H4 was about.
+    for (const [flag, value] of [
+      ['--risk-tolerance', 'low'],
+      ['--max-output-tokens', '500'],
+      ['--max-latency-ms', '100'],
+    ] as const) {
       const stdout = new MemoryStream();
       const stderr = new MemoryStream();
       const exitCode = runCli(
-        ['bench', 'test/fixtures/bench', '--risk-tolerance', 'ultra_high'],
+        ['bench', 'test/fixtures/bench', flag, value],
         { stdout: stdout as never, stderr: stderr as never },
       );
       expect(exitCode).toBe(1);
-      expect(stderr.content).toContain('Invalid value for --risk-tolerance.');
+      expect(stderr.content).toContain(`Unknown argument: ${flag}`);
     }
 
     // Ratio > 1.0

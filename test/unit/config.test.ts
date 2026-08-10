@@ -87,8 +87,13 @@ describe('config loading', () => {
       cwd,
       configPath,
       env: {
-        TOKENDAMPER_MAX_OUTPUT_TOKENS: '200',
         TOKENDAMPER_TARGET_REDUCTION_RATIO: '0.2',
+        // Withdrawn by audit H4, and asserted below to have no effect. It set a budget field
+        // that nothing in the pipeline reads, so offering it as an environment variable
+        // advertised a control that did not exist.
+        TOKENDAMPER_MAX_OUTPUT_TOKENS: '200',
+        TOKENDAMPER_MAX_LATENCY_MS: '900',
+        TOKENDAMPER_RISK_TOLERANCE: 'high',
       },
       cliOverrides: {
         budget: {
@@ -99,10 +104,14 @@ describe('config loading', () => {
     });
 
     expect(config.budget.maxInputTokens).toBe(1000);
-    expect(config.budget.maxOutputTokens).toBe(200);
     expect(config.budget.targetReductionRatio).toBe(0.2);
-    expect(config.budget.riskTolerance).toBe('medium');
     expect(config.budget.preserveKinds).toEqual(['prompt', 'file']);
+
+    // The three withdrawn variables are ignored: the file's `riskTolerance: 'medium'` stands
+    // rather than being overridden to 'high', and the two numeric fields stay unset.
+    expect(config.budget.riskTolerance).toBe('medium');
+    expect(config.budget.maxOutputTokens).toBeUndefined();
+    expect(config.budget.maxLatencyMs).toBeUndefined();
   });
 
   it('throws a clear message on invalid JSON syntax in config file', () => {

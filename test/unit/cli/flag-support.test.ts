@@ -24,10 +24,7 @@ const VALUE_FOR: Readonly<Record<string, string | null>> = {
   '--minimum-confidence': '0.5',
   '--log-level': 'silent',
   '--max-input-tokens': '500',
-  '--max-output-tokens': '500',
   '--target-reduction-ratio': '0.3',
-  '--max-latency-ms': '100',
-  '--risk-tolerance': 'low',
   '--preserve-kinds': 'prompt',
   '--diff': null,
   '--diff-html': 'out.html',
@@ -61,6 +58,28 @@ describe('the flag table matches the loop it governs', () => {
         Object.prototype.hasOwnProperty.call(VALUE_FOR, flag),
         `no test value for ${flag}`,
       ).toBe(true);
+    }
+  });
+
+  it('carries no test value for a flag the table no longer supports', () => {
+    // The reverse direction, added when audit H4 withdrew `--max-output-tokens`,
+    // `--max-latency-ms` and `--risk-tolerance`. Without it a removed flag leaves an entry
+    // here that nothing exercises and nothing complains about — and the next reader takes the
+    // list above for the flag surface, because that is what it looks like.
+    const all = new Set(Object.values(SUPPORTED_FLAGS).flatMap((set) => [...set]));
+    for (const flag of Object.keys(VALUE_FOR)) {
+      expect(all.has(flag), `${flag} has a test value but no command supports it`).toBe(true);
+    }
+  });
+
+  it('rejects the flags H4 withdrew, on every command', () => {
+    for (const command of ['optimize', 'bench', 'mcp'] as const) {
+      for (const flag of ['--max-output-tokens', '--max-latency-ms', '--risk-tolerance']) {
+        const head = command === 'optimize' ? [command, '-'] : [command];
+        // `Unknown argument`, not `Unsupported for` — these belong to no command now, so the
+        // "applies to" hint would have nothing to name.
+        expect(() => parseArguments([...head, flag, 'x'], process.cwd())).toThrow('Unknown argument');
+      }
     }
   });
 
