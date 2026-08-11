@@ -44,6 +44,40 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
   fields. Wave 2 changes no stage output. See DECISIONS §44.
 
 ### Added
+- **A file that fails a check no longer reverts the rest — Phase 1c, audit §3.1.** Validation is
+  bundle-scoped and fallback was all-or-nothing, so on the frozen 45-file Python corpus the
+  stages achieved **42.52%** and the run emitted **0.00%**: 26 `CONSTRAINT_DIRECTIVE_LOST` errors
+  across 14 items reverted all 45, with drift at 0.0359 against a 0.40 gate and AST clean.
+
+  Failures that name an item now revert only that item; the repaired bundle goes back through the
+  **same** `validate` and is emitted only if it passes. Repair changes which bundle is offered,
+  never what counts as valid.
+
+  | bundle | before | after | reverted |
+  |---|---|---|---|
+  | 45 Python files | 0.00% | **22.73%** | 14 |
+  | 61 TypeScript files | 0.00% | **19.47%** | 21 |
+
+  Three supporting changes: `ValidationIssue.itemId` is a field rather than text interpolated
+  into `message` (recovering it by regex would have been audit M5b exactly); `validate()` returns
+  `attribution` with `repairableItemIds` and `hasUnattributableError`; and `trace.itemsReverted`
+  names what was put back, so a partial success cannot be mistaken for a clean run.
+
+  **The refusal rule was tried too strict and corrected by measurement.** "Refuse if any error is
+  unattributable" reads as the conservative choice, but the TypeScript bundle fails on both
+  attributable constraint losses *and* `SEMANTIC_DRIFT_EXCEEDED` at 0.4122 — so the failure that
+  named nothing discarded the attribution that named 21 items, and the run stayed at 0.00%. The
+  gate is now "is there a principled subset to revert?", which is safe because the candidate is
+  re-validated regardless: reverting items lowers semantic loss, and drift fell 0.4122 → 0.0056
+  (TypeScript) and 0.0359 → 0.0141 (Python).
+
+  Repair declines, and routes to the real fallback, when *every* changed item would be reverted —
+  that is a fallback wearing a different name, and the distinction is load-bearing because
+  fallback echoes `request.rawInput` (the CLI writes the original `Buffer`) while repair renders
+  from items. DECISIONS §35 exists because those are not the same bytes for non-UTF-8 input.
+  Measured: 14 of 14 single-file fallbacks remain byte-identical, and **574 of 574 corpus rows
+  are unchanged** — the harness measures single-file runs, where repair cannot fire.
+
 - **A 0% run now says whether the language could ever have been reduced — audit H2.** Twelve of
   nineteen recognised extensions cannot produce a non-zero reduction under any flag combination,
   and that was indistinguishable from a file with nothing worth compressing. `trace.languageSupport`

@@ -25,6 +25,8 @@ export function buildTrace(
     readonly driftScore?: number;
     /** Per-stage wall time, positionally aligned with `stageResults`. See `StageTrace`. */
     readonly stageDurationsMs?: ReadonlyArray<number>;
+    /** Items Phase 1c reverted; reported so a partial success cannot pass for a clean one. */
+    readonly itemsReverted?: ReadonlyArray<string>;
   },
 ): OptimizationTrace {
   // Both sides must measure the same *kind* of thing, or the ratio is a comparison of a bundle
@@ -97,5 +99,8 @@ export function buildTrace(
     // has any transform for the input's language at all, which is a different problem from the
     // input being incompressible and calls for a different response. Audit H2.
     ...(validation.languageSupport === undefined ? {} : { languageSupport: validation.languageSupport }),
+    ...(metrics?.itemsReverted === undefined || metrics.itemsReverted.length === 0
+      ? {}
+      : { itemsReverted: metrics.itemsReverted }),
   });
 }

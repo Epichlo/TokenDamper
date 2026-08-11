@@ -327,15 +327,23 @@ The agreed direction is three scoped changes (no rewrite):
    `statistics.contentTypeCounts` is already the bundle-level view. See `NOTES-FOR-DOCS.md`. [retired]
    The planner-level gate (§3.6 of the design doc) is still **not** implemented: nothing in
    `src/core/planner/` reads `contentType`.
-2. Per-stage checkpointing replacing the single global validate→fallback gate (**Phase 1c,
-   not started**) — roll back only the failing stage, keep prior valid reductions. Requires
-   extending the trace with per-stage status. **Read this before designing it:** the plan
-   assumes a validation failure is attributable to a stage, and sometimes it is not.
-   `validate()` runs `validateBundleAst` over *every* item in the final bundle, so a failure
-   can originate in an item no stage touched (that is how DECISIONS.md §17 was found, on
-   turn 1 with nothing transformed). Constraint retention and drift are also bundle-scoped
-   set comparisons with no per-stage attribution. Establish attribution first. See
-   `NOTES-FOR-DOCS.md` and `docs/phase-1-stabilization-summary.md` §8. [retired]
+2. ~~Per-stage checkpointing replacing the single global validate→fallback gate.~~ **DONE as
+   Phase 1c, DECISIONS §47 — but per *item*, not per stage.** This entry's own warning is why:
+   a validation failure is often not attributable to a stage, because `validate()` runs over
+   every item in the final bundle and a failure can originate in an item no stage touched. It
+   *is* attributable to an **item**, and that is the axis the fix uses.
+   - `ValidationIssue.itemId` is a field now, not text inside `message`. `validate()` returns
+     `attribution` — `repairableItemIds` plus `hasUnattributableError`.
+   - The engine reverts named items, re-validates through the **same** `validate`, and adopts
+     the result only if it passes. Repair changes which bundle is offered, never what counts
+     as valid.
+   - Drift splits: `SEMANTIC_DRIFT_UNMEASURABLE` names items via `unwitnessedItemIds` (§33) and
+     is repairable; `SEMANTIC_DRIFT_EXCEEDED` names none and is not.
+   - **The gate is "is there a principled subset to revert?", not "is every error attributed?"**
+     The stricter rule was tried and measured too strict — see §47 before re-tightening it.
+   - Measured: 45-file Python **0.00% → 22.73%**, 61-file TypeScript **0.00% → 19.47%**;
+     574/574 single-file corpus rows unchanged; 14/14 single-file fallbacks still byte-identical.
+   - Read `trace.itemsReverted`, not just `fallbackUsed` — a partial success is not a clean run.
 3. ~~Split fallback into **raw passthrough** vs. **bundle rendering**.~~ **DONE (Phase B,
    DECISIONS §35)** — though the live defect was not the one this item names. The fallback
    branch already returned `request.rawInput`; what made that *not* byte-identical was that

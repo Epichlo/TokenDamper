@@ -3,8 +3,7 @@
 Working state for the `max_audit.md` remediation. **Read this before picking up audit work**;
 it records what is done, what is measured, and what the next batch actually requires.
 
-Last updated 2026-08-10, at `main` = `0cf63dd` + Wave 2 working tree. Suite: **557 passing**,
-typecheck and lint clean.
+Last updated 2026-08-11, after Phase 1c. Suite: **606 passing**, typecheck and lint clean.
 
 ---
 
@@ -18,8 +17,8 @@ typecheck and lint clean.
 | **3** | C3/H1 ✅, H6 ✅, H5 ✅, C4 ✅ | ✅ **done — C4 in DECISIONS §45** |
 | Decisions | H2, M1, M11 | ✅ **decided and done — DECISIONS §46** |
 
-**Every audit item is now closed.** What remains is the architectural work in §5 — chiefly
-Phase 1c, which is the binding constraint on multi-file value.
+**Every audit item is now closed, and so is Phase 1c** (DECISIONS §47), which was the binding
+constraint on multi-file value. §5 records what is left on the architectural axis.
 
 The three decisions were taken as: **H2 — report why** (keep accepting every language, but say
 when elision cannot reduce it, rather than narrowing the accepted set); **M1 — correct the
@@ -29,7 +28,7 @@ narratives and the root planning artifacts**. Each is argued in §46.
 ### Corresponding DECISIONS entries
 
 §36 license · §37 C1a · §38 C2 · §39 M6 · §40 C1b · §41 C3/H1 · §42 H6 · §43 H5 · §44 Wave 2 ·
-§45 C4 · §46 H2/M1/M11
+§45 C4 · §46 H2/M1/M11 · §47 Phase 1c
 
 ---
 
@@ -65,6 +64,10 @@ which is the whole of the 2.09pp move.
   `test/` too, so with the new tests present it fails, emits nothing, and leaves the *previous*
   `dist/` in place — the measurement then silently compares an engine against itself. It
   reported a perfect match, which is exactly what a real match looks like.
+- **The corpus is `src/`, so a change to `src/` changes the corpus.** Phase 1c measured the
+  TypeScript bucket at 19.76% against a previous 23.03% and it looked like a regression. The
+  *pre-change* engine reads 19.76% on the same frozen corpus too. Comparing two runs over two
+  corpora is not a comparison, however carefully each was made.
 - Key the rows on `corpusPath`, and assert the row count. Keying on a field the harness does not
   emit collapses all 594 rows onto one undefined key and reports `compared 2 rows, differing: 0`.
 
@@ -185,11 +188,23 @@ Learned the hard way during Waves 0–3.
 
 ## 5. Beyond Wave 2
 
-- **§3.1 / Phase 1c — per-item fallback.** Now the binding constraint on multi-file value: on the
-  45-file Python corpus, drift is 0.0359 and AST is clean, yet **26 constraint failures across 14
-  items revert all 45**. Phase 1c's stated prerequisite was attribution, and that now exists —
-  constraint failures name their item (§42), unwitnessed items name theirs (§37), AST issues carry
-  `itemId`. Drift remains bundle-scoped and would need its own rule.
+- ~~**§3.1 / Phase 1c — per-item fallback.**~~ **Done, DECISIONS §47.** A failure that names its
+  item now reverts only that item; the repaired bundle is re-validated through the same
+  `validate` and emitted only if it passes. Measured: 45-file Python **0.00% → 22.73%** (14
+  reverted), 61-file TypeScript **0.00% → 19.47%** (21 reverted), **574/574** single-file corpus
+  rows unchanged, 14/14 single-file fallbacks still byte-identical.
+
+  Two things to know before touching it. **The refusal gate was tried too strict and corrected by
+  measurement** — "refuse if any error is unattributable" let `SEMANTIC_DRIFT_EXCEEDED`, which
+  names nothing, discard the constraint attribution that named 21 items; the gate is now "is
+  there a principled subset to revert?", safe because the candidate is re-validated regardless.
+  And **repair declines when every changed item would be reverted**, routing to the real fallback
+  instead, because fallback echoes `request.rawInput` while repair renders from items — §35
+  exists because those differ for non-UTF-8 input.
+
+  Still open on this axis: drift remains a bundle-scoped score. It is *repairable in practice*
+  (reverting items lowers it — 0.4122 → 0.0056 on TypeScript) but it never names an item itself,
+  so a bundle failing on drift alone still falls back whole.
 - ~~**C4 — structured message content flattened to a string.**~~ **Done, DECISIONS §45** — and
   the premise recorded here was wrong. It was *not* "still masked by the drift gate": that holds
   for a cross-turn sole copy, but content duplicated **within one payload** is elided

@@ -3,6 +3,7 @@ import type {
   ContextBundle,
   ContextItem,
   DriftCoverage,
+  FailureAttribution,
   LanguageSupportReport,
   OptimizationBudget,
   OptimizationPlan,
@@ -51,6 +52,7 @@ export function validate(
         code: issue.code,
         message: `AST Error in item [${issue.itemId}] at line ${issue.line ?? 0}, col ${issue.column ?? 0}: ${issue.message}`,
         severity: 'error',
+        itemId: issue.itemId,
       });
     }
   }
@@ -80,6 +82,7 @@ export function validate(
           code: 'CONSTRAINT_DIRECTIVE_LOST',
           message: `Imperative constraint directive dropped from item [${item.id}]: "${directive}"`,
           severity: 'error',
+          itemId: item.id,
         });
       }
     }
@@ -177,6 +180,32 @@ export function validate(
     });
   }
 
+  // 7. Attribute the failures, so the engine can decide whether a repair is possible.
+  //
+  // `SEMANTIC_DRIFT_UNMEASURABLE` is attributable even though it carries no `itemId`: the
+  // measurement gate refuses specific items and `driftReport.unwitnessedItemIds` names them
+  // (§33). `SEMANTIC_DRIFT_EXCEEDED` is not — `S_k` is a whole-bundle set comparison.
+  const errorIssues = issues.filter((issue) => issue.severity === 'error');
+  const repairable = new Set<string>();
+  let hasUnattributableError = false;
+
+  for (const issue of errorIssues) {
+    if (issue.itemId !== undefined) {
+      repairable.add(issue.itemId);
+      continue;
+    }
+    if (issue.code === 'SEMANTIC_DRIFT_UNMEASURABLE' && driftReport.unwitnessedItemIds.length > 0) {
+      for (const id of driftReport.unwitnessedItemIds) repairable.add(id);
+      continue;
+    }
+    hasUnattributableError = true;
+  }
+
+  const attribution: FailureAttribution = {
+    repairableItemIds: Object.freeze([...repairable].sort()),
+    hasUnattributableError,
+  };
+
   // Verdicts are error-scoped. `issues.length === 0` was equivalent while every issue pushed
   // here was an error, but it makes the `severity` field decorative and turns any future
   // informational finding into a forced fallback.
@@ -195,6 +224,7 @@ export function validate(
     astCoverage,
     driftCoverage,
     languageSupport,
+    attribution,
     ...(reason ? { reason } : {}),
   };
 }

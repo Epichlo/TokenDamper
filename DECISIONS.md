@@ -3146,3 +3146,129 @@ rule.
 H4 established no stage reads. It is now the only reader of that field, and a benchmark column
 implies the row's numbers depend on it. Small, real, and left alone here because changing what a
 benchmark table reports is a measurement change, not a documentation one.
+
+---
+
+## 47. One Bad Item No Longer Reverts the Good Ones
+
+Phase 1c — per-item repair. The audit's §3.1, and the binding constraint on multi-file value
+since H5 made multi-item bundles reachable at all.
+
+### The problem, measured
+
+Validation is bundle-scoped and fallback was all-or-nothing. On the frozen 45-file Python corpus
+at `targetReductionRatio: 0.3`:
+
+```
+stages achieved      42.52%
+26 CONSTRAINT_DIRECTIVE_LOST errors across 14 items
+drift                0.0359   (gate: 0.40)
+AST                  clean
+emitted               0.00%
+```
+
+Fourteen items reverted forty-five. The 61-file TypeScript bundle was the same shape with drift
+additionally at 0.4122 — barely over the gate.
+
+### What changed
+
+Three pieces, in order of dependency.
+
+**1. Attribution became data.** It already existed — as prose. `ValidationIssue` carried
+`"…in item [<id>]…"` interpolated into `message`, and nothing else. That is unusable by anything
+that has to *act* on it, and recovering it with a regex over the message would have been audit
+M5b exactly: two places restating one format, drifting apart. `ValidationIssue.itemId` is now a
+field, populated by the AST and constraint checks, which knew it all along.
+
+**2. `validate()` says what it can and cannot attribute.** `FailureAttribution` carries
+`repairableItemIds` and `hasUnattributableError`. The interesting case is drift, which splits:
+`SEMANTIC_DRIFT_UNMEASURABLE` **is** attributable, because the measurement gate refuses specific
+items and `unwitnessedItemIds` names them (§33); `SEMANTIC_DRIFT_EXCEEDED` is not, because `S_k`
+is a set comparison over the whole bundle.
+
+**3. The engine tries a repair before giving up.** Items named by errors are restored to their
+pre-optimization content, the result goes back through the **same** `validate`, and it is adopted
+only if it passes. Deliberately shaped like — and placed after — the automated-rehydration
+attempt that was already there, because it is the same move: build a candidate, re-check it, keep
+it only if the check agrees.
+
+The load-bearing property: **repair changes which bundle is offered, never what counts as valid.**
+Nothing here decides an item is acceptable. Validation still does, by the same standard, on the
+same code path.
+
+### The gate was tried too strict first, and measurement corrected it
+
+The first rule was *"refuse if any error is unattributable."* It reads as the conservative choice
+and it is the wrong one. The TypeScript bundle fails on both attributable constraint losses *and*
+`SEMANTIC_DRIFT_EXCEEDED`; under that rule the drift failure, which names nothing, discarded the
+constraint attribution, which names fourteen items. The run stayed at 0.00%.
+
+The correct question is not *"is every error attributed?"* but *"is there a principled subset to
+revert?"* Attempting the repair decides nothing — a drift score still over the gate simply fails
+the re-validation and falls back. And reverting items *lowers semantic loss*, which is what drift
+measures, so a drift failure is frequently a consequence of the same items:
+
+```
+                    before repair        after repair
+python  drift       0.0359               0.0141
+typescript  drift   0.4122               0.0056
+```
+
+What would be guessing is reverting a subset when **no** error names anything. That still
+refuses, and `repairableItemIds` being empty is the condition.
+
+### Result
+
+| bundle | before | after | reverted | fallback |
+|---|---|---|---|---|
+| 45-file Python | 0.00% | **22.73%** | 14 of 45 | false |
+| 61-file TypeScript | 0.00% | **19.47%** | 21 of 61 | false |
+
+### What repair refuses to do, and why it matters
+
+`revertFailingItems` returns `undefined` — declining the repair — in two cases.
+
+**Nothing to revert.** No named item actually differs from its original, so the failure is not
+about content this can restore.
+
+**Everything would be reverted.** The result would be indistinguishable from the original bundle,
+which is a full fallback wearing a different name. This is not a cosmetic distinction: the
+fallback path echoes `request.rawInput`, and the CLI writes the original `Buffer`, whereas the
+repair path renders from items. DECISIONS §35 exists precisely because those are not the same
+bytes when the input is not valid UTF-8. Routing it as a fallback keeps that guarantee.
+
+Measured: on 45 single-file Python runs, 14 fall back and **14 of 14 are byte-identical**, with
+no run reporting `itemsReverted`. A one-item bundle can never be a partial success, and the code
+says so rather than relying on it happening not to arise.
+
+"Everything" accounts for pruning. A bundle whose surviving items were all reverted is still a
+real reduction if the planner dropped items — selection is not elision, and that saving is not
+what any of these checks objected to.
+
+### One pass, not a loop
+
+Repair runs once and re-validates once. A loop to fixpoint terminates — each pass reverts at
+least one more item, and the limit is the full fallback — but it costs a whole-bundle AST pass
+per iteration, so the worst case is O(n²) validations on exactly the bundles that need it most.
+Measured, one pass sufficed on both corpora. A second round of attributable failures falls back
+rather than iterating.
+
+### Reporting
+
+`trace.itemsReverted` names what was put back, and is present only on a partial success. Without
+it the outcome is a reduction with `fallbackUsed: false` and no indication that anything was
+restored — invariant 10's shape, a clean-looking result concealing what did not happen. It is
+absent on a clean run and on a full fallback, and the engine omits it when `fallback.used`,
+because on that path the decision had no effect on the output.
+
+### Unchanged
+
+**574 of 574 corpus rows are identical** to the pre-1c engine, same frozen corpus, varying only
+`dist/`. That is the expected result and the point of checking: the harness measures single-file
+runs, where repair cannot fire. Phase 1c adds value exactly where the audit said the value was
+missing, and nowhere else.
+
+A measurement caution that cost time here, and is now in the status doc: the TypeScript bucket
+read 23.03% on the previous corpus and 19.76% on this one, which looks like a regression and is
+not — the pre-1c engine reads 19.76% too. The corpus changed because this change edits `src/`,
+and `src/` *is* the TypeScript bucket. Comparing two runs over two corpora is not a comparison.

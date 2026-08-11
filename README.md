@@ -74,8 +74,18 @@ tokens), skipping `node_modules`, `dist`, `.git` and similar. Each file becomes 
 emitted under a `==> path <==` header; a single file is emitted exactly as before, with no header.
 On fail-open each file is returned byte for byte.
 
-Note that validation is bundle-scoped: if any one file fails a check, the whole run falls back.
-On large, densely-commented trees that is common today — see `DECISIONS.md` §43.
+**A file that fails a check no longer reverts the rest.** Validation is still bundle-scoped, but
+a failure that names its item now reverts *only* that item; the repaired bundle is re-validated
+and emitted only if it passes. Measured on frozen corpora at `--target-reduction-ratio 0.3`:
+
+| bundle | before | after |
+|---|---|---|
+| 45 Python files | 0.00% (all reverted) | **22.73%**, 14 files reverted |
+| 61 TypeScript files | 0.00% (all reverted) | **19.47%**, 21 files reverted |
+
+`trace.itemsReverted` names what was put back, so a partial success cannot be mistaken for a
+clean one. A failure that names no item — semantic drift over the whole bundle — still falls back
+entirely, because there is no principled subset to revert. See `DECISIONS.md` §47.
 
 **Tell it what the content is when you pipe it.** Optimization is language-aware: the
 validators, the elision-region selector and the drift metric all dispatch on the item's

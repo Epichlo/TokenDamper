@@ -439,6 +439,7 @@ export function createValidationReport(report: ValidationReport): ValidationRepo
     ...(report.astCoverage === undefined ? {} : { astCoverage: report.astCoverage }),
     ...(report.driftCoverage === undefined ? {} : { driftCoverage: report.driftCoverage }),
     ...(report.languageSupport === undefined ? {} : { languageSupport: report.languageSupport }),
+    ...(report.attribution === undefined ? {} : { attribution: report.attribution }),
   });
 }
 
@@ -465,6 +466,9 @@ export function createOptimizationTrace(trace: OptimizationTrace): OptimizationT
     ...(trace.astCoverage === undefined ? {} : { astCoverage: trace.astCoverage }),
     ...(trace.driftCoverage === undefined ? {} : { driftCoverage: trace.driftCoverage }),
     ...(trace.languageSupport === undefined ? {} : { languageSupport: trace.languageSupport }),
+    ...(trace.itemsReverted === undefined || trace.itemsReverted.length === 0
+      ? {}
+      : { itemsReverted: freeze([...trace.itemsReverted]) }),
   });
 }
 
