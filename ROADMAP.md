@@ -52,17 +52,18 @@ cited are real, and known-already-shipped items have been excluded (see Appendix
 > frozen corpus means anything.
 
 ```
-v1.1.0 (Baseline, shipped — tag @ 807f6f0)
- │
- ├── v1.1.1: Green Tree & Correct Metadata          ← hours   (BLOCKING)
- ├── v1.1.2: Data Loss & Corruption                 ← days    (BLOCKING)
- ├── v1.1.3: Honest Instruments                     ← days    (BLOCKING)
- └── ▼ Scope Decision Gate  ─ outcomes rewrite everything below ─
-      │
-      └── v1.2.0: Context Selection Quality & Redundancy Elimination   [gated on H5]
-           └── v1.3.0: AST Code Folding ("Fast" vs "Deep") & Cache Alignment  [re-scoped]
-                └── v1.4.0: Granular Sub-Query Re-hydration & MCP Tool Extension [gated on M5b]
-                     └── v2.0.0: Enterprise Gateway, Remote MCP & Guardrails  [gated on C3/H1]
+v1.1.0 (tag @ 807f6f0) — never published to npm
+  │
+  └── v1.2.0  SHIPPED 2026-08-11 — tag, GitHub release, npm latest
+       │      the whole v1.1.1/1.1.2/1.1.3 remediation track + the Scope
+       │      Decision Gate answers (H2, M1, M11) + Phase 1c, in one release
+       │
+       ├── v1.3.0: Context Selection Quality & Redundancy Elimination
+       │           ⛔ BM25 has no query source; MMR found 0 of 1,486 pairs
+       │              above its 0.90 threshold. Re-scope before starting.
+       ├── v1.4.0: AST Code Folding ("Fast" vs "Deep") & Cache Alignment
+       ├── v1.5.0: Granular Sub-Query Re-hydration & MCP Tool Extension
+       └── v2.0.0: Enterprise Gateway, Remote MCP & Guardrails  [gated on C3/H1]
 ```
 
 ---
@@ -101,7 +102,7 @@ description under "Pluggable `TokenizerAdapter` architecture."
 
 ---
 
-## v1.1.x — Audit Remediation Track — **BLOCKING**
+## v1.1.x — Audit Remediation Track — **✅ SHIPPED IN v1.2.0**
 
 Ordered by (harm prevented) ÷ (effort), with dependency edges made explicit. Finding IDs refer
 to `max_audit.md`; that document holds the evidence and reproduction commands, and is not
@@ -177,20 +178,64 @@ before scheduling any of it.** Each is a decision with a legitimate "narrow the 
 
 ---
 
-## v1.2.0 — Context Selection Quality & Redundancy Elimination
+## v1.3.0 — Context Selection Quality & Redundancy Elimination
 
-> **⛔ Blocked on Scope Decision Gate — question A (H5).** Every deliverable in this release
-> operates on `scoreBundleTopology()` and `solve01Knapsack()`, both of which are **unreachable on
-> every shipping path**: `createContextBundle` (`constructors.ts:142`) emits `freeze([item])` — a
-> one-item bundle — for CLI, MCP and bench; `applyCacheAwarePrefixLocking` pins everything inside
-> the first 1,024 tokens; `solve01Knapsack` places pinned items outside the candidate set and
-> always selects them. The only multi-item bundle producer in `src/` is `gateway/proxy.ts`, and the
-> Gateway pins the planner to `session_dedup`, which never plans the pruner.
+> ### ⛔ Both headline deliverables failed their preconditions when measured (2026-08-11).
 >
-> A BM25 scorer and an MMR refinement pass added on top of that would be **correct code with no
-> observable effect on any output the product can emit** — the same condition the audit found in
-> ~1,000 existing LOC. Do not start this release until question A is answered. If the answer is
-> "boundary it off", this release is cancelled rather than deferred.
+> The H5 blocker this notice used to carry **is resolved** — `optimize` takes multiple paths and
+> directories, and the knapsack prunes 15 of 31 files on `src/core` at `--max-input-tokens 4000`.
+> The solver is reachable. What replaced that blocker is worse, and was found the same way:
+>
+> **BM25 hybrid scoring has no input.** There is no query concept anywhere in `src/`.
+> `scoreBundleTopology(bundle, gitStatus, graph, budget)` takes none, and no entry mode carries
+> one — `tokendamper optimize ./src` has no prompt at all. "BM25 keyword overlap against the
+> active prompt query" would be scoring against nothing. **Where a query comes from is a product
+> decision and has to be answered before any of this is written.**
+>
+> **MMR has nothing to eliminate.** The spec below ejects one of any pair scoring `> 0.90`.
+> Measured over **1,486 real pairs**:
+>
+> | corpus | pairs | >0.90 | >0.50 | max |
+> |---|---|---|---|---|
+> | this repo’s `src/core` | 496 | **0** | 0 | 0.296 |
+> | pip internals (45 files) | 990 | **0** | 1 | 0.500 |
+>
+> The instrument was validated before the result was believed — identical files score 1.000, a
+> one-line edit 0.998, disjoint prose 0.000 — so the zeros are real. Lowering the threshold does
+> not rescue it: the single pair above 0.50 is pip’s `download.py` ~ `wheel.py`, two genuinely
+> different commands, and ejecting one would be deleting a file the user asked for rather than
+> removing redundancy.
+>
+> **Why the premise fails.** MMR assumes near-duplicate items. That shape occurs in
+> *conversational* context — the same file pasted twice, repeated tool results, overlapping
+> retrieved chunks — not in a directory of source files, where every file is deliberately
+> distinct. The place it does occur is the Gateway, which plans only `cleanup:session-dedup`,
+> where exact-hash duplicates are already handled.
+>
+> Built as specified, both would be ~1,000 lines of correct code with no observable effect on
+> any output the product can emit — the exact condition the audit found in H5. **Do not start
+> this release on the strength of the spec below.** Either find a query source and a corpus that
+> actually contains near-duplicates, or re-scope to the alternatives in "What to do instead".
+
+### What to do instead — preconditions verified as holding
+
+1. **Widen elision beyond TypeScript/JavaScript and Python.** H2 measured **3 of 17** languages
+   reducible; a Go or Java region selector converts whole corpora from 0.00% to something. The
+   largest real-world gain available, and the gate (`supportsRegionElision`) is already the
+   single place that decides.
+2. **Sub-region elision.** `--target-reduction-ratio` is now a real target (§48) but adheres
+   only partially: elision’s smallest unit is one region, files typically have one dominant
+   region (58%, 61%, 83% measured), and at target 30% **23 of 66** reducing files still exceed
+   50%. Finer granularity is what closes that.
+3. **Per-item drift.** Phase 1c repairs AST and constraint failures per item; drift remains
+   bundle-scoped, so a drift failure still reverts everything.
+
+---
+
+### The original specification, retained for reference
+
+**Read the notice above first.** The spec below is unchanged from when it was written and is
+**not** ready to implement.
 
 **Core objective:** upgrade context selection with hybrid relevance scoring, and eliminate pairwise
 redundancy *without* breaking 0/1 knapsack's optimal-substructure guarantee.
@@ -226,7 +271,7 @@ $$\text{Score}(i \mid S) = \frac{V_i - \max_{j \in S}(M_{ij} \cdot V_j)}{w_i}$$
 
 ---
 
-## v1.3.0 — AST Code Folding ("Fast" vs "Deep") & Cache Alignment
+## v1.4.0 — AST Code Folding ("Fast" vs "Deep") & Cache Alignment
 
 > **⚠ Re-scoped by audit. Fast mode is substantially already shipped.** This release was written
 > as though body folding did not exist. It does: `selectElisionRegions` (`elision/regions.ts:382-384`)
@@ -290,7 +335,7 @@ export function processOrder(order: Order): Promise<Result> {
 
 ---
 
-## v1.4.0 — Granular Sub-Query Re-hydration & MCP Tool Extension
+## v1.5.0 — Granular Sub-Query Re-hydration & MCP Tool Extension
 
 > **⛔ Blocked on M5b (v1.1.3, item 10).** This release adds a `query` field to
 > `rehydrate_context`. That tool's session path has **never worked**: its regex

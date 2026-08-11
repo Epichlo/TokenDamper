@@ -108,10 +108,14 @@ fails there.
 
 ### What Wave 2 deliberately did **not** do
 
-- **`--target-reduction-ratio` stays**, even though the planner reads it only as `> 0` and it is
-  therefore an on/off switch named like a dial. It is the only budget flag every doc and example
-  uses, and making it a real proportional target is a planner change, not a flag change. This is
-  still its own open decision.
+- ~~**`--target-reduction-ratio` stays**~~ **— now a real target, DECISIONS §48.** It reached
+  nothing (`pruning:topology-pruner` bypassed itself when only a ratio was set) and stopped at
+  nothing (compression ran to exhaustion, producing 44–69% for any target). It now resolves to a
+  token ceiling and compression halts there. Adherence is **partial**: at target 30%, 21 of 66
+  reducing files land in 25–35% and 23 still exceed 50%, because elision's smallest unit is one
+  region and files typically have one dominant region. Corpus aggregates fell as a result
+  (python file 23.14% → 20.26%) while fallbacks fell and reduced counts rose — the target being
+  honoured, not a regression.
 - **`OptimizationBudget` keeps `maxOutputTokens`, `maxLatencyMs` and `riskTolerance`.** H4
   withdrew the CLI flags, the environment variables and the MCP schema property — the *surface* —
   but `ARCHITECTURE.md` pins the model as frozen, and a field awaiting an implementation is not

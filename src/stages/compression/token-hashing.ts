@@ -9,6 +9,7 @@ import {
   selectElisionRegions,
   type ElisionSkipReason,
 } from '../../core/elision';
+import { ceilingReached, resolveTokenCeiling } from '../../core/budget';
 import { DriftTracker } from '../../core/ledger/drift-tracker';
 import { TokenHasher } from '../../core/hashing/token-hasher';
 import { DEFAULT_TOKENIZER, estimateBundleTokens, type TokenizerAdapter } from '../../core/hashing/tokenizer';
@@ -105,7 +106,30 @@ export function runTokenHashingStage(
     return renderElisionMarker(text, describes, blockHash);
   };
 
+  // The ceiling this run is aiming at, and a running estimate of where we are against it.
+  //
+  // This is what makes `--target-reduction-ratio` a *target* rather than a floor. Without it the
+  // stage elides everything it can and stops only when it runs out of candidates: measured on a
+  // single TypeScript file, `--target-reduction-ratio 0.3` produced **44.62%**. Overshooting is
+  // not a bonus — each extra elision spends semantic fidelity, raises drift, and on the CLI is
+  // irreversible because no `TokenHasher` is wired in. Removing half again as much as the caller
+  // asked for is a defect.
+  //
+  // Tracked incrementally rather than re-estimating the whole bundle per item: `map` visits items
+  // in array order, so the running total is deterministic (invariant 1), and re-estimating would
+  // make this O(n²) on the bundles that need it most.
+  const ceiling = resolveTokenCeiling(bundle, budget);
+  let runningTokens = bundle.summary.tokenEstimate;
+  let itemsLeftByCeiling = 0;
+
   const newItems: ContextItem[] = bundle.items.map((item) => {
+    // Rule 0: stop once the target is met. Checked first, so an item left alone by the ceiling
+    // is not also counted as skipped for some unrelated reason.
+    if (ceilingReached(runningTokens, ceiling)) {
+      itemsLeftByCeiling += 1;
+      return item;
+    }
+
     // Rule 1: Never hash items matching preserveKinds in OptimizationBudget
     if (preserveKinds.has(item.kind)) {
       return item;
@@ -137,7 +161,15 @@ export function runTokenHashingStage(
     // `selectElisionRegions` returns nothing for content it cannot segment safely — JSON,
     // prose, logs, truncated code with no complete body — and the whole-item path below
     // still handles those exactly as before.
-    const regions = selectElisionRegions(item);
+    const allRegions = selectElisionRegions(item);
+    // Trimmed to what the target actually needs.
+    //
+    // The item-level check above cannot bind on the commonest CLI shape: `optimize one-file.ts`
+    // is a single-item bundle, so that check runs once, before anything has been elided, and the
+    // item then has *all* of its regions removed in one call. Measured, that made the target
+    // inert exactly where it is most used — 0.1, 0.3, 0.5 and 0.7 all produced **69.09%** on the
+    // same file. The ceiling has to bind at the granularity the compression happens at.
+    const regions = trimRegionsToCeiling(item, allRegions, runningTokens, ceiling, markerFor, tokenizer);
     if (regions.length > 0) {
       const regionOutcome = elideRegions({
         item,
@@ -159,6 +191,7 @@ export function runTokenHashingStage(
         itemsHashed += 1;
         regionsHashed += regions.length;
         bytesSaved += regionOutcome.bytesSaved;
+        runningTokens -= tokensFreed(item, regionOutcome.item, tokenizer);
         if (!reversible) {
           irreversibleElisions += 1;
         }
@@ -225,6 +258,7 @@ export function runTokenHashingStage(
     changed = true;
     itemsHashed += 1;
     bytesSaved += outcome.bytesSaved;
+    runningTokens -= tokensFreed(item, outcome.item, tokenizer);
     if (!reversible) {
       irreversibleElisions += 1;
     }
@@ -296,12 +330,104 @@ export function runTokenHashingStage(
       bytesSaved,
       tokenEstimateSaved,
       irreversibleElisions,
+      itemsLeftByCeiling,
+      ...(ceiling === undefined ? {} : { tokenCeiling: ceiling }),
     },
     notes:
       `Successfully token-hashed ${itemsHashed} context item(s) (${regionsHashed} sub-item region(s)); ` +
       `skipped ${itemsSkipped} (${skipReasons.post_condition_rejected} rejected by post-condition, ${skipReasons.no_savings} for no savings, ${skipReasons.structured_content} for structured content).` +
+      (itemsLeftByCeiling > 0
+        ? ` Stopped at the ${ceiling}-token target with ${itemsLeftByCeiling} item(s) left untouched.`
+        : '') +
       (irreversibleElisions > 0
         ? ` ${irreversibleElisions} elision(s) are irreversible: no token hasher was supplied, so the removed content is not retained anywhere.`
         : ''),
   });
+}
+
+/**
+ * Tokens an elision actually freed, measured the same way the bundle total is.
+ *
+ * Deliberately **not** `bytesSaved / 4`. DECISIONS §19 records what happens when one quantity
+ * gets two estimators: until `1b1e999` the input side went through the tokenizer while every
+ * output side used `ceil(len / 4)`, and byte-identical output reported an 11–22% saving. The
+ * running total here is compared against a ceiling derived from `bundle.summary.tokenEstimate`,
+ * so it has to come from the same estimator or the comparison is between two different units
+ * again — the same defect in a new place.
+ *
+ * Clamped at 0: an elision that grew the item is refused upstream by the chokepoint, so a
+ * negative here would mean a bug elsewhere, and letting it inflate the running total would make
+ * the stage elide *more* in response.
+ */
+function tokensFreed(before: ContextItem, after: ContextItem, tokenizer: TokenizerAdapter): number {
+  return Math.max(0, estimateBundleTokens([before], tokenizer) - estimateBundleTokens([after], tokenizer));
+}
+
+/**
+ * Keeps only as many regions as the token ceiling needs, in positional order.
+ *
+ * The stop-early rule, applied at the granularity the compression actually happens at. Without
+ * it the target binds only between items, which on a single-item bundle — `optimize one-file.ts`,
+ * the commonest CLI invocation — means it never binds at all.
+ *
+ * **Smallest-first, chosen by measurement rather than taste.** Positional order was tried first
+ * and adheres badly, because regions are extremely uneven: measured across three of this repo's
+ * own sources, each file has one dominant region — 58%, 61%, 83% of the file — followed by
+ * several small ones, and the dominant one comes first positionally. Taking regions in position
+ * order therefore blows past any modest target on the first step: `0.1`, `0.2`, `0.3` and `0.5`
+ * all produced **55.2%** on `planner/index.ts`. Smallest-first approaches the ceiling in fine
+ * increments and only reaches for the dominant region when the target genuinely requires it.
+ *
+ * The cost is that the output for one ratio is no longer a prefix of the output for a larger
+ * one. That property is worth less than hitting the number the caller asked for, which is the
+ * entire point of the flag.
+ *
+ * Ties break on `start`, so the choice is a total order and the stage stays deterministic
+ * (invariant 1). The kept regions are returned in **positional** order regardless, because
+ * `elideRegions` splices with a forward cursor and refuses ranges that arrive out of order.
+ *
+ * With no ceiling, every region is returned in its original order and the stage behaves exactly
+ * as it did.
+ */
+function trimRegionsToCeiling(
+  item: ContextItem,
+  regions: ReadonlyArray<{ readonly start: number; readonly end: number }>,
+  runningTokens: number,
+  ceiling: number | undefined,
+  markerFor: (regionText: string, describes: string, blockType: string) => string,
+  tokenizer: TokenizerAdapter,
+): ReadonlyArray<{ readonly start: number; readonly end: number }> {
+  if (ceiling === undefined || regions.length === 0) {
+    return regions;
+  }
+
+  let needed = runningTokens - ceiling;
+  if (needed <= 0) {
+    return [];
+  }
+
+  // The marker is rendered, not assumed: it is variable-length and self-describing, so its cost
+  // depends on the region it replaces. Estimating a saving without it would overstate every
+  // region by the marker's own size.
+  const withCost = regions.map((region) => {
+    const text = item.content.slice(region.start, region.end);
+    const marker = markerFor(text, FUNCTION_BODY_NOUN, item.kind);
+    const freed = Math.max(
+      0,
+      estimateBundleTokens([{ ...item, content: text }], tokenizer) -
+        estimateBundleTokens([{ ...item, content: marker }], tokenizer),
+    );
+    return { region, freed };
+  });
+
+  const bySize = [...withCost].sort((a, b) => a.freed - b.freed || a.region.start - b.region.start);
+
+  const kept: Array<{ readonly start: number; readonly end: number }> = [];
+  for (const candidate of bySize) {
+    if (needed <= 0) break;
+    kept.push(candidate.region);
+    needed -= candidate.freed;
+  }
+
+  return kept.sort((a, b) => a.start - b.start);
 }

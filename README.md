@@ -165,6 +165,12 @@ TokenDamper provides detailed explainability for how your context was optimized 
 - `--diff-html <path>`: Generates a beautiful HTML report visualizing exact token elisions and metrics.
 - `--max-debt <0-100>`: Fails validation if optimization debt (information loss score) exceeds this threshold.
 - `--max-drift <0-1>`: Fails validation if semantic drift (structural deviation) exceeds this threshold.
+- `--target-reduction-ratio <0-1>`: How much to remove. Resolved against the input into a token
+  ceiling that both selection and compression respect, so compression stops rather than eliding
+  everything it can. **Best effort, not a guarantee:** the smallest thing elision can remove is
+  one region — usually a whole function body — and files often have one dominant region, so a
+  modest target can overshoot. Measured at target 30%, 21 of 66 reducing files landed in 25–35%
+  and 23 exceeded 50%.
 
 ---
 

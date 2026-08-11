@@ -1,4 +1,5 @@
 import type { ContextBundle, ContextItem, OptimizationBudget, StageResult } from '../../core/model/types';
+import { resolveTokenCeiling } from '../../core/budget';
 import { createBundleStatistics, createStageResult, freeze, hashContent } from '../../core/model/constructors';
 import { inspectGitWorkspace } from '../../core/topology/git-inspector';
 import { buildDependencyGraph } from '../../core/topology/dependency-graph';
@@ -21,7 +22,11 @@ export function runTopologyPrunerStage(
   const stageId = 'pruning:topology-pruner';
 
   try {
-    const maxTokens = budget.maxInputTokens;
+    // Resolved rather than read straight off `maxInputTokens`, so `targetReductionRatio` reaches
+    // the solver at all. It never did: this branch bypassed pruning entirely whenever only a
+    // ratio was set, which is why a 45-file bundle at `--target-reduction-ratio 0.3` reported
+    // "maxInputTokens not specified in budget; topology pruning bypassed" and selected nothing.
+    const maxTokens = resolveTokenCeiling(bundle, budget);
     if (typeof maxTokens !== 'number' || maxTokens <= 0) {
       return createStageResult({
         stageId,
@@ -34,7 +39,7 @@ export function runTopologyPrunerStage(
           pinnedCount: 0,
           selectedCount: bundle.items.length,
         },
-        notes: 'maxInputTokens not specified in budget; topology pruning bypassed.',
+        notes: 'No token ceiling in budget (neither maxInputTokens nor targetReductionRatio); topology pruning bypassed.',
       });
     }
 
