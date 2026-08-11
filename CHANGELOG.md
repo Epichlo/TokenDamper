@@ -11,8 +11,72 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or released; run
-`git log v1.1.0..HEAD` to confirm current scope before relying on this list.
+Nothing yet. The next entry starts here.
+
+## [v1.2.0] - 2026-08-11
+
+**The audit remediation release.** 78 commits beyond `v1.1.0`, closing every finding in
+`max_audit.md` and the architectural work that followed from it. `docs/audit-remediation-status.md`
+is the index; `DECISIONS.md` §36–§47 carries the reasoning.
+
+**Numbered 1.2.0 rather than 1.1.1**, for two reasons. The roadmap planned the remediation as
+three releases — v1.1.1 "Green Tree & Correct Metadata", v1.1.2 "Data Loss & Corruption",
+v1.1.3 "Honest Instruments" — and this ships all three plus the Scope Decision Gate answers
+(H2, M1, M11) and Phase 1c. And it removes command-line surface, which a patch release is not
+permitted to do.
+
+### ⚠ Breaking
+
+- **Three CLI flags removed**, along with their environment variables: `--risk-tolerance`
+  (`TOKENDAMPER_RISK_TOLERANCE`), `--max-output-tokens` (`TOKENDAMPER_MAX_OUTPUT_TOKENS`) and
+  `--max-latency-ms` (`TOKENDAMPER_MAX_LATENCY_MS`). They are now a hard `Unknown argument`
+  error rather than being accepted and ignored.
+
+  **Nothing functional was lost.** No stage, validator or planner ever read them — risk tolerance
+  reached one benchmark display column and stopped. A script passing them will now fail instead
+  of silently doing nothing, which is the point: the previous behaviour reported success for a
+  setting that had no effect (audit H4, DECISIONS §44).
+
+- **MCP `optimize_context` no longer accepts `riskTolerance`.** Same reason. It gained
+  `targetReductionRatio`, which is the parameter that actually does something.
+
+- **`GatewaySessionStoreInterface` requires `getSession`.** Any third-party implementation must
+  add it. Reading a session must not create one (audit M5).
+
+- **The Gateway no longer reads `TOKENDAMPER_MOCK_UPSTREAM` or `NODE_ENV`.** Both are now
+  explicit options (`mockUpstream`, `allowMissingUpstreamCredentials`). A proxy in an environment
+  that happened to set either no longer changes behaviour (audit M8, DECISIONS §44).
+
+### Highlights
+
+- **The MCP entry mode does something.** `optimize_context` had no budget parameter, so it was a
+  guaranteed 0% no-op that reported success. Measured through the stdio server: 0 stages / 0.0%
+  without a budget, 4 stages / **69.1%** at `targetReductionRatio: 0.3`.
+- **`optimize` takes multiple files and directories**, which is what makes the 0/1 knapsack
+  reachable at all. On this repo's `src/core` at `--max-input-tokens 4000`: 31 files in,
+  **15 pruned, 20,540 tokens saved** by the planner.
+- **One bad item no longer reverts the good ones** (Phase 1c). On the 45-file Python corpus the
+  stages were already achieving 42.52% while the product emitted **0.00%**, because 26 constraint
+  failures across 14 items reverted all 45. It now emits **22.73%**.
+- **Structured provider content survives the Gateway.** A `tool_result` block could ship as a
+  bare string — a `400` from Anthropic — and the audit's "masked by the drift gate" assessment
+  was wrong for the one case the Gateway actually saves on.
+- **A 0% result now says why.** Whether a budget was in effect (`budgetApplied`), whether any
+  transform could reduce the language at all (`trace.languageSupport`), and whether items were
+  reverted (`trace.itemsReverted`).
+- **`tokendamper bench` runs when installed.** It threw for every user outside a checkout.
+- **The docs say what the validators actually check** — bracket/quote integrity, not syntax
+  validity — with a per-language table pinned by tests.
+
+### Known limitations, stated deliberately
+
+- Elision reduces **TypeScript/JavaScript and Python only**. Twelve of nineteen recognised
+  extensions cannot produce a non-zero reduction under any flag; runs on them now say so rather
+  than returning a silent 0%.
+- **Gateway mode is experimental** and saves nothing across turns by design.
+- `--target-reduction-ratio` engages the planner but is **not** a proportional target; the planner
+  reads it only as `> 0`.
+- Drift remains bundle-scoped: a run failing on drift alone still falls back whole.
 
 ### Documentation
 - **`docs/audit-remediation-status.md` is the entry point for audit work**, and `CLAUDE.md` points
