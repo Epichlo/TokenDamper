@@ -56,6 +56,34 @@ ignored.
 it has repeatedly been mistaken for one (see benchmark Issue 1). Always pass a budget
 when testing reduction.
 
+**`--target-reduction-ratio` is a real target as of DECISIONS §48 — the numbers moved, on
+purpose.** It used to be an on/off switch: the planner read it as `> 0` and nothing else read it,
+so `0.01` and `0.99` produced byte-identical output. Now `resolveTokenCeiling`
+(`src/core/budget/`) converts the ratio into an absolute token ceiling against the input bundle,
+`pruning:topology-pruner` gates on that ceiling instead of `maxInputTokens` (it used to bypass
+itself entirely when only a ratio was set), and `compression:token-hashing` **stops** once the
+ceiling is met.
+
+Two consequences that will otherwise look like regressions:
+
+- **Corpus aggregates fell and that is the feature working.** The harness measures at ratio 0.3.
+  Python file went 23.14% → **20.26%**, TypeScript file 23.03% → **17.57%** — while *fallbacks
+  fell* (python 14 → 13) and *reduced counts rose*. Runs that used to overshoot to 44–69% now
+  stop near 30%, so more files survive validation and each contributes less. **Compare per-file
+  adherence, not the mean.**
+- **Adherence is partial, and the limit is structural.** Elision's smallest unit is one region —
+  usually a whole function body — and files typically have one dominant region: measured at 58%,
+  61% and 83% of the file across three of this repo's own sources. At target 30% over the frozen
+  corpus, 21 of 66 reducing files landed in 25–35%, 13 in 35–50%, and **23 still exceeded 50%**
+  because the dominant region cannot be taken in part. Closing that needs sub-region elision and
+  is not attempted. `test/unit/target-reduction-ratio.test.ts` pins this as a documented limit
+  and deliberately does **not** assert `achieved <= target`.
+
+Region selection is **smallest-first when a ceiling is set** (positional order otherwise), chosen
+by measurement: positional order takes the dominant region first, which made 0.1, 0.2, 0.3 and
+0.5 all produce the same 55.2%. Kept regions are re-sorted into positional order before splicing,
+because `elideRegions` walks a forward cursor and refuses out-of-order ranges.
+
 Config file: `tokendamper.config.json` (not `.tokendamperrc`).
 
 ## Architecture
@@ -163,12 +191,44 @@ and takes precedence over budget-derived knapsack selection.
     nothing covers a pathless item. §33 makes coverage irrelevant to the refusal, so both routes
     now behave the same; what a declaration still buys is *coverage*, not the refusal.
 
-## Known bugs — highest-priority work
+## Where the project actually is (read this first)
 
-> **Start at `docs/audit-remediation-status.md`.** It carries the current state of the
-> `max_audit.md` remediation — what is merged, the measured corpus baseline, what remains, and
-> the traps this codebase has for anyone changing it. The entries below are the older per-issue
-> history and several are now closed; the status doc is the one that is kept current.
+**v1.2.0 shipped 2026-08-11** — tagged, GitHub release, and published to npm as `tokendamper@1.2.0`
+(`latest`). **Every finding in `max_audit.md` is closed**, plus Phase 1c and the three decisions
+the audit deferred. `DECISIONS.md` §36–§48 carries the reasoning; `docs/audit-remediation-status.md`
+is the index and is the doc kept current.
+
+The roadmap's feature gate is open. **But two of the next release's headline deliverables failed
+their preconditions when measured, and that is recorded rather than discovered again:**
+
+- **BM25 hybrid scoring has no input.** There is no query concept anywhere in `src/` —
+  `scoreBundleTopology(bundle, gitStatus, graph, budget)` takes none, and no entry mode carries
+  one (`tokendamper optimize ./src` has no prompt at all). Scoring "against the active prompt
+  query" would be scoring against nothing. **Decide where a query comes from before writing any
+  of it.**
+- **MMR has nothing to eliminate.** The spec ejects one of any pair scoring `> 0.90`. Measured
+  over **1,486 real pairs** — 496 in this repo's `src/core`, 990 in the 45-file pip corpus —
+  **zero** pairs exceed 0.90. Maxima are 0.296 and 0.500. The instrument was validated first
+  (identical files → 1.000, one-line edit → 0.998, disjoint prose → 0.000), so the zeros are real.
+  Lowering the threshold makes it dangerous rather than useful: the one pair above 0.50 is pip's
+  `download.py` ~ `wheel.py`, two genuinely different commands.
+
+Both would be ~1,000 lines of correct code with no observable effect — the H5 condition again.
+MMR's premise fits *conversational* redundancy (the same file pasted twice, repeated tool
+results), which is Gateway traffic; the Gateway plans only `session-dedup`, and exact duplicates
+are already handled there.
+
+**Candidates with preconditions that do hold today:** widen elision beyond TS/JS/Python (H2
+measured 3 of 17 languages reducible — the largest real-world gain available); per-item drift, to
+finish what Phase 1c started; sub-region elision, which is what would make
+`--target-reduction-ratio` adhere tightly rather than partially.
+
+## Known bugs — historical per-issue record
+
+> **Start at `docs/audit-remediation-status.md`.** It carries what is merged, the measured corpus
+> baseline, what remains, and the traps this codebase has for anyone changing it. The entries
+> below are the older per-issue history and **all of them are now closed**; the status doc is the
+> one that is kept current.
 >
 > Waves 0, 1, 2 and most of 3 are merged (DECISIONS §36–§44). **Wave 2 is done** — the MCP entry
 > mode is no longer a guaranteed 0% no-op (`optimize_context` takes `targetReductionRatio`, and

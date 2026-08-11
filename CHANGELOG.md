@@ -11,7 +11,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-Nothing yet. The next entry starts here.
+### Changed
+- **`--target-reduction-ratio` is a real target — audit H4's deferred half (DECISIONS §48).**
+  It was an on/off switch: the planner read it as `> 0` and nothing else read it, so `0.01` and
+  `0.99` produced byte-identical output. `resolveTokenCeiling` now converts the ratio into an
+  absolute token ceiling, `pruning:topology-pruner` gates on that ceiling instead of
+  `maxInputTokens` (it used to bypass itself entirely when only a ratio was set), and
+  `compression:token-hashing` stops once the ceiling is met instead of eliding everything it can.
+
+  **Corpus aggregates fall by design.** The harness measures at ratio 0.3, so runs that used to
+  overshoot to 44–69% now stop near 30%: python file 23.14% → 20.26%, typescript file 23.03% →
+  17.57% — while fallbacks *fell* (python 14 → 13) and reduced counts *rose*, because less
+  aggressive elision survives validation more often. Compare per-file adherence, not the mean.
+
+  **Adherence is partial and the limit is structural.** Elision's smallest unit is one region and
+  files typically have one dominant region (58%, 61%, 83% measured). At target 30%, 21 of 66
+  reducing files landed in 25–35% and 23 still exceeded 50%. Sub-region elision is what would
+  close that; it is not attempted here.
 
 ## [v1.2.0] - 2026-08-11
 

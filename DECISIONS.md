@@ -3272,3 +3272,101 @@ A measurement caution that cost time here, and is now in the status doc: the Typ
 read 23.03% on the previous corpus and 19.76% on this one, which looks like a regression and is
 not — the pre-1c engine reads 19.76% too. The corpus changed because this change edits `src/`,
 and `src/` *is* the TypeScript bucket. Comparing two runs over two corpora is not a comparison.
+
+---
+
+## 48. The Dial Now Turns, and Says How Far It Can Turn
+
+Audit H4's deferred half. When the three dead knobs were withdrawn (§44),
+`--target-reduction-ratio` was kept and explicitly named as its own decision: the planner read it
+only as `> 0` to choose knapsack mode over pass-through, and nothing else read it at all, so
+`0.01` and `0.99` produced **byte-identical output**. It survived the cull because it is the flag
+every document and example uses and making it real is a pipeline change rather than a flag change.
+
+### Two things were broken, not one
+
+**It never reached the machinery.** `pruning:topology-pruner` gated on `budget.maxInputTokens` and
+returned early — *"maxInputTokens not specified in budget; topology pruning bypassed"* — whenever
+only a ratio was set. That message is visible in the trace of every ratio-only run ever made,
+including the 45-file Python bundle used throughout Phase 1c.
+
+**It never stopped.** Compression ran to exhaustion and halted only when it ran out of candidates.
+A single TypeScript file at `--target-reduction-ratio 0.3` produced **44.62%**, and later 69.09%
+once other work made more regions eligible. Overshooting is not a bonus: every extra elision
+spends semantic fidelity, raises drift, and on the CLI is irreversible because no `TokenHasher` is
+wired in. Removing more than twice what the caller asked for is a defect.
+
+### The mapping: proportional becomes absolute
+
+`resolveTokenCeiling` (`src/core/budget/`) reads the ratio as a statement about the input —
+"remove 30%" is "keep at most 70%" — and resolves it against the incoming bundle. Once absolute it
+is an ordinary token ceiling, which is exactly what the pruner and the 0/1 knapsack already solve
+against, so no new selection machinery was needed. **Both ceilings are caps, so the tighter wins:**
+`maxInputTokens: 500` with `targetReductionRatio: 0.9` on a 10,000-token bundle means "at most 500"
+and "at most 1,000", and honouring anything but the smaller violates a limit the caller set.
+
+### Granularity is where this got interesting
+
+The stop rule was first written between items, which is where the running total naturally lives.
+Measured, it did nothing on the commonest CLI shape: `optimize one-file.ts` is a **single-item
+bundle**, so the check runs once, before anything is elided, and the item then has all of its
+regions removed in one call. `0.1`, `0.3`, `0.5` and `0.7` all produced **69.09%** on the same
+file. **A ceiling has to bind at the granularity the compression happens at**, which is regions.
+
+Then region *order* turned out to matter more than expected. Taking regions positionally still
+overshot badly — 0.1, 0.2, 0.3 and 0.5 all produced **55.2%** — because regions are extremely
+uneven. Measured across three of this repository's own sources:
+
+| file | regions | each as % of file |
+|---|---|---|
+| `core/planner/index.ts` | 3 | **58%**, 9%, 9% |
+| `core/engine/index.ts` | 5 | **61%**, 1%, 4%, 10%, 2% |
+| `core/validation/index.ts` | 2 | **83%**, 4% |
+
+Every file has one dominant region and it comes first positionally, so any modest target blew past
+it on the first step. Selection is now **smallest-first when a ceiling is set**, which approaches
+the ceiling in fine increments and reaches for the dominant region only when the target genuinely
+requires it. Ties break on `start`, so the order is total and the stage stays deterministic
+(invariant 1), and the kept regions are re-sorted **into positional order** before splicing because
+`elideRegions` walks a forward cursor and refuses ranges that arrive out of order.
+
+The cost is that one ratio's output is no longer a prefix of a larger ratio's. That property was
+written into the first version of the comment and is worth less than hitting the number the caller
+asked for.
+
+### What it achieves, stated as a distribution rather than a claim
+
+Frozen corpus, target 30%, 66 files that reduced:
+
+| achieved | files |
+|---|---|
+| 0–10% | 2 |
+| 10–25% | 7 |
+| **25–35% (on target)** | **21** |
+| 35–50% | 13 |
+| **>50% (overshoot)** | **23** |
+
+Mean achieved 43.9%. So the flag now binds — it is no longer a switch — but **adherence is
+partial, and the limit is structural**: elision's smallest unit is one region, and 23 files have a
+dominant region that cannot be taken in part. Closing that needs sub-region elision, which is not
+attempted here and is recorded in `ROADMAP.md` as the work that would.
+`test/unit/target-reduction-ratio.test.ts` pins this as a documented limit and deliberately does
+**not** assert `achieved <= target` — that would assert a guarantee the implementation does not
+make.
+
+### The aggregate fell, and that is the feature
+
+The harness measures at ratio 0.3, so this change makes the corpus figures move by design:
+
+| bucket | before | after | reduced | fallbacks |
+|---|---|---|---|---|
+| python file | 23.14% | **20.26%** | 30 → **31** | 14 → **13** |
+| typescript file | 23.03% | **17.57%** | rose | — |
+
+Runs that used to overshoot to 44–69% now stop near 30%, so each contributing file contributes
+less — **and more files survive validation**, because less aggressive elision means less drift.
+Reduced counts rose and fallbacks fell in the same measurement that shows the mean falling.
+
+This is the third time in this project that a headline aggregate moved for a reason that is not a
+regression (§45's line endings, §46's corpus growth, this). The rule that keeps catching it:
+**compare per-file rows over one frozen corpus, never the mean across two.**
