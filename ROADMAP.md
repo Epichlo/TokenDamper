@@ -1,10 +1,14 @@
 # TokenDamper Product Roadmap — v1.1.0 → v2.0.0
 
-**Baseline:** v1.1.0 (shipped — tag `v1.1.0` @ `807f6f0`, see `CHANGELOG.md`). `HEAD` carries
-**51 commits** beyond the tag that are not yet tagged or released — check `git log v1.1.0..HEAD`
-before treating anything past the tag as shipped. All items below were checked against actual
-source, not assumed from a prior draft; file/function names cited are real, and
-known-already-shipped items have been excluded (see Appendix).
+**Baseline:** **v1.2.0** (shipped — tag `v1.2.0`, see `CHANGELOG.md`), which closed the whole
+audit remediation track in one release rather than the three this document planned. All items
+below were checked against actual source, not assumed from a prior draft; file/function names
+cited are real, and known-already-shipped items have been excluded (see Appendix).
+
+> **The v1.1.x numbering below is historical.** v1.1.1 "Green Tree & Correct Metadata",
+> v1.1.2 "Data Loss & Corruption" and v1.1.3 "Honest Instruments" were never tagged separately —
+> their scopes all shipped in v1.2.0, together with the Scope Decision Gate answers and Phase 1c.
+> The sections are kept because they record what each finding was and how it was disposed of.
 
 > ### ⛔ Feature work is gated. Read this first.
 >
@@ -26,9 +30,26 @@ known-already-shipped items have been excluded (see Appendix).
 >   not ship. There is currently no instrument that can detect total failure.
 >
 > `CLAUDE.md` has carried the instruction *"Do this before roadmap feature work"* for some time.
-> This document now encodes it: **v1.2.0 does not start until the v1.1.x remediation track lands
-> and the Scope Decision Gate is answered.** Numbering of v1.2.0–v2.0.0 is unchanged so existing
-> cross-references stay valid, but their **scope is provisional** pending those decisions.
+> This document encoded it as: **v1.2.0 does not start until the v1.1.x remediation track lands
+> and the Scope Decision Gate is answered.**
+>
+> ## ✅ That gate is now open — v1.2.0 shipped 2026-08-11.
+>
+> Every finding in `max_audit.md` is closed, and the three preconditions this notice named are
+> answered rather than deferred:
+>
+> - **H5 — the knapsack is reachable.** `optimize` takes multiple paths and directories; measured
+>   on `src/core` at `--max-input-tokens 4000`, 15 of 31 files pruned, 20,540 tokens saved. So
+>   v1.2.0's BM25 scorer and MMR refinement now build on a solver that can affect output.
+> - **C1 — markdown is no longer deleted whole with every gate green** (DECISIONS §33–§34).
+> - **H3 — the instruments are honest.** `bench` runs the shipped fixture set, `baseline.json`
+>   asserts measured truth, and a 0% result reports whether a budget was in effect and whether any
+>   transform could reduce the language.
+>
+> **Read `docs/audit-remediation-status.md` §4 before starting feature work.** It carries the traps
+> this codebase has for anyone changing it — chiefly that `src/` is its own measurement corpus, so
+> aggregate reduction figures are not comparable across a commit and only a per-row A/B over one
+> frozen corpus means anything.
 
 ```
 v1.1.0 (Baseline, shipped — tag @ 807f6f0)
