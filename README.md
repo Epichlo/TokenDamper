@@ -167,12 +167,43 @@ Raw Input
   -> Stateless 0/1 Knapsack Planner
   -> Linear Engine
       -> Topology Pruning & Delta Compression
-      -> AST Validators
+      -> Syntax Checks (see "What validation actually checks")
       -> Explicit Fallback (on constraint violation)
   -> Final Output + Explainability Trace
 ```
 
-Note: the `AST Validators` and `Explicit Fallback` steps above run in **all three** modes, Gateway included, since Phase 1.0b. (A previous version of this note claimed Gateway mode skipped them; it does not.) What differs on the Gateway is the *stage list*, not the checks — it plans only `cleanup:session-dedup`. See the Gateway proxy status notice at the top.
+Note: the `Syntax Checks` and `Explicit Fallback` steps above run in **all three** modes, Gateway included, since Phase 1.0b. (A previous version of this note claimed Gateway mode skipped them; it does not.) What differs on the Gateway is the *stage list*, not the checks — it plans only `cleanup:session-dedup`. See the Gateway proxy status notice at the top.
+
+## What validation actually checks
+
+The internal validators are called "AST-lite". **They are not parsers and they do not build an
+AST** — the one exception is JSON. Stating the guarantee precisely, because it is the product's
+headline property:
+
+| Content | What is checked | What is *not* |
+|---|---|---|
+| **TypeScript / JavaScript** | Bracket, quote and comment balance, by a lexer that tracks strings, template interpolation and regex literals | Everything else. `const x = ;`, `import from "x";`, `let 123abc = 5;` and plain English prose all **pass** |
+| **Python** | The above, plus missing colons, malformed `def`, bad dedent and stray leading indentation | Plain English prose still passes |
+| **JSON** | Fully parsed — this one is a real check | — |
+| **Everything else** | Nothing. No validator covers it | Reported on `trace.astCoverage`, never silently counted as a pass |
+
+So the guarantee this product offers on TypeScript — the language family where compression
+actually runs — is **bracket and quote integrity**, not syntax validity. An elision that lands
+somewhere syntactically nonsensical but balanced is caught by the drift metric, if at all, not by
+the syntax check.
+
+Two consequences worth stating plainly:
+
+- **A passing check is not a promise the output compiles.** It is a promise the output is no
+  more unbalanced than the input.
+- **Real inputs are often already invalid**, and that is deliberate: a truncated completion
+  prompt is a first-class input, so the sub-item check is *relative* — an elision must not
+  introduce a new problem, rather than produce provably valid code.
+
+Wiring the real TypeScript compiler API would change this. It is not done: `typescript` is a
+development dependency today, and making it a runtime one costs install size and parse latency
+against a lexer that runs in single-digit milliseconds. That is a deliberate trade, not an
+oversight — see `docs/audit-remediation-status.md`.
 
 ## License
 TokenDamper is licensed under the Mozilla Public License 2.0 (MPL-2.0). See [LICENSE](./LICENSE).

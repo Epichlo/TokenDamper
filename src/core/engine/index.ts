@@ -242,6 +242,7 @@ export function optimize(
         ...(validation.driftReport ? { driftReport: validation.driftReport } : {}),
         ...(validation.astCoverage ? { astCoverage: validation.astCoverage } : {}),
         ...(validation.driftCoverage ? { driftCoverage: validation.driftCoverage } : {}),
+        ...(validation.languageSupport ? { languageSupport: validation.languageSupport } : {}),
       });
     }
 
@@ -263,6 +264,7 @@ export function optimize(
         ...(validation.driftReport ? { driftReport: validation.driftReport } : {}),
         ...(validation.astCoverage ? { astCoverage: validation.astCoverage } : {}),
         ...(validation.driftCoverage ? { driftCoverage: validation.driftCoverage } : {}),
+        ...(validation.languageSupport ? { languageSupport: validation.languageSupport } : {}),
       });
     }
 
@@ -287,6 +289,7 @@ export function optimize(
         ...(validation.driftReport ? { driftReport: validation.driftReport } : {}),
         ...(validation.astCoverage ? { astCoverage: validation.astCoverage } : {}),
         ...(validation.driftCoverage ? { driftCoverage: validation.driftCoverage } : {}),
+        ...(validation.languageSupport ? { languageSupport: validation.languageSupport } : {}),
       });
     }
 

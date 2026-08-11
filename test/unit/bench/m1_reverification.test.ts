@@ -28,7 +28,7 @@ describe('M1 Challenger Re-verification Suite', () => {
       // Restored to 0, which is what the test name asserts. `aba84df` inverted this to
       // 1 and blamed Issue 3 (the drift threshold). The real cause was BenchmarkRunner
       // calling optimize() with no TokenHasher, which left the engine's rehydration
-      // recovery path switched off. See docs/phase-1d-drift-investigation.md §10.
+      // recovery path switched off. See docs/phase-1d-drift-investigation.md §10. [retired]
       expect(sweep.summary.fallbackRate).toBe(0);
     });
 

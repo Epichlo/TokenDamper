@@ -112,7 +112,7 @@ describe('BenchmarkRunner Harness', () => {
       // Restored to 0, which is what the test name asserts. `aba84df` inverted this to 1
       // and blamed the drift threshold; the real cause was the engine's rehydration
       // recovery path being switched off by BenchmarkRunner passing no TokenHasher.
-      // See docs/phase-1d-drift-investigation.md §10.
+      // See docs/phase-1d-drift-investigation.md §10. [retired]
       expect(sweep.summary.fallbackRate).toBe(0);
     });
   });

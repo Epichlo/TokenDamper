@@ -146,10 +146,13 @@ before scheduling any of it.** Each is a decision with a legitimate "narrow the 
   `fallbackUsed: false`. It was live, on the one path the Gateway saves anything on.
 - **M7** — measure savings against the bytes on the wire rather than the newline-joined render.
   Still open, and no longer blocked on C4. **Only if B keeps the Gateway.**
-- **M1 + M4b + M11** — docs last, once A–D are answered. Rename "syntax validity" to
-  "bracket/quote integrity" (the TS validator passes `const x = ;` and plain English prose);
-  correct the README's remaining untrue claims; retire the phase narratives to git history.
-  Docs currently run **4.1:1** against source.
+- ~~**M1 + M11**~~ — **done.** "Syntax validity" is now "bracket/quote integrity" in the README
+  and `CLAUDE.md`, with a per-language table of what each validator does and does not catch,
+  pinned by `test/unit/validator-guarantee.test.ts`; the phase narratives are retired to git
+  history. The **4.1:1** figure was stale by the time it was acted on — measured before the
+  cleanup it was **1.40:1**, and not because the docs shrank (they had grown to 726 KB) but
+  because `src/` had grown faster. Counting the 33% of source that is comment prose, prose:code
+  was ~2.6:1.
 
 ---
 

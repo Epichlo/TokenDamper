@@ -24,7 +24,7 @@ import { parse } from '../../src/adapters/cli';
  * whole on the file-argument route at `S_k = 0`, `measured: false`, no fallback, because
  * nothing covers `.pl`. The Gateway keeps within-payload deduplication either way, because
  * `resolveRecoverableElisions` substitutes recoverable elisions back before the rule runs.
- * See `docs/phase-0-measurement-baseline.md` §5 and DECISIONS §33.
+ * See `docs/phase-0-measurement-baseline.md` §5 and DECISIONS §33. [retired]
  */
 describe('drift refuses to certify an elision it has no evidence for', () => {
   const tracker = new DriftTracker();

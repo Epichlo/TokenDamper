@@ -3,6 +3,7 @@ import type {
   ContextBundle,
   ContextItem,
   DriftCoverage,
+  LanguageSupportReport,
   OptimizationBudget,
   OptimizationPlan,
   ValidationIssue,
@@ -11,8 +12,10 @@ import type {
 import { extractConstraintDirectives } from '../../stages/cleanup/constraint-preservation';
 import { DriftTracker } from '../ledger/drift-tracker';
 import { validateBundleAst } from './ast';
+import { describeLanguageSupport } from './language-support';
 
 export * from './ast';
+export * from './language-support';
 
 export interface ValidationOptions {
   readonly maxDriftThreshold?: number | undefined;
@@ -96,6 +99,11 @@ export function validate(
   // population that was being deleted unwitnessed. `calculateDrift` no longer takes it.
   const symbolBearingItemIds = new Set(after.items.filter((item) => !unchecked.has(item.id)).map((item) => item.id));
 
+  // Computed over `before`, not `after`: the question is what this build could have done to the
+  // input, which is a property of the input's languages and does not depend on what the stages
+  // managed to do (audit H2).
+  const languageSupport: LanguageSupportReport = describeLanguageSupport(before);
+
   const driftReport = driftTracker.calculateDrift(before, after);
 
   const driftCoverage: DriftCoverage = {
@@ -152,6 +160,23 @@ export function validate(
     });
   }
 
+  // 6. Report language support, without voting on it either.
+  //
+  // An unsupported language is not an error — pass-through is byte-identical and correct. What
+  // it must not do is look like a supported language that happened to have nothing worth
+  // removing. Those two produce the identical `reductionRatio: 0` and only one of them is about
+  // the user's file (audit H2). This is the same correction M5a made for budgets.
+  if (languageSupport.unsupported > 0) {
+    const languages = languageSupport.unsupportedLanguages.join(', ');
+    issues.push({
+      code: 'LANGUAGE_NOT_ELIDIBLE',
+      message: languageSupport.noneSupported
+        ? `No elision transform in this build can reduce ${languages}: there is no sub-item region selector for it, and whole-item elision cannot survive the drift gate. Elision reduces TypeScript/JavaScript and Python only. A 0% result here is structural, not a property of this input.`
+        : `${languageSupport.unsupported} of ${before.items.length} item(s) are in a language elision cannot reduce (${languages}); only whole-item pruning can affect them.`,
+      severity: 'info',
+    });
+  }
+
   // Verdicts are error-scoped. `issues.length === 0` was equivalent while every issue pushed
   // here was an error, but it makes the `severity` field decorative and turns any future
   // informational finding into a forced fallback.
@@ -169,6 +194,7 @@ export function validate(
     driftReport,
     astCoverage,
     driftCoverage,
+    languageSupport,
     ...(reason ? { reason } : {}),
   };
 }

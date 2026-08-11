@@ -7,7 +7,7 @@
  * Usage: node tools/corpus-harness/seam2.js <out-dir>
  *
  * DECISIONS §32 named three seams for the hash-commented-code defect and
- * docs/phase-4b-lever-disposition.md measured two of them dead. Seam 2 — tightening the
+ * docs/phase-4b-lever-disposition.md measured two of them dead. Seam 2 — tightening the [retired]
  * classifier — was never measured. This measures it.
  *
  * The known trap, from the disposition (§1): a *count* threshold on markers points the wrong

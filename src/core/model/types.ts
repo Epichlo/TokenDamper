@@ -244,6 +244,51 @@ export interface DriftCoverage {
 }
 
 /**
+ * Whether this build's transforms can reduce an item's language **at all**.
+ *
+ * The third member of the same family as `AstCoverage` and `DriftCoverage`, and it answers the
+ * question those two leave open: they say whether anything *looked*, this says whether anything
+ * *could have acted*.
+ *
+ * Twelve of the nineteen extensions `isCodeExtension` recognises cannot produce a non-zero
+ * reduction under any flag combination (audit H2), and the reason is structural rather than
+ * tunable — `--max-drift 0.99` does not move it:
+ *
+ *  1. `selectElisionRegions` returns `[]` unless the selected validator's language is
+ *     `typescript` or `python`, so everything else can only be elided whole.
+ *  2. A whole-item elision has to survive the measurement gate, which needs symbols or content
+ *     markers. `DriftTracker.extractSymbols` is regexes over JS/TS declarations, Python
+ *     `def`/`class`/`import`, and JSON keys — a Go `func`, a Rust `fn`, a C function, a shell
+ *     function, a SQL statement and a CSS rule each yield **none**.
+ *
+ * So a Go file returns 0% and looks exactly like a Go file with nothing worth compressing. This
+ * report is what separates them, and it is the same correction M5a made for budgets: a 0% result
+ * has to say whether anything ran.
+ */
+export interface LanguageSupportReport {
+  /** Items whose language has at least one route to a surviving reduction. */
+  readonly supported: number;
+  /** Items for which reduction is impossible in this build, whatever the budget says. */
+  readonly unsupported: number;
+  /**
+   * The distinct declared languages behind `unsupported`, for the message. Falls back to the
+   * content type when an item carries no declared language.
+   */
+  readonly unsupportedLanguages: ReadonlyArray<string>;
+  /** Whether *every* item is unsupported — the case where 0% is guaranteed before any stage runs. */
+  readonly noneSupported: boolean;
+  /**
+   * The explanation, in prose, present only when something is unsupported.
+   *
+   * It lives *inside* the report rather than being printed alongside it because the CLI writes
+   * this trace to stderr as a JSON document, and consumers — including this repository's own
+   * tests — parse the whole stream. A friendly line prepended to that stream is a breaking
+   * change to the channel's contract, which is exactly what a first attempt at this did.
+   */
+  readonly reason?: string | undefined;
+}
+
+/**
  * The immutable validation outcome for an optimization attempt.
  */
 export interface ValidationReport {
@@ -255,6 +300,7 @@ export interface ValidationReport {
   readonly driftReport?: DriftReport | undefined;
   readonly astCoverage?: AstCoverage | undefined;
   readonly driftCoverage?: DriftCoverage | undefined;
+  readonly languageSupport?: LanguageSupportReport | undefined;
 }
 
 /**
@@ -306,6 +352,7 @@ export interface OptimizationTrace {
   readonly driftScore?: number | undefined;
   readonly astCoverage?: AstCoverage | undefined;
   readonly driftCoverage?: DriftCoverage | undefined;
+  readonly languageSupport?: LanguageSupportReport | undefined;
 }
 
 /**

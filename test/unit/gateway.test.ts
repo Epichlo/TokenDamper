@@ -269,7 +269,7 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
     // because the consumer is a stateless provider API that never calls `rehydrate_context`.
     // The content is deleted, and conversational prose carries neither symbols nor content
     // markers — so the elision cannot be evidenced and drift refuses it. The §9 addendum in
-    // docs/phase-1-stabilization-summary.md already described this population as sending the
+    // docs/phase-1-stabilization-summary.md already described this population as sending the [retired]
     // model a marker it has no way to resolve.
     const sessionStore = server.getSessionStore();
     const soleContext = 'A paragraph of ordinary conversational context that appears exactly once per turn';
@@ -491,7 +491,7 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
     // only because `DriftTracker.extractSymbols` harvests `jsonkey:` symbols solely when
     // `contentType === 'json'`. Tagged `text`, a JSON document yielded zero symbols,
     // retention was vacuously 1.0 and drift vacuously 0.00 — a pass produced by not
-    // looking. See docs/issue-2-content-type-contract-design.md §2.2.
+    // looking. See docs/issue-2-content-type-contract-design.md §2.2. [retired]
     expect(res2.body).toBe(turn2);
     expect(res2.body).not.toContain('__td_block__');
 

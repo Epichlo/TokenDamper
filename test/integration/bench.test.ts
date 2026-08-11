@@ -179,7 +179,7 @@ describe('TokenDamper Regression Test Suite & Performance Baseline (R5)', () => 
     // `TokenHasher` reached the engine and `attemptAutomatedRehydration` returned immediately
     // on `if (!hasher && !ledger)` — the recovery path never ran. With the hasher supplied, the
     // engine rehydrates the placeholder, re-validates, and passes on every humaneval fixture.
-    // That remains true and is still asserted below. See docs/phase-1d-drift-investigation.md §10.
+    // That remains true and is still asserted below. See docs/phase-1d-drift-investigation.md §10. [retired]
     //
     // What was wrong was not the assertion but its **scope**. `maxFallbackRate: 0` was read as
     // a statement about the product; it was only ever a statement about humaneval, which is

@@ -7,7 +7,16 @@ Context file for Claude Code. Read this before touching the codebase.
 TokenDamper is a **deterministic context optimization engine** for AI coding assistants
 (Claude Code, Codex, Gemini CLI, Aider). TypeScript, CommonJS, Node >=20.19, MPL-2.0.
 It sits between a developer tool and an LLM provider API and reduces token count while
-preserving syntax validity and provider prompt-cache alignment.
+preserving **bracket/quote integrity** and provider prompt-cache alignment.
+
+**Not "syntax validity" — audit M1, closed by measurement.** The TypeScript "AST-lite validator"
+builds no AST; it is a lexer detecting unbalanced brackets and unterminated strings. Probed
+against the shipped code, it *passes* `const x = ;`, `import from "x";`, `let 123abc = 5;`,
+`const a = 1 +++++ 2;` and plain English prose, and fails only on `super(; }`. Python is
+meaningfully stronger (missing colons, malformed `def`, bad dedent) and still passes prose; JSON
+is a real parser and is correct. `test/unit/validator-guarantee.test.ts` pins every one of those
+as a characterization test, and the README carries the same table — if you strengthen a
+validator, that test fails on purpose and both need updating together.
 
 Three entry modes: **CLI**, **local Gateway HTTP proxy**, **MCP server (stdio)**.
 
@@ -138,11 +147,11 @@ and takes precedence over budget-derived knapsack selection.
       from **114 of 264 files to 12** with **zero** prose casualties.
     - **Measured end state:** every uncovered-language bucket goes to **0.00%** reduction, and
       **258 of 258** rows in the AST-covered and prose buckets are **byte-identical** to
-      baseline. `docs/phase-0-measurement-baseline.md`, DECISIONS §33–§34.
+      baseline. `docs/phase-0-measurement-baseline.md`, DECISIONS §33–§34. [retired]
     - **The Gateway keeps within-payload dedup and loses cross-turn sole-copy dedup.**
       `resolveRecoverableElisions` substitutes recoverable elisions back before the gate runs,
       so they are structurally invisible to it. The lost case is the one §9 of
-      `docs/phase-1-stabilization-summary.md` already called a marker the model cannot resolve.
+      `docs/phase-1-stabilization-summary.md` already called a marker the model cannot resolve. [retired]
     - **Still open:** a symbol-free code file the **pruner** removes is invisible to drift (the
       `!after` branch is a deliberate exemption — selection is not elision); and
       `isCodeExtension` remains a hardcoded 19-entry list that decides whether a real source
@@ -180,8 +189,10 @@ and takes precedence over budget-derived knapsack selection.
 > (this is invariant 10 applied to budgets, and H2 is the same question one layer down), and the
 > corpus A/B method in the status doc §2 is the one that caught its own two false greens.
 
-Full detail in `tokendamper-headroom-known-issues.md`; proposed fixes in
-`purposed architecture changes.md`. Summary:
+Both documents that used to hold the detail here — `tokendamper-headroom-known-issues.md` and
+`purposed architecture changes.md` — were retired by audit M11. Their live content is below and
+in `docs/audit-remediation-status.md`; `docs/retired-documents.md` says how to read the originals
+out of git. Summary:
 
 - **~~Gateway bypasses validation entirely~~ — FIXED (Phase 1.0b).** `src/gateway/proxy.ts`
   now routes through `core/engine.optimize()`, so validators, `DriftTracker`,
@@ -244,7 +255,7 @@ Full detail in `tokendamper-headroom-known-issues.md`; proposed fixes in
   A case for splitting fallback may still exist — the success path's newline join is lossy
   for multi-item bundles, which is why the Gateway must map `finalBundle` positionally
   (invariant 9) — but it is a **different defect with different evidence**. Do not scope
-  Phase 1b from the -1.39%. See `NOTES-FOR-DOCS.md`.
+  Phase 1b from the -1.39%. See `NOTES-FOR-DOCS.md`. [retired]
   **Phase B settled both halves (DECISIONS §35).** The live one was neither: `rawInput` is a
   *decoded string*, so `readFileSync(path, 'utf8')` turned invalid bytes into U+FFFD before any
   stage ran and the fallback echo could not restore them — a Latin-1 `vimspell.sh` came back
@@ -255,8 +266,9 @@ Full detail in `tokendamper-headroom-known-issues.md`; proposed fixes in
   Gateway bypasses `emittedOutput` — so it is pinned by `test/unit/fallback-render.test.ts`
   rather than fixed.
 - **Issue 3 / Phase 1d — investigated 2026-08-03, threshold unchanged, remedy undesigned.**
-  Full record: `docs/phase-1d-drift-investigation.md`; read §10 and §12 before citing any
-  benchmark number from it. **The threshold is not the defect; do not tune it.**
+  Full record was `docs/phase-1d-drift-investigation.md` (retired — `docs/retired-documents.md`);
+  its §10 and §12 carried the caveats on its benchmark numbers, so treat any figure quoted from
+  it as needing that context. **The threshold is not the defect; do not tune it.**
   - Bench reality at `targetReductionRatio: 0.30`: `avgReduction` **0.00%**,
     `fallbackRate` 0.40, all ten fixtures byte-identical. The 7.82% that briefly appeared
     was the estimator mismatch, not a saving (§12, DECISIONS §19).
@@ -286,7 +298,7 @@ Full detail in `tokendamper-headroom-known-issues.md`; proposed fixes in
     is **retracted** — on re-run Headroom hit a 20-second backend timeout and failed open.
     Same 0%, different mechanism. Do not cite it as corroboration.
   - **The semantic gate was investigated 2026-08-04 and precondition (a) is disposed of:
-    `docs/phase-1d-semantic-gate-disposition.md`. Nothing implemented.** §18's proposed
+    `docs/phase-1d-semantic-gate-disposition.md`. Nothing implemented.** §18's proposed [retired]
     markers for code (brace balance, function/class boundaries, imports) are measured to be
     near-constants under the shipped selector — it preserves them by construction — so they
     would replace one decorative constant with four. Only comments and docstrings vary.
@@ -312,7 +324,7 @@ The agreed direction is three scoped changes (no rewrite):
    dispatches per item, so a bundle-level tag would key the transform and the check at
    different granularities, reproducing Issue 2's shape while appearing to fix it. Bundles
    are heterogeneous (a 12 KB JSON tool result next to a one-line question), and
-   `statistics.contentTypeCounts` is already the bundle-level view. See `NOTES-FOR-DOCS.md`.
+   `statistics.contentTypeCounts` is already the bundle-level view. See `NOTES-FOR-DOCS.md`. [retired]
    The planner-level gate (§3.6 of the design doc) is still **not** implemented: nothing in
    `src/core/planner/` reads `contentType`.
 2. Per-stage checkpointing replacing the single global validate→fallback gate (**Phase 1c,
@@ -323,7 +335,7 @@ The agreed direction is three scoped changes (no rewrite):
    can originate in an item no stage touched (that is how DECISIONS.md §17 was found, on
    turn 1 with nothing transformed). Constraint retention and drift are also bundle-scoped
    set comparisons with no per-stage attribution. Establish attribution first. See
-   `NOTES-FOR-DOCS.md` and `docs/phase-1-stabilization-summary.md` §8.
+   `NOTES-FOR-DOCS.md` and `docs/phase-1-stabilization-summary.md` §8. [retired]
 3. ~~Split fallback into **raw passthrough** vs. **bundle rendering**.~~ **DONE (Phase B,
    DECISIONS §35)** — though the live defect was not the one this item names. The fallback
    branch already returned `request.rawInput`; what made that *not* byte-identical was that
@@ -358,7 +370,7 @@ scoring, MMR, AST folding and Prometheus metrics on top of a pipeline that curre
   Gateway path: the consumer is a stateless provider API with no rehydration mechanism, so
   elided content is deleted, not referenced. Do not infer the exemption from `elided` or
   `originalContentHash`; `token-hashing` sets both and must stay fully scored.
-  See DECISIONS.md §16 and the §16 entry in `NOTES-FOR-DOCS.md`.
+  See DECISIONS.md §16 and the §16 entry in `NOTES-FOR-DOCS.md`. [retired]
 - **This repo is its own corpus. Freeze it before measuring, or the measurement moves under
   you.** Every reduction figure in this project is measured over `src/**/*.ts` and the
   repository's own `*.py` — the same files a session edits while it works. A re-run after
@@ -374,7 +386,7 @@ scoring, MMR, AST folding and Prometheus metrics on top of a pipeline that curre
   that converts fallbacks into reductions changes the denominator and can make a strictly
   worse rule look better on the mean); and the corpus is ~94% TypeScript, which is not a
   neutral sample for anything language-dependent — a docstring rule that costs 0.45pp here
-  costs 6.8pp on real Python (`docs/phase-1d-semantic-gate-disposition.md` §2).
+  costs 6.8pp on real Python (`docs/phase-1d-semantic-gate-disposition.md` §2). [retired]
 - **Classification has a blast radius over items no stage touched.** `validate()` runs
   `validateBundleAst` over *every* item in the final bundle, so changing what
   `classifyContent` returns can fail an item nothing transformed. To see it, measure
@@ -413,6 +425,12 @@ scoring, MMR, AST folding and Prometheus metrics on top of a pipeline that curre
 Start here for anything audit-related; it is the doc kept current.
 
 `ARCHITECTURE.md` (canonical, frozen) · `ROADMAP.md` · `DECISIONS.md` · `CHANGELOG.md` ·
-`max_audit.md` (the audit itself — note several of its proposed fixes were measured wrong; see
-§40 and §42) · `docs/architecture/milestone_*.md` · `docs/v1_deployment_audit.md` ·
+`max_audit.md` (the audit itself — note several of its *reachability* claims were measured wrong;
+see §40, §42 and §45) · `docs/architecture/milestone_*.md` · `docs/v1_deployment_audit.md` ·
 `tokendamper-benchmark/BENCHMARK_RESULTS.md`
+
+**`docs/retired-documents.md`** — audit M11 retired twelve narrative documents (~230 KB) whose
+conclusions already lived in `DECISIONS.md` and the status doc. That file maps each one to where
+its conclusion now lives and gives the `git show` command to read the original. Citations marked
+`[retired]` in source comments and here point at documents in git history, not missing files —
+they are still accurate about what was measured and when.

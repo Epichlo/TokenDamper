@@ -16,16 +16,20 @@ typecheck and lint clean.
 | **1** | C1a, C1b, C2, M6 | ✅ merged |
 | **2** | M5a, M5b, H4, M8, M9, M10 + M5 minor | ✅ **done — DECISIONS §44** |
 | **3** | C3/H1 ✅, H6 ✅, H5 ✅, C4 ✅ | ✅ **done — C4 in DECISIONS §45** |
-| Decisions | H2, M1, M11 | ⬜ not addressed |
+| Decisions | H2, M1, M11 | ✅ **decided and done — DECISIONS §46** |
 
-**Every task-shaped audit item is now closed.** What remains is three *decisions* (H2, M1, M11)
-and the architectural work in §5 — chiefly Phase 1c, which is the binding constraint on
-multi-file value.
+**Every audit item is now closed.** What remains is the architectural work in §5 — chiefly
+Phase 1c, which is the binding constraint on multi-file value.
+
+The three decisions were taken as: **H2 — report why** (keep accepting every language, but say
+when elision cannot reduce it, rather than narrowing the accepted set); **M1 — correct the
+docs** (say "bracket/quote integrity", do not wire the compiler API); **M11 — retire the
+narratives and the root planning artifacts**. Each is argued in §46.
 
 ### Corresponding DECISIONS entries
 
 §36 license · §37 C1a · §38 C2 · §39 M6 · §40 C1b · §41 C3/H1 · §42 H6 · §43 H5 · §44 Wave 2 ·
-§45 C4
+§45 C4 · §46 H2/M1/M11
 
 ---
 
@@ -193,15 +197,45 @@ Learned the hard way during Waves 0–3.
   `messages[2].content` came back as the string `"{\"__td_block__\":\"[TokenDamper Elided: …]\"}"`
   with `fallbackUsed: false` and `tokensSaved: 42`. That is the one case the Gateway saves
   anything on at all, so C4 was live on precisely the path the mode exists for.
-- **H2 — language coverage.** 3 of 19 declared languages can produce a non-zero reduction.
-  Decision, not a task: narrow the accepted set, or make a declared-but-unsupported language
-  report *why* instead of falling back mutely.
+- ~~**H2 — language coverage.**~~ **Decided: report why. DECISIONS §46.** Every language is
+  still accepted — pass-through is byte-identical and refusing it would remove a working
+  behaviour to make a point. What changed is that the run now says when elision cannot reduce
+  the input: `trace.languageSupport` carries `supported`/`unsupported`/`noneSupported` and a
+  `reason` string, and `validate()` raises an **info** issue, `LANGUAGE_NOT_ELIDIBLE`.
 
-  **Wave 2 built the shape of the answer without applying it here.** M5a's response now carries
-  `budgetApplied` and a `notice` so a 0% result says whether anything ran. A declared-but-
-  unsupported language is the same question one layer down — the run reports 0% and does not say
-  the language has no validator behind it. `trace.astCoverage` already holds the fact.
-- **M1 — "AST-lite validator".** The TypeScript validator is a bracket/quote matcher. Say that in
-  user-facing docs, or wire the real compiler API.
-- **M11 — documentation volume.** 4.1:1 against source. This file is meant to *replace* scattered
-  status prose, not add to it; retire superseded phase narratives to git history.
+  Measured, elision reduces **3 of 17** probed languages — TypeScript, JavaScript, Python —
+  which matches both the audit headline and the corpus. The predicate is `supportsRegionElision`
+  and nothing looser: a first attempt asked "does the item yield symbols?" and called Go
+  supported, because a trivial Go file yields exactly one — `import:fmt`, an incidental match by
+  the TypeScript import regex.
+
+- ~~**M1 — "AST-lite validator".**~~ **Decided: correct the docs, do not wire the compiler
+  API. DECISIONS §46.** `README.md` and `CLAUDE.md` now say **bracket/quote integrity** and
+  carry a per-language table of what each validator does and does not catch.
+  `test/unit/validator-guarantee.test.ts` pins all of it as characterization tests, verified
+  against the shipped validator rather than copied from the audit.
+
+  Wiring `ts.createSourceFile` was rejected on cost, not principle: `typescript` is a *dev*
+  dependency today, and promoting it to runtime costs install size and parse latency against a
+  lexer that runs in single-digit milliseconds. Revisit if the guarantee needs to be stronger.
+
+- ~~**M11 — documentation volume.**~~ **Decided: retire the narratives and the root planning
+  artifacts. DECISIONS §46.** Twelve files, **226 KB**, 31 markdown files down to 19.
+  `docs/retired-documents.md` maps each to where its conclusion lives and how to read the
+  original out of git.
+
+  **The 4.1:1 premise was stale.** Measured before the cleanup it was **1.40:1**, and not
+  because the docs had shrunk — they had grown to 726 KB — but because `src/` grew faster.
+  Counting the **32.8%** of `src/` that is comment prose, prose:code ran ~2.6:1. After the
+  retirement, markdown:src is **0.95:1**.
+
+  The in-source commentary was deliberately left alone. It is the part that sits next to the
+  code it explains and is maintained with it; the retired files were the part that had to be
+  kept in sync by hand, which is the failure mode M11 actually names.
+
+  **Twenty-five source and test comments cite a retired document.** They are marked
+  `[retired]` rather than rewritten: the citation names a document and section that existed and
+  git still has, whereas re-pointing 25 citations at DECISIONS sections by hand would risk
+  mapping some of them to the wrong place. `CHANGELOG.md` and `DECISIONS.md` keep their older
+  citations untouched for the same reason — they are append-only records of what was true when
+  written, and each now carries a note saying so.
