@@ -198,6 +198,19 @@ export interface ValidationIssue {
   readonly code: string;
   readonly message: string;
   readonly severity: ValidationIssueSeverity;
+  /**
+   * The item this issue is about, when the check knows.
+   *
+   * Attribution existed before Phase 1c, but only as prose — `"…in item [<id>]…"` interpolated
+   * into `message`. That is unusable by anything that has to *act* on it, and recovering it with
+   * a regex over the message would be audit M5b exactly: two places restating one format, which
+   * drift apart. The producers know the id; they now pass it.
+   *
+   * Absent for genuinely bundle-scoped findings. `SEMANTIC_DRIFT_EXCEEDED` is the important one:
+   * `S_k` is a set comparison over the whole bundle and names no item, which is why it forces a
+   * full fallback rather than a repair.
+   */
+  readonly itemId?: string | undefined;
 }
 
 /**
@@ -289,6 +302,31 @@ export interface LanguageSupportReport {
 }
 
 /**
+ * Which items a failed validation blames, and whether anything is left unblamed.
+ *
+ * The input to Phase 1c's per-item repair. Validation is bundle-scoped and fallback has been
+ * all-or-nothing, so on the 45-file Python corpus the stages achieved **42.52%** and the run
+ * emitted **0.00%** — 26 `CONSTRAINT_DIRECTIVE_LOST` errors across 14 items reverted all 45,
+ * with drift at 0.0359 against a 0.40 gate and AST clean.
+ *
+ * Repair is only legitimate when every error names an item. `SEMANTIC_DRIFT_EXCEEDED` is a set
+ * comparison over the whole bundle and names none: reverting an arbitrary subset in response
+ * would be guessing, so an unattributable error forces the full fallback that already exists.
+ */
+export interface FailureAttribution {
+  /** Items named by at least one error. Reverting these is what repair attempts. */
+  readonly repairableItemIds: ReadonlyArray<string>;
+  /**
+   * Whether any error names no item at all.
+   *
+   * When true, repair is refused outright — not attempted and then re-checked. A bundle-scoped
+   * failure is not evidence about any particular item, and acting on it as though it were would
+   * be the guess this whole subsystem exists to avoid.
+   */
+  readonly hasUnattributableError: boolean;
+}
+
+/**
  * The immutable validation outcome for an optimization attempt.
  */
 export interface ValidationReport {
@@ -301,6 +339,7 @@ export interface ValidationReport {
   readonly astCoverage?: AstCoverage | undefined;
   readonly driftCoverage?: DriftCoverage | undefined;
   readonly languageSupport?: LanguageSupportReport | undefined;
+  readonly attribution?: FailureAttribution | undefined;
 }
 
 /**
@@ -353,6 +392,18 @@ export interface OptimizationTrace {
   readonly astCoverage?: AstCoverage | undefined;
   readonly driftCoverage?: DriftCoverage | undefined;
   readonly languageSupport?: LanguageSupportReport | undefined;
+  /**
+   * Items restored to their original content by Phase 1c's per-item repair.
+   *
+   * Present and non-empty only on a **partial** success: some items were optimized, others were
+   * reverted because a check named them. Without this the outcome is a reduction with
+   * `fallbackUsed: false` and no indication that anything was put back — which is invariant 10's
+   * shape, a clean-looking result concealing what did not happen.
+   *
+   * Absent on a clean run and on a full fallback. A full fallback is reported as it always was,
+   * because repairing every changed item is a fallback and is routed as one.
+   */
+  readonly itemsReverted?: ReadonlyArray<string> | undefined;
 }
 
 /**

@@ -5,6 +5,7 @@ import {
   createStageResult,
   createContextItem,
   createBundleStatistics,
+  createBundleFromItems,
   freeze,
   hashContent,
 } from '../model';
@@ -192,6 +193,56 @@ export function optimize(
       }
     }
 
+    // Per-item repair, before giving up on the whole bundle — Phase 1c.
+    //
+    // Validation is bundle-scoped and fallback has been all-or-nothing, so one bad item reverted
+    // every good one. Measured on the 45-file Python corpus: the stages achieved **42.52%**, 26
+    // `CONSTRAINT_DIRECTIVE_LOST` errors across 14 items reverted all 45, and the run emitted
+    // **0.00%** — with drift at 0.0359 against a 0.40 gate and AST clean. Reverting only the 14
+    // named items yields **23.14%** and re-validates clean.
+    //
+    // Deliberately placed after the rehydration attempt above, and shaped like it: build a
+    // candidate, re-validate it with the same `validate`, and adopt it **only if it passes**.
+    // Nothing here decides an item is acceptable; validation still does. This changes which
+    // bundle is offered, never what counts as valid.
+    //
+    // **The gate is "is there a principled subset to revert?", not "is every error attributed?"**
+    //
+    // The stricter rule was tried first and measured too strict. The 61-file TypeScript bundle
+    // fails on *both* attributable constraint losses and `SEMANTIC_DRIFT_EXCEEDED` at 0.4122,
+    // barely over the 0.40 gate. Refusing because drift named no item threw away the constraint
+    // attribution that did — and reverting those items lowers semantic loss, which is exactly
+    // what drift measures, so the drift failure is frequently a consequence of the same items.
+    //
+    // Attempting the repair is safe because it decides nothing: the candidate goes back through
+    // the same `validate`, and a drift score still over the gate simply fails again and falls
+    // back. What would be guessing is reverting a subset when **no** error names anything —
+    // there is no principled choice there, so `repairableItemIds` being empty still refuses.
+    let revertedItemIds: ReadonlyArray<string> = Object.freeze([]);
+    if (!validation.passed && !stageFailed) {
+      const attribution = validation.attribution;
+      if (attribution && attribution.repairableItemIds.length > 0) {
+        const repaired = revertFailingItems(request.bundle, currentBundle, attribution.repairableItemIds);
+        if (repaired) {
+          const revalidated = createValidationReport(
+            validate(request.bundle, repaired.bundle, selectedPlan, request.budget, valOptions),
+          );
+
+          // One pass, not a loop to fixpoint. A loop terminates — each pass reverts at least one
+          // more item and the limit is the full fallback — but it costs a whole-bundle AST pass
+          // per iteration, so worst case is O(n²) validations on the bundles that need it most.
+          // Measured, one pass sufficed on the corpus above. If a second round of attributable
+          // failures ever appears, this refuses and falls back rather than iterating.
+          if (revalidated.passed && revalidated.confidence >= minimumConfidence) {
+            currentBundle = repaired.bundle;
+            validation = revalidated;
+            revertedItemIds = repaired.revertedItemIds;
+            debtBreakdown = computeDebtBreakdown(debtTracker, currentBundle, options?.confidenceLedger, turn);
+          }
+        }
+      }
+    }
+
     const finalLedgerConfidence = options?.confidenceLedger
       ? options.confidenceLedger.getOverallConfidence(turn)
       : 1.0;
@@ -298,6 +349,10 @@ export function optimize(
     const trace = buildTrace(request, selectedPlan, stageResults, validation, fallback, emittedOutput, {
       debtScore: debtBreakdown.debtScore,
       stageDurationsMs,
+      // Only meaningful when the run actually emitted the repaired bundle. On a fallback the
+      // caller gets their input back and nothing was "kept", so reporting a revert list there
+      // would describe a decision that had no effect on the output.
+      ...(fallback.used ? {} : { itemsReverted: revertedItemIds }),
       ...(validation.driftReport?.driftScore !== undefined
         ? { driftScore: validation.driftReport.driftScore }
         : {}),
@@ -347,6 +402,56 @@ export function optimize(
       fallbackUsed: true,
     });
   }
+}
+
+/**
+ * Rebuilds `after` with the named items restored to their pre-optimization content.
+ *
+ * Returns `undefined` in the two cases where a repair is not the right answer:
+ *
+ *  - **Nothing to revert.** No named item actually differs from its original, so the failure is
+ *    not about content this can restore.
+ *  - **Everything would be reverted.** The result would be indistinguishable from the original
+ *    bundle, which is a full fallback wearing a different name. Returning `undefined` sends it
+ *    down the real fallback path, and that matters: fallback echoes `request.rawInput` (the CLI
+ *    writes the original `Buffer`), whereas this path renders from items. DECISIONS §35 exists
+ *    because those two are not the same bytes for input that is not valid UTF-8.
+ *
+ * "Everything" accounts for pruning. A bundle whose surviving items were all reverted is still a
+ * real reduction if the planner dropped items — selection is not elision, and that saving is not
+ * what any of these checks objected to.
+ */
+function revertFailingItems(
+  before: ContextBundle,
+  after: ContextBundle,
+  repairableItemIds: ReadonlyArray<string>,
+): { readonly bundle: ContextBundle; readonly revertedItemIds: ReadonlyArray<string> } | undefined {
+  const beforeById = new Map(before.items.map((item) => [item.id, item]));
+  const targets = new Set(repairableItemIds);
+  const reverted: string[] = [];
+
+  const items = after.items.map((item) => {
+    if (!targets.has(item.id)) return item;
+    const original = beforeById.get(item.id);
+    if (!original || original.content === item.content) return item;
+    reverted.push(item.id);
+    return original;
+  });
+
+  if (reverted.length === 0) {
+    return undefined;
+  }
+
+  const sameItemCount = items.length === before.items.length;
+  const everyItemOriginal = items.every((item) => beforeById.get(item.id)?.content === item.content);
+  if (sameItemCount && everyItemOriginal) {
+    return undefined;
+  }
+
+  return {
+    bundle: createBundleFromItems(items, after.source),
+    revertedItemIds: Object.freeze([...reverted].sort()),
+  };
 }
 
 function computeDebtBreakdown(
