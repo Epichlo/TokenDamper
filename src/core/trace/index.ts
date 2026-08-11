@@ -93,5 +93,9 @@ export function buildTrace(
     // nothing to measure" indistinguishably, and the CLI's stderr trace is the only place a
     // one-shot run can notice the difference.
     ...(validation.driftCoverage === undefined ? {} : { driftCoverage: validation.driftCoverage }),
+    // And the same again for language support: a 0% run cannot otherwise say whether this build
+    // has any transform for the input's language at all, which is a different problem from the
+    // input being incompressible and calls for a different response. Audit H2.
+    ...(validation.languageSupport === undefined ? {} : { languageSupport: validation.languageSupport }),
   });
 }

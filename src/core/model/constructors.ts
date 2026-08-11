@@ -138,7 +138,7 @@ export function createOptimizationRequest(
  * modes are pathless by construction — `optimize -` has no filename, and an MCP
  * `optimize_context` call is a string in a JSON-RPC frame — so without a declaration the
  * only signal left is the content probe, and §17 removed content-only code detection on
- * purpose. See `docs/phase-4b-pathless-code-scope.md`.
+ * purpose. See `docs/phase-4b-pathless-code-scope.md`. [retired]
  *
  * **It sets `language` and `contentType` together, never one without the other.** Setting
  * only `language` leaves `contentType` at whatever the probe guessed — `text` for most
@@ -438,6 +438,7 @@ export function createValidationReport(report: ValidationReport): ValidationRepo
     ...(report.driftReport === undefined ? {} : { driftReport: report.driftReport }),
     ...(report.astCoverage === undefined ? {} : { astCoverage: report.astCoverage }),
     ...(report.driftCoverage === undefined ? {} : { driftCoverage: report.driftCoverage }),
+    ...(report.languageSupport === undefined ? {} : { languageSupport: report.languageSupport }),
   });
 }
 
@@ -463,6 +464,7 @@ export function createOptimizationTrace(trace: OptimizationTrace): OptimizationT
     ...(trace.driftScore === undefined ? {} : { driftScore: trace.driftScore }),
     ...(trace.astCoverage === undefined ? {} : { astCoverage: trace.astCoverage }),
     ...(trace.driftCoverage === undefined ? {} : { driftCoverage: trace.driftCoverage }),
+    ...(trace.languageSupport === undefined ? {} : { languageSupport: trace.languageSupport }),
   });
 }
 
@@ -512,7 +514,7 @@ export function freeze<T>(value: T): Readonly<T> {
  * `MARKDOWN_MARKER_TYPES`, so the file's `#` comment leaders would be harvested as markdown
  * headings and then "destroyed" by the very elision the detection just enabled — measured at
  * 1,025 fabricated markers across 43 pathless Python files
- * (`docs/phase-4b-pathless-code-scope.md` §2, D2).
+ * (`docs/phase-4b-pathless-code-scope.md` §2, D2). [retired]
  *
  * An extension never sets `language`. It does not need to — `selectValidator` consults `path`
  * on its own — and doing so would put a `language` on every file-route item, moving every
@@ -1009,7 +1011,7 @@ const pythonConfirmingValidator = new PythonValidator();
 /**
  * Detects Python by structure, then **confirms it by parsing**. Phase 4b.2.
  *
- * The structural half is `docs/phase-4b-pathless-code-scope.md` §4's measured rule:
+ * The structural half is `docs/phase-4b-pathless-code-scope.md` §4's measured rule: [retired]
  * `strong >= 2 && (strong + weak) / counted >= 0.15 && disqualified / counted < 0.10`, where
  * comment lines are neutral — excluded from the numerator *and* the denominator, since `#` is
  * a Python comment and a markdown heading and cannot be evidence either way.
@@ -1090,11 +1092,11 @@ function isPython(text: string): boolean {
  *
  * **The discriminator is shape, not count.** A threshold on how many `#` lines a file has
  * points the wrong way — `tclConfig.sh` carries 79 to `CODE_OF_CONDUCT.md`'s 12, so any count
- * rule protects the shell script *less* (`docs/phase-4b-lever-disposition.md` §1). What
+ * rule protects the shell script *less* (`docs/phase-4b-lever-disposition.md` §1). What [retired]
  * separates them is that a real document also has fences, lists or links, and a commented
  * config fragment has none. Measured over the 289-file Phase 0 corpus: code misclassified as
  * markdown falls from **114 of 264 files to 12**, while **all 25** real documents are
- * retained. See `docs/phase-0-measurement-baseline.md` §6.
+ * retained. See `docs/phase-0-measurement-baseline.md` §6. [retired]
  *
  * The 12 residual leaks are honest rather than spurious — two shell scripts with `- ` lists,
  * three Tcl files whose `[...]` command syntax matches the link regex, four pip files, and

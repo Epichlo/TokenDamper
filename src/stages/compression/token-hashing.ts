@@ -131,7 +131,7 @@ export function runTokenHashingStage(
     // Rule 5: prefer sub-item granularity. Whole-item hashing replaces every byte, so every
     // symbol in a single-item code bundle dies at once, `R_AST` is a boolean and `S_k` pins
     // at 0.60 — over the gate, every time, structurally
-    // (`docs/phase-1d-drift-investigation.md` §6). Eliding function bodies leaves the
+    // (`docs/phase-1d-drift-investigation.md` §6). Eliding function bodies leaves the [retired]
     // declarations that carry the symbols, so drift has something fractional to grade.
     //
     // `selectElisionRegions` returns nothing for content it cannot segment safely — JSON,

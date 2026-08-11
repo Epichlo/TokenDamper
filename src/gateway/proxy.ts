@@ -435,7 +435,7 @@ function runGatewayOptimization(
   //
   // Note the drift exemption in DriftTracker covers `recoverable` (dedup) elisions only.
   // The lossy compression stages are still scored in full, so drift is a second, separate
-  // blocker on widening this list. See docs/phase-1-stabilization-summary.md (§5.3, §7).
+  // blocker on widening this list. See docs/phase-1-stabilization-summary.md (§5.3, §7). [retired]
   const config: ResolvedConfig = {
     ...baseConfig,
     planner: { ...baseConfig.planner, defaultMode: 'session_dedup' },
@@ -506,7 +506,7 @@ function runGatewayOptimization(
  *    retention was vacuously 1.0 and drift vacuously 0.00.
  *
  * Both checks were reporting a pass they had never performed. See
- * `docs/issue-2-content-type-contract-design.md` §2.2.
+ * `docs/issue-2-content-type-contract-design.md` §2.2. [retired]
  *
  * **This closed the JSON half only, and the record overstates it.** `classifyContent` does
  * see JSON as JSON, so the drift half above holds. It did *not* start selecting a validator

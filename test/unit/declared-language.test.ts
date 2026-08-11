@@ -118,7 +118,7 @@ describe('a declaration sets language and contentType together', () => {
     //
     // It used to be *wrong* validation: `CONTENT_TYPE_VALIDATORS.code` was the TypeScript
     // validator, so a `code` tag without a language was how Python got checked by the wrong
-    // checker — the trap `docs/phase-4b-pathless-code-scope.md` §6.3 named. That mapping is
+    // checker — the trap `docs/phase-4b-pathless-code-scope.md` §6.3 named. That mapping is [retired]
     // now `null`, because `code` is a *family*, not a language, and lexing the whole family
     // as TypeScript invented findings rather than weakening them (perl 39/40, tcl 30/40,
     // shell 22/40).

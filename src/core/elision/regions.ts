@@ -352,6 +352,41 @@ export interface SelectRegionsOptions {
 }
 
 /**
+ * The languages `selectElisionRegions` can select sub-item regions for.
+ *
+ * Exported so the language-support report is derived from the gate rather than restating it.
+ * The two used to be the same fact written twice in different files, which is how audit M5b's
+ * marker formats drifted apart; this list and the check below must not repeat that.
+ */
+export type RegionElisionLanguage = 'typescript' | 'python';
+
+export const REGION_ELISION_LANGUAGES: ReadonlyArray<RegionElisionLanguage> = Object.freeze([
+  'typescript',
+  'python',
+]);
+
+/**
+ * The region-selectable language for this item, or `undefined` if there is none.
+ *
+ * The first of the two gates behind audit H2, and the narrowing `selectElisionRegions` needs —
+ * one function rather than a predicate plus a second membership test that could disagree with it.
+ * An item that yields `undefined` can only be elided *whole*, which then has to survive the
+ * measurement gate; for a language whose symbols the drift tracker cannot see, that is refused
+ * by construction.
+ */
+export function regionElisionLanguage(item: ContextItem): RegionElisionLanguage | undefined {
+  const language = selectValidator(item)?.language;
+  return language !== undefined && (REGION_ELISION_LANGUAGES as ReadonlyArray<string>).includes(language)
+    ? (language as RegionElisionLanguage)
+    : undefined;
+}
+
+/** Whether sub-item elision is available for this item's language. */
+export function supportsRegionElision(item: ContextItem): boolean {
+  return regionElisionLanguage(item) !== undefined;
+}
+
+/**
  * Selects the sub-item regions of `item` that may be elided.
  *
  * Deterministic: the result is a pure function of `item.content` and the language
@@ -368,9 +403,8 @@ export function selectElisionRegions(
   item: ContextItem,
   options?: SelectRegionsOptions,
 ): ReadonlyArray<ElisionRegion> {
-  const validator = selectValidator(item);
-  const language = validator?.language;
-  if (language !== 'typescript' && language !== 'python') {
+  const language = regionElisionLanguage(item);
+  if (language === undefined) {
     return [];
   }
 

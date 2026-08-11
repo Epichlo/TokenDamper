@@ -21,7 +21,7 @@ import { selectValidator, validateItemAst } from '../../src/core/validation/ast'
  * message is a provider payload with no language field anywhere in its schema, so for the
  * traffic the proxy actually carries a probe is the only route that exists.
  *
- * Scoped to Python deliberately. `docs/phase-4b-pathless-code-scope.md` §4 measured
+ * Scoped to Python deliberately. `docs/phase-4b-pathless-code-scope.md` §4 measured [retired]
  * TypeScript positives at 0.283–1.000 against prose negatives reaching 0.333 — overlapping
  * ranges, no threshold orders them — because this repository's prose is documentation *about*
  * TypeScript, dense with fenced TypeScript. A TypeScript probe is not proposed, now or later.
@@ -59,7 +59,7 @@ describe('the probe identifies Python and says so in both fields', () => {
   });
 
   it('stops the marker fabrication that made D2 worth fixing before enabling elision', () => {
-    // `docs/phase-4b-pathless-code-scope.md` §2: pathless Python classified `text` or
+    // `docs/phase-4b-pathless-code-scope.md` §2: pathless Python classified `text` or [retired]
     // `markdown`, both on `MARKDOWN_MARKER_TYPES`, so `# NOTE: …` comment leaders were
     // harvested as structural markers — 1,025 of them across 43 files — and the next elision
     // then "destroyed" them. §3 measured that fixing the language *without* the content type

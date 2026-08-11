@@ -17,7 +17,7 @@ import { join } from 'node:path';
  *
  * This is a property of the harness, not of the engine, so it is pinned here as text rather
  * than by running the pipeline. The engine-side defect — that pathless input is invisible to
- * the validator layer at all — is real, tracked in `docs/phase-4b-pathless-code-scope.md`,
+ * the validator layer at all — is real, tracked in `docs/phase-4b-pathless-code-scope.md`, [retired]
  * and deliberately NOT asserted here. Fixing it must not make this test pass by accident.
  */
 describe('benchmark harness invocation route', () => {

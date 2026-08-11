@@ -6,7 +6,7 @@ This exists because every reduction figure in this project is measured over file
 may also be editing, and because two separate measurements have already been wrong in ways
 nothing caught: the repo moved under a measurement (CLAUDE.md, Gotchas), and a 4b.3 A/B loop
 globbed one directory level and measured 132 of 144 files without noticing
-(`docs/phase-4b-lever-disposition.md`, finding 3).
+(`docs/phase-4b-lever-disposition.md`, finding 3). [retired]
 
 ## Use
 

@@ -25,7 +25,7 @@ import { validate } from '../../src/core/validation';
  *
  * That rules out both extremes. Trusting it everywhere keeps 51 false positives; the audit's
  * proposed "skip `code` entirely" discards 54 genuine constraints — including the Python
- * docstring case `docs/phase-1d-semantic-gate-disposition.md` measured this check to be the only
+ * docstring case `docs/phase-1d-semantic-gate-disposition.md` measured this check to be the only [retired]
  * thing catching. The separator is the *region*, not the content type.
  *
  * Measured effect of scoping to prose regions and attributing per item: Python 14.98% -> 23.14%,

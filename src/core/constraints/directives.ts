@@ -25,7 +25,7 @@ const PROSE_CONTENT_TYPES: ReadonlySet<ContentType> = new Set<ContentType>([
  * So neither "trust it everywhere" nor the audit's proposed "skip `code` entirely" is right:
  * the first keeps 51 false positives, the second discards 54 genuine constraints. What separates
  * them is not the content *type* but the region — an instruction to a reader lives in a comment
- * or a docstring, never in an expression. `docs/phase-1d-semantic-gate-disposition.md` measured
+ * or a docstring, never in an expression. `docs/phase-1d-semantic-gate-disposition.md` measured [retired]
  * that this check is what catches Python docstring loss, and that is preserved here precisely
  * because docstrings stay in scope.
  *

@@ -217,7 +217,7 @@ export interface ElideRegionsParams {
  * symbol in the bundle dies at once. `DriftTracker`'s `R_AST` is then a boolean and `S_k`
  * is pinned at the formula constant `0.60` — above the `0.40` gate, every time, structurally.
  * Whole-item hashing can never succeed on a single-item code bundle
- * (`docs/phase-1d-drift-investigation.md` §6). Regions give the metric something fractional
+ * (`docs/phase-1d-drift-investigation.md` §6). Regions give the metric something fractional [retired]
  * to grade, and measured, it grades correctly.
  *
  * Two rules govern where a region may start and end, and both were found by measurement

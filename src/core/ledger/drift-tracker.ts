@@ -8,7 +8,7 @@ import type { ContentType, ContextBundle, ContextItem } from '../model';
  * Deliberately an allowlist, not a denylist of `code`/`yaml`. A new `ContentType` should
  * default to *not* harvesting these — an absent marker costs a little discrimination, an
  * invented one actively inflates drift, and the second failure is the one that has
- * actually bitten (DECISIONS.md §18, `docs/phase-1d-drift-investigation.md` §7).
+ * actually bitten (DECISIONS.md §18, `docs/phase-1d-drift-investigation.md` §7). [retired]
  *
  * **`markdown` alone, since Phase 4b.3 (DECISIONS §32).** The list used to also hold `text`,
  * `html`, `logs` and `unknown`, which contradicted the paragraph above: `text` and `unknown`
@@ -316,7 +316,7 @@ export class DriftTracker {
     //     `measured: false`, no fallback, because no validator covers `.pl` and the rule
     //     therefore never looked. That is the defect, not prose.
     //
-    // See `docs/phase-0-measurement-baseline.md` §5 and DECISIONS §33.
+    // See `docs/phase-0-measurement-baseline.md` §5 and DECISIONS §33. [retired]
     const unwitnessedItemIds = this.findUnwitnessedItems(beforeBundle, effectiveAfter);
 
     // The two gates, decided separately. See `DriftReport.measurementGate`.

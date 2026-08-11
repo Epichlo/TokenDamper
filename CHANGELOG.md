@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+> **Entries citing retired documents are deliberate.** Audit M11 retired twelve narrative files;
+> older entries still name them, because a changelog records what was true at the time and
+> rewriting it would falsify that. See `docs/retired-documents.md` for where each conclusion
+> lives now and how to read the original out of git.
+
 ## [Unreleased]
 
 Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or released; run
@@ -39,6 +44,20 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
   fields. Wave 2 changes no stage output. See DECISIONS §44.
 
 ### Added
+- **A 0% run now says whether the language could ever have been reduced — audit H2.** Twelve of
+  nineteen recognised extensions cannot produce a non-zero reduction under any flag combination,
+  and that was indistinguishable from a file with nothing worth compressing. `trace.languageSupport`
+  now carries `supported`, `unsupported`, `unsupportedLanguages`, `noneSupported` and a `reason`,
+  and `validate()` raises an **info** issue (`LANGUAGE_NOT_ELIDIBLE`) that does not vote on the
+  verdict. Every language is still accepted — pass-through is byte-identical, and refusing it
+  would remove a working behaviour to make a point.
+
+  Measured, elision reduces **3 of 17** probed languages (TypeScript, JavaScript, Python), which
+  is the audit's headline and the corpus agreeing independently. The predicate is
+  `supportsRegionElision` and nothing looser: a first attempt asked "does the item yield symbols?"
+  and called Go supported, because a trivial Go file yields exactly one — `import:fmt`, an
+  incidental match by the TypeScript import regex.
+
 - **`optimize` accepts multiple paths and directories — audit H5**: `tokendamper optimize a.ts
   b.ts` and `tokendamper optimize ./src`. This is what makes the 0/1 knapsack reachable:
   `createContextBundle` produced exactly one item for every shipping entry point, prefix locking
@@ -60,6 +79,23 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
   Phase 1c). This delivers the mechanism; §3.1 stands between it and the outcome. See DECISIONS §43.
 
 ### Removed
+- **Twelve narrative documents, 226 KB — audit M11.** `NOTES-FOR-DOCS.md`, `study.md`,
+  `purposed architecture changes.md`, `tokendamper-headroom-known-issues.md`, and the eight
+  `docs/phase-*` / `docs/issue-2-*` files. Markdown drops from 31 files to 19, and markdown:src
+  from 1.40:1 to **0.95:1**. `docs/retired-documents.md` maps each file to where its conclusion
+  now lives and gives the `git show` command to read the original.
+
+  **The 4.1:1 premise was stale**: measured before acting it was already 1.40:1, and not because
+  the docs had shrunk — they had grown to 726 KB — but because `src/` grew faster. Since **32.8%
+  of `src/` is comment prose**, prose:code actually ran ~2.6:1. The in-source commentary is
+  deliberately kept: the failure mode M11 names is two copies of an argument kept in sync by hand,
+  and a comment next to its code is not that.
+
+  Twenty-five source and test citations to retired documents are marked `[retired]` rather than
+  re-pointed — the citation names something git still holds, and re-pointing 25 of them by hand
+  would risk mapping some to the wrong place. `CHANGELOG.md` and `DECISIONS.md` keep their older
+  citations untouched, each with a note saying why: they record what was true when written.
+
 - **Three knobs that were parsed, validated and then read by nothing — audit H4.**
   `--max-output-tokens` and `--max-latency-ms` (with `TOKENDAMPER_MAX_OUTPUT_TOKENS` and
   `TOKENDAMPER_MAX_LATENCY_MS`) reached no consumer anywhere in the pipeline;
@@ -219,6 +255,19 @@ Commits on `main` beyond the `v1.1.0` tag (`807f6f0`). Not yet tagged or release
   constant-time.
 
 ### Changed
+- **The documented guarantee is "bracket/quote integrity", not "syntax validity" — audit M1.**
+  The TypeScript validator builds no AST; it is a lexer detecting unbalanced brackets and
+  unterminated strings. Probed against the shipped code, it passes `const x = ;`,
+  `import from "x";`, `let 123abc = 5;`, `const a = 1 +++++ 2;` and plain English prose, failing
+  only on `super(; }`. `README.md` gains a per-language table of what each validator does and does
+  not catch; `CLAUDE.md` says the same; `test/unit/validator-guarantee.test.ts` pins every row as
+  a characterization test, so strengthening a validator fails the test on purpose and the table
+  has to move with it.
+
+  Wiring the real TypeScript compiler API was **refused on cost, not principle**: `typescript` is
+  a development dependency today, and promoting it to runtime costs install size and parse latency
+  against a lexer that runs in single-digit milliseconds.
+
 - **Gateway test seams are parameters, not environment variables — audit M8.**
   `TOKENDAMPER_MOCK_UPSTREAM=true` made the proxy return the caller's own optimized prompt with a
   200 as though a model had written it, and `NODE_ENV === 'test'` waived the missing-credentials

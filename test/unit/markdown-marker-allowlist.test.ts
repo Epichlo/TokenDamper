@@ -126,7 +126,7 @@ describe('only markdown yields markdown markers', () => {
  *     `text`, harvests zero headings, and lands in the measurement gate's reach.
  *
  * §32 deferred seam 2 on the belief that it meant "require more than one `#` line" — a *count*
- * threshold, which `docs/phase-4b-lever-disposition.md` had already shown points the wrong way,
+ * threshold, which `docs/phase-4b-lever-disposition.md` had already shown points the wrong way, [retired]
  * since `tclConfig.sh` carries 79 markers to `CODE_OF_CONDUCT.md`'s 12. The discriminator that
  * works is *shape*, and its measured cost to prose is zero files.
  *

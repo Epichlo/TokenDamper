@@ -4,6 +4,13 @@ This document records the architectural decisions behind TokenDamper.
 
 It should grow over time. Any future architectural change must update this document before implementation.
 
+> **Citations to retired documents are deliberate and are not broken links.** Audit M11 retired
+> twelve narrative files whose conclusions had already been folded into the entries below. Older
+> entries still cite them by name, because those citations were accurate when the entry was
+> written and this is an append-only record — rewriting them would falsify the history it exists
+> to keep. `docs/retired-documents.md` maps each file to where its conclusion lives now and gives
+> the `git show` command to read the original.
+
 ## 1. Why immutable `ContextBundle`?
 
 ### Decision
@@ -3017,3 +3024,125 @@ CRLF line terminators".
 
 So aggregate reduction figures on this repo are not comparable across a commit boundary, not only
 across a corpus-size change. Only the per-row A/B over one frozen corpus is.
+
+---
+
+## 46. Three Decisions: Say What Cannot Be Done, Say What Is Actually Checked, Stop Maintaining Two Copies
+
+Audit H2, M1 and M11. The audit filed these as *decisions rather than tasks* — each had a
+legitimate "narrow the product" answer and a legitimate "build more" answer, and the choice was
+not the auditor's to make. Recorded here with the option taken and the option refused.
+
+### H2 — decided: report why, do not narrow the accepted set
+
+Twelve of nineteen recognised extensions cannot produce a non-zero reduction under any flag
+combination. Two gates, both single-language-family and neither threshold-controlled:
+`selectElisionRegions` returns `[]` outside TypeScript/JavaScript and Python, and a whole-item
+elision has to survive a measurement gate that a Go `func` or a C function gives it nothing to
+work with.
+
+**Refused: narrowing the accepted set.** Rejecting `--language go` would be the stronger honesty
+signal, and it would also delete a working behaviour — pass-through is byte-identical and
+harmless. Taking away something that works, to avoid saying something true, is the wrong trade.
+
+**Taken: say it.** `trace.languageSupport` carries `supported`, `unsupported`,
+`unsupportedLanguages`, `noneSupported` and a `reason`; `validate()` raises an **info** issue,
+`LANGUAGE_NOT_ELIDIBLE`, which does not vote on the verdict. This is the same correction M5a made
+for budgets, one layer down: `reductionRatio: 0` cannot distinguish *"nothing was compressible"*
+from *"nothing could have been"*, and only one of those is about the user's file.
+
+Three things this cost, all worth recording:
+
+**The predicate had to be derived from the gate, not guessed.** The first version asked *"does
+the item yield symbols or content markers?"* — reasonable, and wrong. A trivial Go file yields
+exactly one symbol: `import:fmt`, an incidental match by the TypeScript import regex. It
+witnesses nothing about the function bodies, and Go still cannot reduce, but the predicate called
+it supported. The answer is exactly `supportsRegionElision`, because every other elision route
+terminates in a refusal: a symbol-bearing item cannot be elided whole (§43), and a symbol-free
+item's whole-item elision destroys every content marker and fails the same gate one step along.
+Measured, that predicts **3 of 17** probed languages — TypeScript, JavaScript, Python — which is
+the audit's headline and the corpus baseline agreeing independently.
+
+**The field had to be threaded through four separate whitelists**, each of which enumerates its
+keys: `validate()`'s return, `createValidationReport`, `buildTrace` and `createOptimizationTrace`.
+Three of them dropped it silently, and the symptom every time was `trace.languageSupport:
+undefined` with everything else correct. `test/unit/language-support.test.ts` asserts on the
+**trace**, not on `validate()`, for exactly that reason.
+
+**A friendly notice line was written, and then removed.** The CLI prints the trace to stderr as a
+JSON document, and consumers parse the whole stream — this repository's own integration tests
+among them. Prepending prose broke four of them. The explanation now lives *inside* the report as
+a `reason` field, which is both machine-readable and readable, and stderr stays parseable. A
+channel with a contract is not improved by making it friendlier.
+
+### M1 — decided: correct the documentation, do not wire the compiler API
+
+The TypeScript "AST-lite validator" builds no AST. It is a lexer — a good one, tracking strings,
+template interpolation, comments and regex literals — that detects unbalanced brackets and
+unterminated strings, and nothing else.
+
+Probed against the shipped code rather than taken from the audit, since three audit claims in
+this project have failed that test (§40, §42, §45). All of it reproduced exactly:
+
+| Input | Verdict |
+|---|---|
+| `const x = ;` | **PASS** |
+| `function f(a: , b) { return 1; }` | **PASS** |
+| `import from "x";` | **PASS** |
+| `let 123abc = 5;` | **PASS** |
+| `const a = 1 +++++ 2;` | **PASS** |
+| `ceci nest pas du code` | **PASS** |
+| `super(; }` | FAIL |
+
+Python is meaningfully stronger — missing colons, malformed `def`, bad dedent, stray leading
+indentation — and still passes English prose. JSON is a real parser and is correct.
+
+**Refused: wiring `ts.createSourceFile`.** It would make the guarantee real, and `typescript` is
+already a development dependency. It is refused on cost: promoting it to a *runtime* dependency
+costs install size, and parsing costs latency against a lexer that runs in single-digit
+milliseconds. That is a trade someone may want to revisit; it is not an oversight.
+
+**Taken: say what is true.** `README.md` gains a per-language table and the sentence that the
+guarantee on TypeScript — the family where compression actually runs — is **bracket and quote
+integrity**, not syntax validity. `CLAUDE.md` says the same. `test/unit/validator-guarantee.test.ts`
+pins every row as a characterization test, so the documented guarantee is executable: strengthen
+a validator and the test fails on purpose, and the README table has to move with it.
+
+Two consequences stated in the README rather than left implicit: a passing check is not a promise
+the output compiles, only that it is no more unbalanced than the input; and real inputs are
+frequently already invalid, which is why the sub-item check is *relative*.
+
+### M11 — decided: retire the narratives and the root planning artifacts
+
+Twelve files, **226 KB**, markdown from 31 files to 19. `docs/retired-documents.md` maps each to
+where its conclusion lives and gives the `git show` command to read the original.
+
+**The premise was stale, and measuring it first changed what the decision was about.** M11 was
+filed as a **4.1 : 1** documentation-to-code ratio. Measured immediately before acting, it was
+**1.40 : 1** — and the improvement was not real: markdown had *grown* to 726 KB, while `src/` grew
+faster. Worse, **32.8% of `src/` is comment prose** (165 KB of 518 KB), so counting honestly,
+prose ran about **2.6 : 1** against code. The volume had not gone anywhere; some of it had moved
+into the source files.
+
+That reframes the finding usefully. The problem M11 names is not bytes, it is **two copies of an
+argument that have to be kept in sync by hand**. In-source commentary is not that — it sits next
+to the code it describes and moves with it. Retired: the standalone narratives. Kept: every line
+of the in-source commentary.
+
+**Twenty-five source and test comments cite a retired document**, which is the check the option
+called for and the thing that nearly made this a bad change. They are marked `[retired]` rather
+than re-pointed: the citation names a document and section that existed and that git still holds,
+whereas re-pointing 25 citations at DECISIONS sections by hand would risk mapping some of them to
+the wrong place — trading a volume problem for a correctness one.
+
+`CHANGELOG.md` and `DECISIONS.md` keep their older citations untouched, and each now carries a
+note saying why. They are append-only records of what was true when written; editing them to
+match today would falsify the history they exist to preserve. This entry is subject to the same
+rule.
+
+### What was not done
+
+`cli/bench-table-renderer.ts:97` still prints a `risk` column sourced from `riskTolerance`, which
+H4 established no stage reads. It is now the only reader of that field, and a benchmark column
+implies the row's numbers depend on it. Small, real, and left alone here because changing what a
+benchmark table reports is a measurement change, not a documentation one.
