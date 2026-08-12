@@ -11,6 +11,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [v1.4.0] - 2026-08-12
+
+**The target adheres.** v1.3.0 made `--target-reduction-ratio` bind and recorded that adherence
+was partial for a structural reason: elision's smallest unit was a whole function body, and files
+typically have one dominant region. This divides the region into its statements, which takes the
+population of files overshooting past 50% from **34 rows to 18** with **zero regressions** —
+no new fallbacks, no file that stopped reducing.
+
+**Numbered 1.4.0, and the roadmap's reservation on that number was released** rather than moved,
+per the rule adopted in §49: a release whose preconditions are measured false holds no version
+number. "AST Code Folding & Cache Alignment" is now unnumbered — its Fast-mode half is already
+shipped in `elision/regions.ts`, and its cache-alignment half needs a caller-supplied
+`cl100k_base` encoder before 1,024-token quantization means anything. This is the third time a
+reservation has collided with real work; releasing the number is what stops it recurring.
+
+A minor rather than a patch, for the same reason as v1.3.0: nothing is removed, but the same
+command over the same input emits different bytes on 54 of 576 corpus rows.
+
 ### Changed
 - **Elision divides a region into its statements when a ceiling is set (DECISIONS §50).** The
   smallest thing the stage could remove was a whole function body, which is what made

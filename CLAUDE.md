@@ -198,9 +198,18 @@ and takes precedence over budget-derived knapsack selection.
 carries the reasoning; `docs/audit-remediation-status.md` is the index and is the doc kept current.
 
 **v1.3.0 shipped 2026-08-12** — §48 (`--target-reduction-ratio` binds, which moves every reduction
-number in the docs) and §49. Current measured baseline: python file **20.26%**, typescript file
-**17.57%** (288 files, both routes, `5c7919b`) — status doc §2, re-measured 2026-08-12, not the
-Wave 2 figures a prior session may quote.
+number in the docs) and §49.
+
+**v1.4.0 shipped 2026-08-12** — §50, sub-region elision. A region is no longer the smallest thing
+elision can remove: `splitRegionIntoStatements` divides it at depth-0 boundaries when a ceiling is
+set, so the target adheres. Per-row over 576 corpus rows, rows above 50% achieved went **34 → 18**
+with **zero** new fallbacks and **zero** files that stopped reducing; 522 rows are byte-identical
+because subdivision is confined to the ceiling path. Current measured baseline: python file
+**17.95%**, typescript file **18.52%** — status doc §2, not the figures a prior session may quote.
+
+**Do not read a falling aggregate here as a regression.** It has now happened four times for four
+different non-regression reasons (§45 line endings, §46 corpus growth, §48 the target binding, §50
+this). Compare per-row over one frozen corpus.
 
 **There is no `npm run format`, and do not add one back without reading DECISIONS §49.** It was
 `prettier --check .`, it had never passed, and nothing invoked it — CI and `prepublishOnly` both
