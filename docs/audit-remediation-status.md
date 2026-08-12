@@ -344,7 +344,17 @@ Ordered by measured value ÷ risk. Preconditions verified as holding — as dist
    language needs a validator *and* `extractSymbols` coverage as well as a region scanner; add
    the scanner alone and §33's measurement gate refuses the item, converting a 0% into a
    fallback.
-4. **Per-item drift.** Finishes Phase 1c. `SEMANTIC_DRIFT_EXCEEDED` names no items
-   (`validation/index.ts:186-187` — `S_k` is a whole-bundle set comparison), so a bundle failing
-   on drift alone still reverts whole, while AST and constraint failures now repair per item.
-5. **M7**, per §6 — small, and the only thing between the audit and an empty list.
+4. ~~**Per-item drift.**~~ **Closed without implementing — DECISIONS §51.** The precondition was
+   measured and fails: `SEMANTIC_DRIFT_EXCEEDED` — the only drift failure that is not already
+   attributable — accounts for **0 of 117** corpus fallbacks, and multi-item bundles measure
+   `S_k` at **0.0024–0.0056** against a 0.40 threshold at every ratio from 0.3 to 0.9.
+
+   **This entry was not wrong when written; §48 and §50 closed it and nobody re-measured.** The
+   `0.4122` in §47 that motivated it came from an engine that elided everything it could. A
+   token ceiling and a statement-sized unit cut symbol loss two orders of magnitude below the
+   gate. **An open item is a claim about the current build, and it expires like any other.**
+5. **Make the constraint gate finer.** Where the fallbacks actually are: **29 of 29** code-bucket
+   fallbacks are `CONSTRAINT_DIRECTIVE_LOST`, and §50 measured the same gate as the reason the
+   better sub-region setting costs two working files. This is the per-item axis with something
+   on it — the one §51 was looking for on the wrong metric.
+6. **M7**, per §6 — small, and the only thing between the audit and an empty list.
