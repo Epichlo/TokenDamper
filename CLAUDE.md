@@ -194,9 +194,21 @@ and takes precedence over budget-derived knapsack selection.
 ## Where the project actually is (read this first)
 
 **v1.2.0 shipped 2026-08-11** — tagged, GitHub release, and published to npm as `tokendamper@1.2.0`
-(`latest`). **Every finding in `max_audit.md` is closed**, plus Phase 1c and the three decisions
-the audit deferred. `DECISIONS.md` §36–§48 carries the reasoning; `docs/audit-remediation-status.md`
-is the index and is the doc kept current.
+(`latest`), carrying Phase 1c and the three decisions the audit deferred. `DECISIONS.md` §36–§48
+carries the reasoning; `docs/audit-remediation-status.md` is the index and is the doc kept current.
+
+**§48 is merged to `main` and unreleased** — `--target-reduction-ratio` binds now, which moves
+every reduction number in the docs. `CHANGELOG.md` holds it under `[Unreleased]`;
+`src/version.ts` still reads `1.2.0`. Current measured baseline: python file **20.26%**,
+typescript file **17.57%** (288 files, both routes, `5c7919b`) — status doc §2, re-measured
+2026-08-12, not the Wave 2 figures a prior session may quote.
+
+**One audit finding is still open: M7.** This file and the status doc both claimed every finding
+was closed; M7 was gated in the roadmap behind *"only if question B keeps the Gateway"*, B was
+answered in §41, and nothing carried it across the answer. Gateway savings are still computed
+from `summary.tokenEstimate` — the bundle render — rather than the bytes on the wire, and nothing
+asserts the rewritten body is no larger than the original. Status doc §6 has the scope, including
+why the re-serialization half is not a metrics fix.
 
 The roadmap's feature gate is open. **But two of the next release's headline deliverables failed
 their preconditions when measured, and that is recorded rather than discovered again:**
@@ -235,9 +247,11 @@ finish what Phase 1c started; sub-region elision, which is what would make
 > reports `budgetApplied` when it does not), MCP session rehydration matches a marker the product
 > actually emits, the Gateway no longer reads test seams from `process.env` or returns the
 > caller's credentials as response headers, `bench` runs when installed, and three knobs that did
-> nothing are gone from the surface. **C4 is closed too (§45), so every task-shaped audit item is
-> done** — what remains is three decisions (H2, M1, M11) and the architectural work in the status
-> doc's §5, chiefly Phase 1c.
+> nothing are gone from the surface. **C4 is closed too (§45).** The three decisions (H2, M1, M11)
+> are taken (§46) and Phase 1c is done (§47). ~~Every task-shaped audit item is done~~ — **M7 is
+> not**, and was never in a wave; see the note above and status doc §6. That sentence is left
+> struck through rather than deleted, because "every item is done" is precisely the kind of claim
+> this project keeps having to correct by measuring.
 >
 > §45 is worth reading even if you never touch the Gateway: C4 was recorded as "masked by the
 > drift gate — that is luck", and measurement found it **live** on within-payload duplication,

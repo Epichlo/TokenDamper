@@ -29,6 +29,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   reducing files landed in 25–35% and 23 still exceeded 50%. Sub-region elision is what would
   close that; it is not attempted here.
 
+### Documentation
+- **Audit finding M7 is reinstated as open, having been silently dropped.** No behaviour changed;
+  what changed is that the documents stop saying every audit item is closed.
+  `docs/audit-remediation-status.md` §6 records the finding, its three consequences re-verified
+  against source at `5c7919b`, and why the re-serialization half is not a metrics fix. M7 was
+  gated in `ROADMAP.md` behind *"only if question B keeps the Gateway"*; question B was answered
+  in DECISIONS §41 and nothing carried M7 across the answer, so it entered no wave table and
+  read as done. **An item that is in no table reads exactly like a check that never ran.**
+
+- **The measured baseline was re-taken rather than annotated** (status doc §2): 288 files / 576
+  rows at `5c7919b`, clean tree, both routes, target 0.3 — python file **20.26%**, python stdin
+  **19.78%**, typescript file **17.57%**, everything else 0.00%. The previous table was pre-§48
+  *and* over a different corpus (297 files: typescript 60 → 62, prose 29 → 18 after M11), so it
+  was stale twice over while being labelled "the numbers to compare against".
+
+- **Stale gates cleared across `ROADMAP.md`.** Its Version Summary table was a full renumbering
+  behind the chain at the top of the same document, still listing v1.1.1–v1.1.3 as "Next —
+  blocking" after all three shipped inside v1.2.0. v1.5.0 was marked blocked on M5b, which
+  shipped in Wave 2; Milestone 8 blocked on question A, answered by §43; Milestone 9 pending C1
+  and H6, both shipped; v1.4.0's `cache_control` blocked on H5, whose actual remaining
+  precondition is tokenizer exactness. Each is now marked with what replaced it, not deleted.
+
+- **`README.md`'s Phase 1c table is labelled as pre-§48.** Its 22.73% / 19.47% were measured at
+  target 0.3 before that ratio bound; the same corpora now read 20.26% / 17.57% with fewer
+  fallbacks.
+
 ## [v1.2.0] - 2026-08-11
 
 **The audit remediation release.** 78 commits beyond `v1.1.0`, closing every finding in

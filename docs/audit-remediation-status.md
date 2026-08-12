@@ -3,7 +3,9 @@
 Working state for the `max_audit.md` remediation. **Read this before picking up audit work**;
 it records what is done, what is measured, and what the next batch actually requires.
 
-Last updated 2026-08-11, after Phase 1c. Suite: **606 passing**, typecheck and lint clean.
+Last updated 2026-08-12, after DECISIONS §48 (`--target-reduction-ratio` made real). Suite:
+**614 passing**, typecheck and lint clean. §48 is merged to `main` and **not yet released** —
+`CHANGELOG.md` carries it under `[Unreleased]` and `src/version.ts` still reads `1.2.0`.
 
 ---
 
@@ -16,9 +18,17 @@ Last updated 2026-08-11, after Phase 1c. Suite: **606 passing**, typecheck and l
 | **2** | M5a, M5b, H4, M8, M9, M10 + M5 minor | ✅ **done — DECISIONS §44** |
 | **3** | C3/H1 ✅, H6 ✅, H5 ✅, C4 ✅ | ✅ **done — C4 in DECISIONS §45** |
 | Decisions | H2, M1, M11 | ✅ **decided and done — DECISIONS §46** |
+| **Unscheduled** | **M7** | ⬜ **open — never entered a wave. See §6.** |
 
-**Every audit item is now closed, and so is Phase 1c** (DECISIONS §47), which was the binding
-constraint on multi-file value. §5 records what is left on the architectural axis.
+**Phase 1c is closed** (DECISIONS §47), which was the binding constraint on multi-file value,
+and §48 closed H4's deferred half. §5 records what is left on the architectural axis.
+
+**This document claimed "every audit item is now closed" and that was wrong: M7 was never
+scheduled.** It appears in no wave table above, and the last document to mention it is
+`DECISIONS` §41 — "M7 … remains open", written before Wave 2. Re-verified against source
+2026-08-12: still open, in full. §6 records it. The failure mode is worth naming, because it is
+this project's own §4 rule turned on its documentation: **an item that is in no table reads as
+done, exactly like a check that never ran reads as a pass.**
 
 The three decisions were taken as: **H2 — report why** (keep accepting every language, but say
 when elision cannot reduce it, rather than narrowing the accepted set); **M1 — correct the
@@ -34,21 +44,36 @@ narratives and the root planning artifacts**. Each is argued in §46.
 
 ## 2. Measured baseline
 
-Recorded 2026-08-10 after Wave 2, via `tools/corpus-harness`, 297 files / 594 rows, both routes.
+Recorded **2026-08-12** at commit `5c7919b` (clean tree, `dist` `0b9fc23ecc17`, 138 js), via
+`tools/corpus-harness`, **288 files / 576 rows**, both routes, target ratio 0.3.
 **These are the numbers to compare against; do not re-derive them from memory.**
 
 | bucket | route | n | reduced | fallback | saved |
 |---|---|---|---|---|---|
-| python | file | 45 | 30 | 14 | **23.14%** |
-| python | stdin | 45 | 28 | 13 | **22.66%** |
-| typescript | file | 60 | 33 | 20 | **23.26%** |
-| typescript | stdin | 60 | 0 | 0 | 0.00% |
-| prose | file/stdin | 29 | 0 | 8 | 0.00% |
+| python | file | 45 | 31 | 13 | **20.26%** |
+| python | stdin | 45 | 29 | 12 | **19.78%** |
+| typescript | file | 62 | 35 | 20 | **17.57%** |
+| typescript | stdin | 62 | 0 | 0 | 0.00% |
+| prose | file/stdin | 18 | 0 | 6 | 0.00% |
 | shell, perl, tcl, c, rust, css | both | — | 0 | — | 0.00% |
 
-**No number here is comparable across waves, and the TypeScript row is the live example.** It
-reads 23.26% over 60 files where the `dd540fe` table read 25.35% over 59, and 29.55% in
-`DECISIONS` §43 over fewer still. Same engine every time; the corpus grew.
+**The aggregates fell against the Wave 2 table and nothing regressed.** That table read python
+file **23.14%** and typescript file **23.26%**; §48 made `--target-reduction-ratio` bind, so runs
+that used to overshoot to 44–69% now stop near the requested 30%. In the same measurement
+**fallbacks fell** (python file 14 → 13, stdin 13 → 12) and **reduced counts rose** (python file
+30 → 31, typescript file 33 → 35), because less aggressive elision survives validation more
+often. Compare per-file adherence, not the mean — DECISIONS §48.
+
+**Two denominators also moved, so the two tables are not the same measurement anyway.**
+TypeScript went 60 → 62 files (`src/core/budget/index.ts` from §48, and
+`src/core/validation/language-support.ts` from H2) and prose went 29 → 18, because M11 retired
+twelve narrative documents. 297 files / 594 rows became 288 / 576.
+
+**No number here is comparable across waves, and the TypeScript row is the standing example.** It
+read 23.26% over 60 files where the `dd540fe` table read 25.35% over 59, and 29.55% in
+`DECISIONS` §43 over fewer still — same engine every time; the corpus grew. It now reads 17.57%
+over 62 for a different reason again. **Only a per-row A/B over one frozen corpus means
+anything**, which is what the harness is for.
 
 Wave 2 is the case where this was actually pinned down rather than assumed. A per-row A/B —
 both engines against the **same frozen corpus**, varying only `dist/` — found **594 of 594 rows
@@ -258,3 +283,60 @@ Learned the hard way during Waves 0–3.
   mapping some of them to the wrong place. `CHANGELOG.md` and `DECISIONS.md` keep their older
   citations untouched for the same reason — they are append-only records of what was true when
   written, and each now carries a note saying so.
+
+---
+
+## 6. M7 — the one audit item still open
+
+**Gateway savings are measured against an abstraction, not against the bytes sent.**
+`max_audit.md` §M7. Re-verified against source **2026-08-12** — open in full, nothing partial.
+
+| M7's three consequences | state at `5c7919b` |
+|---|---|
+| metrics measure the bundle render, not the wire | **open.** `proxy.ts:468-469` reads `initialBundle.summary.tokenEstimate` / `result.finalBundle.summary.tokenEstimate` |
+| re-serialization mutates the client's request | **open.** `proxy.ts:698` and `:838` rebuild the body with `JSON.stringify({...parsedPayload, …})` whenever an item changed |
+| nothing asserts `finalBody.length <= rawBody.length` | **open.** No such comparison exists in `src/gateway/` |
+
+**Why it was dropped, and why that matters more than the item.** M7 was gated in `ROADMAP.md`
+behind *"Only if B keeps the Gateway"*. Question B was answered — §41 kept the Gateway and
+labelled it experimental — but nothing carried M7 forward across the answer, and it entered no
+wave table. A conditional that has since been resolved reads exactly like a closed item.
+
+**One consequence is partly bounded by work done since.** C4 (§45) fixed the *mapping* half:
+the Anthropic `system` item is now mapped back, so the specific case where `tokensSaved` counted
+a saving that never reached the wire is closed. What remains is that the number is computed
+over the wrong artefact in the first place, which is the finding itself.
+
+**Scope caution before scheduling it.** Re-serialization is not a metrics bug and should not be
+fixed as one — it mutates a *client's* request (pretty-printing, numeric literal normalization,
+>2⁵³ integer precision, duplicate keys), which is the same mechanism the project already
+identified as the phantom −1.39% in the Python harness, reproduced in production code. Measuring
+`finalBody` against `rawBody` is small; not rewriting the payload when nothing was elided is the
+part with user-visible consequences.
+
+---
+
+## 7. What is next
+
+Ordered by measured value ÷ risk. Preconditions verified as holding — as distinct from
+`ROADMAP.md`'s v1.3.0 headline features, whose preconditions were measured and **do not** hold
+(no query source for BM25; 0 of 1,486 real pairs above MMR's threshold).
+
+1. **Release §48.** It is merged, unreleased, and changes every reduction number the docs quote.
+   The version number is a decision: `ROADMAP.md` already names v1.3.0 as "Context Selection
+   Quality", the release measured as unbuildable, so shipping §48 as v1.3.0 collides with it.
+2. **Sub-region elision.** Completes §48 rather than adding a surface: the flag now binds but
+   adheres partially — at target 30%, 21 of 66 reducing files land in 25–35% and **23 exceed
+   50%**, because elision's smallest unit is one region and files have one dominant region
+   (58%, 61%, 83% measured). Narrowest blast radius; `test/unit/target-reduction-ratio.test.ts`
+   already pins the limit and is where the tightening would be asserted.
+3. **Widen elision beyond TypeScript/JavaScript/Python.** Largest raw gain — every other bucket
+   in §2 is 0.00%. **It is not one gate, despite `supportsRegionElision` being one function.**
+   `regionElisionLanguage` derives its answer from `selectValidator().language`, so a new
+   language needs a validator *and* `extractSymbols` coverage as well as a region scanner; add
+   the scanner alone and §33's measurement gate refuses the item, converting a 0% into a
+   fallback.
+4. **Per-item drift.** Finishes Phase 1c. `SEMANTIC_DRIFT_EXCEEDED` names no items
+   (`validation/index.ts:186-187` — `S_k` is a whole-bundle set comparison), so a bundle failing
+   on drift alone still reverts whole, while AST and constraint failures now repair per item.
+5. **M7**, per §6 — small, and the only thing between the audit and an empty list.
