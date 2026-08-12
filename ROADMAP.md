@@ -1,13 +1,15 @@
 # TokenDamper Product Roadmap — v1.1.0 → v2.0.0
 
-**Baseline:** **v1.3.0** (shipped 2026-08-12 — `--target-reduction-ratio` binds, DECISIONS §48),
+**Baseline:** **v1.4.0** (shipped 2026-08-12 — sub-region elision, DECISIONS §50), on top of
+**v1.3.0** (`--target-reduction-ratio` binds, DECISIONS §48),
 on top of **v1.2.0**, which closed the whole audit remediation track in one release rather than
 the three this document planned. All items below were checked against actual source, not assumed
 from a prior draft; file/function names cited are real, and known-already-shipped items have been
 excluded (see Appendix).
 
-> **Version numbers here are reservations, and two of them have now been wrong.** v1.2.0 took the
-> number this document had reserved for "Context Selection Quality"; v1.3.0 then took it again.
+> **Version numbers here are reservations, and three of them have now been wrong.** v1.2.0 took
+> the number reserved for "Context Selection Quality"; v1.3.0 took it again; v1.4.0 took the one
+> reserved for "AST Code Folding & Cache Alignment".
 > The rule adopted in DECISIONS §49: **a release whose preconditions are measured false holds no
 > number** — it is described, gated, and numbered when it becomes buildable.
 
@@ -65,8 +67,8 @@ v1.1.0 (tag @ 807f6f0) — never published to npm
        │      Decision Gate answers (H2, M1, M11) + Phase 1c, in one release
        │
        ├── v1.3.0  SHIPPED 2026-08-12 — `--target-reduction-ratio` binds (§48)
+       ├── v1.4.0  SHIPPED 2026-08-12 — sub-region elision; the target adheres (§50)
        │
-       ├── v1.4.0: AST Code Folding ("Fast" vs "Deep") & Cache Alignment
        ├── v1.5.0: Granular Sub-Query Re-hydration & MCP Tool Extension
        └── v2.0.0: Enterprise Gateway, Remote MCP & Guardrails  [B answered: experimental]
 
@@ -74,6 +76,11 @@ v1.1.0 (tag @ 807f6f0) — never published to npm
        ⛔ Holds no version number. BM25 has no query source; MMR found 0 of
           1,486 pairs above its 0.90 threshold. It gets a number when its
           preconditions hold, not before.
+
+  unnumbered — AST Code Folding ("Fast" vs "Deep") & Cache Alignment
+       ⛔ Holds no version number. Fast mode is substantially already shipped
+          in `elision/regions.ts`; cache alignment needs a caller-supplied
+          `cl100k_base` encoder before 1,024-token quantization means anything.
 ```
 
 ---
@@ -307,7 +314,22 @@ $$\text{Score}(i \mid S) = \frac{V_i - \max_{j \in S}(M_{ij} \cdot V_j)}{w_i}$$
 
 ---
 
-## v1.4.0 — AST Code Folding ("Fast" vs "Deep") & Cache Alignment
+## v1.4.0 — Sub-Region Elision — **SHIPPED 2026-08-12**
+
+Elision's smallest unit was a whole function body, which is why v1.3.0's target adhered only
+partially. `splitRegionIntoStatements` divides a region at depth-0 boundaries, so every candidate
+is bracket- and quote-balanced. Measured per-row over one frozen corpus at target 0.3: rows above
+50% achieved **34 → 18**, rows reducing **95 → 99**, **zero** new fallbacks and **zero** files
+that stopped reducing. 522 of 576 rows byte-identical — subdivision is confined to the ceiling
+path. DECISIONS §50.
+
+Still open on this axis: 18 rows exceed 50% because a single *statement* is dominant (an
+83%-of-file span in `python-validator.ts`). Dividing that needs elision inside a control-flow
+block, which is a different question from dividing a body.
+
+---
+
+## Unnumbered — AST Code Folding ("Fast" vs "Deep") & Cache Alignment
 
 > **⚠ Re-scoped by audit. Fast mode is substantially already shipped.** This release was written
 > as though body folding did not exist. It does: `selectElisionRegions` (`elision/regions.ts:382-384`)
@@ -464,9 +486,10 @@ remediation track was inserted. Corrected below; the numbering now matches the c
 | ~~v1.1.3~~ | Honest instruments | H3 bench baseline, M5a MCP budget, M5b rehydrate marker, M6 trace | Suite can fail; trace carries real metrics | ✅ **in v1.2.0** |
 | ~~Gate~~ | Scope decisions | A: H5 · B: C3/H1 · C: H4 · D: H2 | Decisions recorded in `DECISIONS.md` | ✅ **all four answered, §41–§46** |
 | v1.2.0 | Audit remediation | The whole remediation track + Phase 1c | 614 tests green | Shipped 2026-08-11, npm `latest` |
-| **v1.3.0** | **Baseline (shipped)** | §48 — `--target-reduction-ratio` is a real ceiling | 21 of 66 files on target at 0.3 | **Shipped 2026-08-12** |
+| v1.3.0 | Prior release | §48 — `--target-reduction-ratio` is a real ceiling | 21 of 66 files on target at 0.3 | Shipped 2026-08-12 |
+| **v1.4.0** | **Baseline (shipped)** | §50 — sub-region elision; the target adheres | rows >50%: 34 → 18, zero regressions | **Shipped 2026-08-12** |
 | *unnumbered* | Selection quality | BM25 + graph hybrid scorer, dual-path MMR | `<10ms` pipeline selection | ⛔ **Both preconditions measured false** — holds no number |
-| v1.4.0 | Folding & cache | Fast (zero-dep) vs Deep (AST) mode, `cache_control` | `<1ms` Fast / `~15ms` Deep | ⚠ Re-scope; Fast largely shipped. Cache needs an exact tokenizer |
+| *unnumbered* | Folding & cache | Fast (zero-dep) vs Deep (AST) mode, `cache_control` | `<1ms` Fast / `~15ms` Deep | ⛔ Fast largely shipped; cache needs an exact tokenizer — **holds no number** |
 | v1.5.0 | Retrieval | `rehydrate_context` with sub-query matching | Targeted line extraction | ✅ Unblocked (M5b shipped); response shape still to design |
 | v2.0.0 | Ecosystem | Streamable HTTP/SSE MCP, LiteLLM plugin, Prometheus metrics | High-throughput multi-agent proxy | ⚠ B answered *experimental*; **M7 before exporting metrics** |
 | Milestone 8 | Caching | MCP Schema Deduplication & Cache-Aligned Knapsack | 100% Provider Cache Hit Rates | ⚠ A answered — knapsack reachable; needs an exact tokenizer |

@@ -3,9 +3,9 @@
 Working state for the `max_audit.md` remediation. **Read this before picking up audit work**;
 it records what is done, what is measured, and what the next batch actually requires.
 
-Last updated 2026-08-12, after **v1.3.0** — §48 (`--target-reduction-ratio` binds) and §49 (the
-numbering rule, and the retirement of `npm run format`). Suite: **614 passing**, typecheck and
-lint clean. `npm run format` no longer exists; `lint` is the enforced style gate.
+Last updated 2026-08-12, after **v1.4.0** — §50 (sub-region elision; the target adheres), on top
+of v1.3.0’s §48 and §49. Suite: **628 passing**, typecheck and lint clean. `npm run format` no
+longer exists; `lint` is the enforced style gate.
 
 ---
 
@@ -44,20 +44,25 @@ narratives and the root planning artifacts**. Each is argued in §46.
 
 ## 2. Measured baseline
 
-Recorded **2026-08-12** at commit `5c7919b` (clean tree, `dist` `0b9fc23ecc17`, 138 js), via
-`tools/corpus-harness`, **288 files / 576 rows**, both routes, target ratio 0.3.
+Recorded **2026-08-12** after §50, over a corpus frozen at `23c6368` (clean tree),
+via `tools/corpus-harness`, **288 files / 576 rows**, both routes, target ratio 0.3.
 **These are the numbers to compare against; do not re-derive them from memory.**
 
 | bucket | route | n | reduced | fallback | saved |
 |---|---|---|---|---|---|
-| python | file | 45 | 31 | 13 | **20.26%** |
-| python | stdin | 45 | 29 | 12 | **19.78%** |
-| typescript | file | 62 | 35 | 20 | **17.57%** |
+| python | file | 45 | 31 | 13 | **17.95%** |
+| python | stdin | 45 | 29 | 12 | **17.54%** |
+| typescript | file | 62 | 39 | 16 | **18.52%** |
 | typescript | stdin | 62 | 0 | 0 | 0.00% |
 | prose | file/stdin | 18 | 0 | 6 | 0.00% |
 | shell, perl, tcl, c, rust, css | both | — | 0 | — | 0.00% |
 
-**The aggregates fell against the Wave 2 table and nothing regressed.** That table read python
+**§50 moved these again, and the per-row A/B is what says nothing regressed:** against the same
+frozen corpus the TypeScript file bucket went 35 reduced / 20 fallbacks to **39 / 16**, rows above
+50% achieved went **34 → 18**, and **no** row gained a fallback or stopped reducing. The aggregate
+saved% is not the measure — 522 of 576 rows are byte-identical.
+
+**The aggregates also fell against the Wave 2 table and nothing regressed there either.** That table read python
 file **23.14%** and typescript file **23.26%**; §48 made `--target-reduction-ratio` bind, so runs
 that used to overshoot to 44–69% now stop near the requested 30%. In the same measurement
 **fallbacks fell** (python file 14 → 13, stdin 13 → 12) and **reduced counts rose** (python file
@@ -325,7 +330,10 @@ Ordered by measured value ÷ risk. Preconditions verified as holding — as dist
 1. ~~**Release §48.**~~ **Done — v1.3.0, 2026-08-12.** The version collision it named was settled
    by releasing the reservation rather than renumbering the chain a second time: a release whose
    preconditions are measured false now holds no number (DECISIONS §49).
-2. **Sub-region elision.** Completes §48 rather than adding a surface: the flag now binds but
+2. ~~**Sub-region elision.**~~ **Done — v1.4.0, DECISIONS §50.** Rows above 50% achieved went
+   **34 → 18** over 576 corpus rows with zero regressions; 18 remain because a single *statement*
+   is dominant, which needs elision inside a control-flow block. The original entry read: the
+   flag now binds but
    adheres partially — at target 30%, 21 of 66 reducing files land in 25–35% and **23 exceed
    50%**, because elision's smallest unit is one region and files have one dominant region
    (58%, 61%, 83% measured). Narrowest blast radius; `test/unit/target-reduction-ratio.test.ts`
