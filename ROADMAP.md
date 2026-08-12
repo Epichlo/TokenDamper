@@ -1,9 +1,15 @@
 # TokenDamper Product Roadmap — v1.1.0 → v2.0.0
 
-**Baseline:** **v1.2.0** (shipped — tag `v1.2.0`, see `CHANGELOG.md`), which closed the whole
-audit remediation track in one release rather than the three this document planned. All items
-below were checked against actual source, not assumed from a prior draft; file/function names
-cited are real, and known-already-shipped items have been excluded (see Appendix).
+**Baseline:** **v1.3.0** (shipped 2026-08-12 — `--target-reduction-ratio` binds, DECISIONS §48),
+on top of **v1.2.0**, which closed the whole audit remediation track in one release rather than
+the three this document planned. All items below were checked against actual source, not assumed
+from a prior draft; file/function names cited are real, and known-already-shipped items have been
+excluded (see Appendix).
+
+> **Version numbers here are reservations, and two of them have now been wrong.** v1.2.0 took the
+> number this document had reserved for "Context Selection Quality"; v1.3.0 then took it again.
+> The rule adopted in DECISIONS §49: **a release whose preconditions are measured false holds no
+> number** — it is described, gated, and numbered when it becomes buildable.
 
 > **The v1.1.x numbering below is historical.** v1.1.1 "Green Tree & Correct Metadata",
 > v1.1.2 "Data Loss & Corruption" and v1.1.3 "Honest Instruments" were never tagged separately —
@@ -58,12 +64,16 @@ v1.1.0 (tag @ 807f6f0) — never published to npm
        │      the whole v1.1.1/1.1.2/1.1.3 remediation track + the Scope
        │      Decision Gate answers (H2, M1, M11) + Phase 1c, in one release
        │
-       ├── v1.3.0: Context Selection Quality & Redundancy Elimination
-       │           ⛔ BM25 has no query source; MMR found 0 of 1,486 pairs
-       │              above its 0.90 threshold. Re-scope before starting.
+       ├── v1.3.0  SHIPPED 2026-08-12 — `--target-reduction-ratio` binds (§48)
+       │
        ├── v1.4.0: AST Code Folding ("Fast" vs "Deep") & Cache Alignment
        ├── v1.5.0: Granular Sub-Query Re-hydration & MCP Tool Extension
-       └── v2.0.0: Enterprise Gateway, Remote MCP & Guardrails  [gated on C3/H1]
+       └── v2.0.0: Enterprise Gateway, Remote MCP & Guardrails  [B answered: experimental]
+
+  unnumbered — Context Selection Quality & Redundancy Elimination
+       ⛔ Holds no version number. BM25 has no query source; MMR found 0 of
+          1,486 pairs above its 0.90 threshold. It gets a number when its
+          preconditions hold, not before.
 ```
 
 ---
@@ -167,7 +177,11 @@ before scheduling any of it.** Each is a decision with a legitimate "narrow the 
   duplication is drift-exempt and shipped a `tool_result` block as a bare string with
   `fallbackUsed: false`. It was live, on the one path the Gateway saves anything on.
 - **M7** — measure savings against the bytes on the wire rather than the newline-joined render.
-  Still open, and no longer blocked on C4. **Only if B keeps the Gateway.**
+  **Still open — the only audit item that is, and this conditional is why.** It read *"Only if B
+  keeps the Gateway"*; B was answered in §41 (the Gateway is kept, labelled experimental), and
+  nothing carried M7 across the answer, so it entered no wave and
+  `docs/audit-remediation-status.md` went on to claim every item was closed. Re-verified open in
+  full 2026-08-12; scope and the re-serialization caution are in that document's §6.
 - ~~**M1 + M11**~~ — **done.** "Syntax validity" is now "bracket/quote integrity" in the README
   and `CLAUDE.md`, with a per-language table of what each validator does and does not catch,
   pinned by `test/unit/validator-guarantee.test.ts`; the phase narratives are retired to git
@@ -178,9 +192,31 @@ before scheduling any of it.** Each is a decision with a legitimate "narrow the 
 
 ---
 
-## v1.3.0 — Context Selection Quality & Redundancy Elimination
+## v1.3.0 — `--target-reduction-ratio` Binds — **SHIPPED 2026-08-12**
 
-> ### ⛔ Both headline deliverables failed their preconditions when measured (2026-08-11).
+The flag every document and example uses was an on/off switch: the planner read it as `> 0` and
+nothing else read it at all, so `0.01` and `0.99` produced byte-identical output while compression
+ran to exhaustion. `resolveTokenCeiling` now converts the ratio into an absolute token ceiling;
+the pruner gates on it and `compression:token-hashing` stops there. DECISIONS §48, `CHANGELOG.md`.
+
+Adherence is **partial and the limit is structural** — at target 30%, 21 of 66 reducing files land
+in 25–35% and 23 still exceed 50%, because elision's smallest unit is one region. Sub-region
+elision is what closes that and is the next piece of work
+(`docs/audit-remediation-status.md` §7).
+
+---
+
+## Unnumbered — Context Selection Quality & Redundancy Elimination
+
+> ### ⛔ Holds no version number, and that is the point.
+>
+> This section had v1.3.0 reserved while both of its headline deliverables were measured
+> unbuildable, which meant a shipped behavioural change had to route around a release that cannot
+> be built. **The number was released rather than renumbered again** — the same collision had
+> already happened once, when v1.2.0 took the number this document reserved for this same release
+> (DECISIONS §49). It gets a number when its preconditions hold.
+>
+> ### Both headline deliverables failed their preconditions when measured (2026-08-11).
 >
 > The H5 blocker this notice used to carry **is resolved** — `optimize` takes multiple paths and
 > directories, and the knapsack prunes 15 of 31 files on `src/core` at `--max-input-tokens 4000`.
@@ -282,15 +318,21 @@ $$\text{Score}(i \mid S) = \frac{V_i - \max_{j \in S}(M_{ij} \cdot V_j)}{w_i}$$
 > project's genuinely good work (`max_audit.md` §4.4). **Re-derive Fast mode as an increment over
 > `regions.ts`, not as a new subsystem**, and measure what is missing before scheduling it.
 >
-> Two further corrections:
-> - **`cache_control` injection is blocked on question A (H5)**, same as v1.2.0 — it runs "after
->   prefix locking", and prefix locking is unreachable.
-> - **The `R_AST = 1.0` target below is not the guarantee it appears to be.** Per audit §3.2,
->   `R_AST` defaults to 1.0 on an empty symbol set, and `R_struct` is pinned at 1.0 for code
->   because its only marker is `filepath:`, which elision cannot touch. The maximum symbol loss
->   that can pass the gate today is **66.7%** — measured live: `src/core/engine/index.ts` reduced
->   76% at `S_k = 0.3934`, i.e. 65.6% of its symbols destroyed, gate passed. State folding's
->   retention target against a **post-C1** metric, or it certifies nothing.
+> Two further corrections, **both since superseded — read the updates, not the originals:**
+> - ~~**`cache_control` injection is blocked on question A (H5)**~~ — **no longer.** Prefix
+>   locking is reachable since §43; `optimize` takes multiple paths and directories. The
+>   remaining precondition is a different one and it still binds: 1,024-token quantization is
+>   only meaningful with `isExact: true`, which needs a caller-supplied `cl100k_base` encoder.
+>   The default `EnhancedHeuristicTokenizer` has 24% mean absolute error, so boundary placement
+>   under it is approximate by construction.
+> - ~~**The `R_AST = 1.0` target below is not the guarantee it appears to be**~~ — **the
+>   arithmetic it describes was fixed.** `R_struct` is no longer pinned at 1.0 for code: §40
+>   computes it over `extractContentMarkers`, which excludes `filepath:`, and a ratio whose
+>   before-set is empty no longer votes at all — its weight is redistributed. For code
+>   `S_k = 1 - R_AST`, so the maximum symbol loss that can pass fell from **66.7% to 40%**.
+>   `R_AST` still defaults to 1.0 on an empty symbol set, but §28 and §33 turned that case into
+>   a refusal rather than a silent pass. State folding's retention target against the current
+>   metric; the "post-C1" caveat is satisfied.
 
 **Core objective:** dual-mode context compression, and exact provider prompt-cache alignment where the tokenizer allows it.
 
@@ -337,15 +379,18 @@ export function processOrder(order: Order): Promise<Result> {
 
 ## v1.5.0 — Granular Sub-Query Re-hydration & MCP Tool Extension
 
-> **⛔ Blocked on M5b (v1.1.3, item 10).** This release adds a `query` field to
-> `rehydrate_context`. That tool's session path has **never worked**: its regex
-> `/<ELIDED:\s*ref=([A-Za-z0-9_-]+)[^>]*>/` (`tools.ts:210`) cannot match the marker the product
-> actually emits, `[TokenDamper Elided: ref=… bytes=… kind=…]`
-> (`stages/cleanup/session-dedup.ts:103`) — different delimiters, different prefix. Extending a
-> tool whose base path is dead code produces a second dead path. Fix the base first, then design
-> the targeted-match response shape (which is a genuinely different return type from full
-> rehydration, and the note below is right to insist it be designed rather than fall out of adding
-> a field).
+> **✅ Unblocked — M5b shipped in Wave 2 (DECISIONS §44).** This release adds a `query` field to
+> `rehydrate_context`, and that tool's session path had **never worked**: its regex
+> `/<ELIDED:\s*ref=([A-Za-z0-9_-]+)[^>]*>/` could not match the marker the product actually
+> emits. Both sides now derive from `src/core/elision/marker.ts` —
+> `renderSessionElisionMarker` and `SESSION_ELISION_MARKER_PATTERN` — so the emitter and the
+> matcher cannot drift apart again, which is the defect rather than the regex.
+>
+> **What remains is design, not a blocker.** The targeted-match response is a genuinely different
+> return type from full rehydration, and the note below is right that it must be designed rather
+> than fall out of adding a field. Sequence it behind the elision work in
+> `docs/audit-remediation-status.md` §7: partial un-elision is most valuable once elision is
+> finer-grained than one whole region.
 
 **Core objective:** interactive partial context un-elision via MCP.
 
@@ -374,18 +419,26 @@ Update `TOOL_DEFINITIONS` in `src/adapters/mcp/tools.ts` — this matches the to
 
 ## v2.0.0 — Enterprise Gateway, Remote MCP & Proxy Guardrails
 
-> **⛔ Blocked on Scope Decision Gate — question B (C3 / H1).** Two of three deliverables here are
-> Gateway work, and the Gateway currently **cannot be started by its documented command** and
-> **saves nothing when it is**. `tokendamper exec` injects `TOKENDAMPER_GATEWAY_TOKEN` into the
-> child's environment; no code in `src/` reads it, and the server 401s every request that lacks
-> it (*verified*). It also sets `HTTP_PROXY`/`HTTPS_PROXY` while implementing neither absolute-form
-> request URIs nor `CONNECT` tunnelling. Measured cross-turn dedup on live sockets: **0 bytes
-> saved, 100% fallback** across prose, JSON and TypeScript.
+> **⚠ Question B is answered (DECISIONS §41) — and the answer was "experimental", which is not
+> the same as "proceed".** The half that was broken is fixed: `tokendamper exec` reaches its own
+> gateway, and the mode says what it actually does. `TOKENDAMPER_GATEWAY_TOKEN` was written at
+> `exec.ts:58` and read nowhere in `src/`, so the server 401'd every request the documented
+> command produced. Interception is by **base URL**, not `HTTP_PROXY` — it is an origin server
+> and implements neither absolute-form request URIs nor `CONNECT`, and the README now says so
+> rather than leading with the Gateway.
 >
-> A Prometheus `/metrics` endpoint on a 0%-saving pass-through instruments nothing — and per **M7**
-> the numbers it would export (`rawTokens`/`optimizedTokens` from `summary.tokenEstimate`) measure
-> the newline-joined item render, not the bytes actually forwarded. **Fix the measurement (M7)
-> before exporting it.** Answer question B before scheduling any of this release.
+> **The half that is not fixed is the premise, deliberately (invariant 8).** Cross-turn dedup of
+> a sole copy still saves **0 bytes**, because the consumer is a stateless provider API with no
+> rehydration mechanism, so the marker is deletion rather than reference.
+> `test/integration/gateway-dedup-reality.test.ts` pins that: if a cross-turn saving ever
+> appears, either resolvability was implemented or the gate was relaxed. Within-payload dedup
+> does save, and is the one path C4 was live on.
+>
+> **So the sequencing constraint stands even though the gate is open.** A Prometheus `/metrics`
+> endpoint on a pass-through that saves nothing cross-turn instruments nothing — and per **M7**,
+> still open and re-verified 2026-08-12, the numbers it would export
+> (`rawTokens`/`optimizedTokens` from `summary.tokenEstimate`) measure the bundle render, not the
+> bytes forwarded. **Fix the measurement (M7) before exporting it.**
 
 **Core objective:** enterprise-grade proxy integration and multi-agent remote access.
 
@@ -397,20 +450,31 @@ Update `TOOL_DEFINITIONS` in `src/adapters/mcp/tools.ts` — this matches the to
 
 ## Version Summary
 
+**This table was a full renumbering behind the chain at the top of the document until
+2026-08-12** — it still listed v1.1.1/v1.1.2/v1.1.3 as "Next — blocking" after all three had
+shipped inside v1.2.0, and mapped every later release to the number it held before the
+remediation track was inserted. Corrected below; the numbering now matches the chain.
+
 | Release | Focus | Key Deliverable | Benchmark Target | Status |
 |---|---|---|---|---|
 | v1.0.3 | Prior release | 0/1 Knapsack, AST validators, debt/drift ledgers | Current test suite | Shipped |
-| v1.1.0 | **Baseline (shipped)** | Heuristic tokenizer, `configSchemaVersion`, Git TTL cache | Sub-ms cache lookups | Shipped @ `807f6f0` |
-| **v1.1.1** | **Green tree** | M2 Phase C migration, M3 license, M10 bench packaging, M4a README | `npm test` green; `dist` rebuilt | **Next — blocking** |
-| **v1.1.2** | **Data loss** | C1 drift measurement gate, C2 Gateway `Buffer`, M8/M9 env & header leak | Markdown survives; Gateway byte-identity | **Blocking** |
-| **v1.1.3** | **Honest instruments** | H3 bench baseline, M5a MCP budget, M5b rehydrate regex, M6 trace | Suite can fail; trace carries real metrics | **Blocking** |
-| **Gate** | **Scope decisions** | A: H5 knapsack reachability · B: C3/H1 Gateway · C: H4 dead knobs · D: H2 languages | Decisions recorded in `DECISIONS.md` | **Blocking** |
-| v1.2.0 | Selection quality | BM25 + graph hybrid scorer, dual-path MMR (DP refinement / live greedy) | `<10ms` pipeline selection | ⛔ Gated on A |
-| v1.3.0 | Folding & cache | Fast (zero-dep) vs Deep (AST) mode, `cache_control` (exact/best-effort) | `<1ms` Fast / `~15ms` Deep | ⚠ Re-scope; Fast largely shipped |
-| v1.4.0 | Retrieval | `rehydrate_context` with sub-query matching | Targeted line extraction | ⛔ Gated on M5b |
-| v2.0.0 | Ecosystem | Streamable HTTP/SSE MCP, LiteLLM plugin, Prometheus metrics | High-throughput multi-agent proxy | ⛔ Gated on B |
-| Milestone 8 | Caching | MCP Schema Deduplication & Cache-Aligned Knapsack | 100% Provider Cache Hit Rates | ⛔ Gated on A |
-| Milestone 9 | Guardrails | Agent Loop Circuit Breaking & Critical Atom Recall Tracking | $S_k \le 0.40$ enforcement | ⚠ Re-derive after C1 + H6 |
+| v1.1.0 | Prior release | Heuristic tokenizer, `configSchemaVersion`, Git TTL cache | Sub-ms cache lookups | Shipped @ `807f6f0` |
+| ~~v1.1.1~~ | Green tree | M2, M3 license, M10 bench packaging, M4a README | `npm test` green; `dist` rebuilt | ✅ **in v1.2.0** |
+| ~~v1.1.2~~ | Data loss | C1 drift measurement gate, C2 Gateway `Buffer`, M8/M9 | Markdown survives; Gateway byte-identity | ✅ **in v1.2.0** |
+| ~~v1.1.3~~ | Honest instruments | H3 bench baseline, M5a MCP budget, M5b rehydrate marker, M6 trace | Suite can fail; trace carries real metrics | ✅ **in v1.2.0** |
+| ~~Gate~~ | Scope decisions | A: H5 · B: C3/H1 · C: H4 · D: H2 | Decisions recorded in `DECISIONS.md` | ✅ **all four answered, §41–§46** |
+| v1.2.0 | Audit remediation | The whole remediation track + Phase 1c | 614 tests green | Shipped 2026-08-11, npm `latest` |
+| **v1.3.0** | **Baseline (shipped)** | §48 — `--target-reduction-ratio` is a real ceiling | 21 of 66 files on target at 0.3 | **Shipped 2026-08-12** |
+| *unnumbered* | Selection quality | BM25 + graph hybrid scorer, dual-path MMR | `<10ms` pipeline selection | ⛔ **Both preconditions measured false** — holds no number |
+| v1.4.0 | Folding & cache | Fast (zero-dep) vs Deep (AST) mode, `cache_control` | `<1ms` Fast / `~15ms` Deep | ⚠ Re-scope; Fast largely shipped. Cache needs an exact tokenizer |
+| v1.5.0 | Retrieval | `rehydrate_context` with sub-query matching | Targeted line extraction | ✅ Unblocked (M5b shipped); response shape still to design |
+| v2.0.0 | Ecosystem | Streamable HTTP/SSE MCP, LiteLLM plugin, Prometheus metrics | High-throughput multi-agent proxy | ⚠ B answered *experimental*; **M7 before exporting metrics** |
+| Milestone 8 | Caching | MCP Schema Deduplication & Cache-Aligned Knapsack | 100% Provider Cache Hit Rates | ⚠ A answered — knapsack reachable; needs an exact tokenizer |
+| Milestone 9 | Guardrails | Agent Loop Circuit Breaking & Critical Atom Recall Tracking | $S_k \le 0.40$ enforcement | ⚠ C1 + H6 both shipped; re-derive against the current metric |
+
+**Not in this table, because it is not a release: `docs/audit-remediation-status.md` §7 carries
+the near-term work** — sub-region elision, widening elision beyond three languages, per-item
+drift, and M7. Those have measured preconditions that hold, which the v1.3.0 row does not.
 
 ### Measured starting position (2026-08-07, `f93c385`)
 
@@ -429,14 +493,17 @@ The numbers any of the above will be judged against. Source: `max_audit.md` Appe
 
 ## Milestone 8: MCP Schema Deduplication & Cache Alignment
 
-> **⛔ Blocked on Scope Decision Gate — question A (H5).** "Cache-Aligned 0/1 Knapsack Allocation"
-> is invariant 6, and invariant 6 is **unimplemented in practice**: `applyCacheAwarePrefixLocking`
-> and `solve01Knapsack` are exercised only by unit tests that build multi-item bundles via
-> `createBundleFromItems`, a function no production code calls. This milestone cannot raise a cache
-> hit rate that no shipping path can currently affect.
+> ~~**⛔ Blocked on Scope Decision Gate — question A (H5).**~~ **A is answered and this half is
+> unblocked (DECISIONS §43).** "Cache-Aligned 0/1 Knapsack Allocation" is invariant 6, and
+> invariant 6 was unimplemented in practice — `applyCacheAwarePrefixLocking` and
+> `solve01Knapsack` were exercised only by unit tests building bundles through
+> `createBundleFromItems`, which no production code called. `optimize` now takes multiple paths
+> and directories: on `src/core` at `--max-input-tokens 4000`, 15 of 31 files are pruned and
+> 20,540 tokens saved. A shipping path can affect the cache hit rate.
 >
-> Also note the exactness precondition: 1,024-token quantization is only meaningful with
-> `isExact: true`, which requires a caller-supplied `cl100k_base` encoder. The default
+> **The exactness precondition still binds, and it is now the whole gate.** 1,024-token
+> quantization is only meaningful with `isExact: true`, which requires a caller-supplied
+> `cl100k_base` encoder. The default
 > `EnhancedHeuristicTokenizer` has 24% mean absolute error — **worse than the `ceil(len/4)`
 > estimate it replaced** (17%). Boundary placement under the default is approximate by
 > construction.
@@ -447,22 +514,27 @@ The numbers any of the above will be judged against. Source: `max_audit.md` Appe
 
 ## Milestone 9: Safety & Drift Guardrails
 
-> **⚠ Must be re-derived after C1 and H6 — do not build it as written.** Both deliverables below
-> extend subsystems the audit found defective in ways this milestone would compound:
+> **⚠ Re-derive against the current metric — C1 and H6 have both shipped, so the two blockers
+> below are closed and their replacements are smaller.** Retained with the corrections inline,
+> because what each one warned about is still the reason to measure before building:
 >
-> - **The composite $S_k$ with a new $w_{\text{atom}} \cdot R_{\text{atom}}$ term adds a third
->   weight to a formula whose second term does no work.** For code, $R_{\text{struct}}$ is pinned
->   at 1.0 — its only marker is `filepath:`, derived from `item.path`, which elision cannot touch —
->   so 40% of the metric is a free constant. That is the arithmetic behind C1. Fix
->   $R_{\text{struct}}$ (drop `filepath:`, use the already-existing `extractContentMarkers`) before
->   adding a term; otherwise the new weight dilutes the one ratio that measures anything.
-> - **"Verify imperative directives are never lost" already ships, and it is the leading cause of
->   0% reduction.** `CONSTRAINT_DIRECTIVE_LOST` is a nine-word substring match
->   (`must|must not|never|always|only if|do not|required|except when|make sure to|critical`) run
->   over the joined bundle with no per-item attribution — it accounts for **24 of 40 fallbacks** on
->   the repo's own corpus, firing on `required: ['rawInput']` in a JSON schema literal and on
->   TypeScript type members. Formalizing it as `TD_PRESERVE` without first scoping it by content
->   type and making retention per-item (H6) hardens a defect into a spec.
+> - ~~**The composite $S_k$ with a new $w_{\text{atom}} \cdot R_{\text{atom}}$ term adds a third
+>   weight to a formula whose second term does no work.**~~ **Fixed in §40.**
+>   $R_{\text{struct}}$ is no longer pinned at 1.0 for code: it is computed over
+>   `extractContentMarkers`, which excludes `filepath:`, and a ratio whose before-set is empty no
+>   longer votes — its weight is redistributed rather than defaulting to perfect retention. The
+>   maximum symbol loss that can pass fell from 66.7% to **40%**. Note the fix this milestone
+>   proposed (drop `filepath:`) was measured **inert on its own**: an empty marker set defaulted
+>   $R_{\text{struct}}$ straight back to 1.0. A third term is now addable — but derive its weight
+>   against the post-§40 formula, not the one described here.
+> - ~~**"Verify imperative directives are never lost" already ships, and it is the leading cause
+>   of 0% reduction."**~~ **Scoped in §42 (H6) and made per-item in §47 (Phase 1c).**
+>   `CONSTRAINT_DIRECTIVE_LOST` was a nine-word substring match over the joined bundle with no
+>   attribution, accounting for 24 of 40 fallbacks and firing on `required: ['rawInput']` in a
+>   JSON schema literal. Imperatives are now read in comments and prose rather than expressions,
+>   and a failure names its item and reverts only that item. `TD_PRESERVE` can be formalized
+>   without hardening a defect into a spec — measure the current fallback mix first, since the
+>   24-of-40 figure predates both fixes.
 >
 > The **Agent Loop Circuit Breaking** half is unaffected by the above and can proceed independently
 > — though note `DebtTracker` is arithmetically inert on the CLI today: with no ledger, maximum

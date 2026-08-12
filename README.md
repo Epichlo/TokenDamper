@@ -76,12 +76,19 @@ On fail-open each file is returned byte for byte.
 
 **A file that fails a check no longer reverts the rest.** Validation is still bundle-scoped, but
 a failure that names its item now reverts *only* that item; the repaired bundle is re-validated
-and emitted only if it passes. Measured on frozen corpora at `--target-reduction-ratio 0.3`:
+and emitted only if it passes. Measured on frozen corpora at `--target-reduction-ratio 0.3`,
+**before `--target-reduction-ratio` became a binding ceiling** — the "after" column is what this
+change was worth on the engine of the day, not what the current engine emits:
 
 | bundle | before | after |
 |---|---|---|
 | 45 Python files | 0.00% (all reverted) | **22.73%**, 14 files reverted |
 | 61 TypeScript files | 0.00% (all reverted) | **19.47%**, 21 files reverted |
+
+Both figures are lower on today's engine, because a target of 0.3 now stops near 30% instead of
+running to exhaustion — 20.26% and 17.57% on the current frozen corpus, with *fewer* fallbacks.
+Current per-bucket numbers live in `docs/audit-remediation-status.md` §2, which is re-measured
+rather than remembered.
 
 `trace.itemsReverted` names what was put back, so a partial success cannot be mistaken for a
 clean one. A failure that names no item — semantic drift over the whole bundle — still falls back

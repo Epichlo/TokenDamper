@@ -11,6 +11,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [v1.3.0] - 2026-08-12
+
+**The flag that did nothing now does what it says.** `--target-reduction-ratio` is the flag every
+document and example uses, and until this release it was an on/off switch: any value produced
+byte-identical output, and compression ran to exhaustion rather than to the requested figure.
+
+**Numbered 1.3.0, and the roadmap's reservation on that number was released rather than worked
+around.** `ROADMAP.md` had v1.3.0 reserved for "Context Selection Quality & Redundancy
+Elimination", whose two headline deliverables were both measured unbuildable — BM25 has no query
+source anywhere in `src/`, and MMR found 0 of 1,486 real pairs above its threshold. A release that
+cannot be built should not hold a version number while a shipped behavioural change waits behind
+it; that section is now unnumbered and gated on its preconditions instead. The same collision
+happened once before, when v1.2.0 took the number this document had reserved for the same
+release — resolving it by renumbering the chain twice is what made it recur (DECISIONS §49).
+
+A minor rather than a patch: nothing is removed, but the same command over the same input emits
+different bytes, and `Changed` is where that belongs.
+
 ### Changed
 - **`--target-reduction-ratio` is a real target — audit H4's deferred half (DECISIONS §48).**
   It was an on/off switch: the planner read it as `> 0` and nothing else read it, so `0.01` and
@@ -28,6 +46,54 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   files typically have one dominant region (58%, 61%, 83% measured). At target 30%, 21 of 66
   reducing files landed in 25–35% and 23 still exceeded 50%. Sub-region elision is what would
   close that; it is not attempted here.
+
+### Documentation
+- **Audit finding M7 is reinstated as open, having been silently dropped.** No behaviour changed;
+  what changed is that the documents stop saying every audit item is closed.
+  `docs/audit-remediation-status.md` §6 records the finding, its three consequences re-verified
+  against source at `5c7919b`, and why the re-serialization half is not a metrics fix. M7 was
+  gated in `ROADMAP.md` behind *"only if question B keeps the Gateway"*; question B was answered
+  in DECISIONS §41 and nothing carried M7 across the answer, so it entered no wave table and
+  read as done. **An item that is in no table reads exactly like a check that never ran.**
+
+- **The measured baseline was re-taken rather than annotated** (status doc §2): 288 files / 576
+  rows at `5c7919b`, clean tree, both routes, target 0.3 — python file **20.26%**, python stdin
+  **19.78%**, typescript file **17.57%**, everything else 0.00%. The previous table was pre-§48
+  *and* over a different corpus (297 files: typescript 60 → 62, prose 29 → 18 after M11), so it
+  was stale twice over while being labelled "the numbers to compare against".
+
+- **Stale gates cleared across `ROADMAP.md`.** Its Version Summary table was a full renumbering
+  behind the chain at the top of the same document, still listing v1.1.1–v1.1.3 as "Next —
+  blocking" after all three shipped inside v1.2.0. v1.5.0 was marked blocked on M5b, which
+  shipped in Wave 2; Milestone 8 blocked on question A, answered by §43; Milestone 9 pending C1
+  and H6, both shipped; v1.4.0's `cache_control` blocked on H5, whose actual remaining
+  precondition is tokenizer exactness. Each is now marked with what replaced it, not deleted.
+
+- **`README.md`'s Phase 1c table is labelled as pre-§48.** Its 22.73% / 19.47% were measured at
+  target 0.3 before that ratio bound; the same corpora now read 20.26% / 17.57% with fewer
+  fallbacks.
+
+### Removed
+- **The `format` script, `prettier`, `eslint-config-prettier`, `.prettierrc.cjs` and
+  `.prettierignore` (DECISIONS §49).** `npm run format` has never passed and nothing has ever
+  invoked it: CI runs typecheck, lint, build and test, and so does `prepublishOnly`. Measured
+  before removing it, `prettier --check .` failed on **148 files** — every markdown document and
+  all 57 TypeScript sources — for two independent reasons: prettier defaults to
+  `endOfLine: "lf"` against a CRLF working tree, and the real formatting drift underneath that is
+  ~5,118 lines in `src/` plus ~1,900 in the docs.
+
+  Making it pass would have rewritten the whole repository, including the in-source commentary
+  that is 32.8% of `src/` and is maintained next to the code it explains. This is audit H4's
+  principle applied to a dev script rather than a CLI flag: **a check that has never run is not a
+  check, and leaving it red teaches everyone to ignore the one instrument that is red for a
+  reason.** `eslint` remains the enforced style gate and is green without
+  `eslint-config-prettier`, which existed only to defer to a formatter that is no longer here.
+
+### Fixed
+- **`package-lock.json` carried `"license": "MIT"` and `"version": "1.1.0"`.** Audit M3 corrected
+  the license in `package.json` and the lockfile mirror was never regenerated, so a file in the
+  repository still asserted the pre-M3 license. Not a published claim — npm reads `package.json` —
+  but M3 was about a stale copy of exactly this fact, and this was the last one.
 
 ## [v1.2.0] - 2026-08-11
 
