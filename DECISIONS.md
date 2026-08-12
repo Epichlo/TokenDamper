@@ -3546,3 +3546,83 @@ failure names its item and Phase 1c reverts only that one.
 Still open: 18 rows exceed 50% because a single *statement* is itself dominant — one 83%-of-file
 span in `python-validator.ts`. Dividing that needs elision inside a control-flow block, which is
 a different question from dividing a body and is not attempted here.
+
+---
+
+## 52. A Comment Is Where a Codebase Narrates Itself, Not Only Where It Instructs
+
+**Date:** 2026-08-12 · **Status:** Accepted · **Follows:** §42 (H6), §51
+
+§51 measured where the fallbacks actually are: **29 of 29** code-bucket fallbacks on the frozen
+corpus are `CONSTRAINT_DIRECTIVE_LOST`. Not drift, not AST — the constraint gate, every time.
+
+§42 scoped that gate by **region**: an instruction to a reader lives in a comment or a docstring,
+never in an expression, which stopped it firing on `logger.critical(exc)` and `readonly required?`.
+This scopes it by **mood** within that region, because a comment is also where a codebase explains
+its own history.
+
+### What the gate was refusing
+
+Inspecting the matched text behind those 29 fallbacks, roughly twelve read like this:
+
+> "The MCP branch of `runCli` **has always** read these two"
+> "It **never did**: this branch bypassed pruning entirely"
+> "`HTTP_PROXY` and `HTTPS_PROXY` … could **never have worked**"
+> "a saving that **never reached** the wire (audit C4)"
+
+Losing one of those costs a reader some history. Losing *"never hash items matching
+preserveKinds"* costs a caller a rule. The keyword is identical and the gate refused the whole
+file for either.
+
+### Narrowed in the safe direction, three ways
+
+This gate protects content, so unlike §48 and §50 — where a wrong call costs output size — a
+wrong call here **silently deletes an instruction**. Three deliberate limits:
+
+1. **Only `never` and `always`.** They are the two keywords equally comfortable describing and
+   instructing. `must`, `must not`, `do not`, `required`, `critical`, `only if`, `except when`
+   and `make sure to` are untouched — *"must have been called before"* is a requirement about a
+   past state, and a perfect-tense test applied to `must` would drop it.
+2. **Only perfect or past constructions**, which are provable from the words present: a preceding
+   `have`/`has`/`had`, or a following past-tense verb. *"is always deterministic"* and *"do not
+   support"* are descriptive too, and are **left firing on purpose** — there the line between
+   describing a constraint and stating one is genuinely blurry. Under-narrowing costs reduction;
+   over-narrowing costs content.
+3. **Unanimity before dropping.** A segment is discarded only if *every* keyword in it is
+   narrative-capable and the construction is narrative. *"this has always been true, so you must
+   call it first"* still raises a directive, because of the `must`.
+
+### The negative control is the load-bearing test
+
+`test/unit/narrative-directive-scope.test.ts` asserts the eight narrative sentences above stop
+firing — and, more importantly, that **sixteen real instructions still do**, several taken
+verbatim from this repository. A rule that drops one of those is not a better rule at any
+reduction figure, and the test says so rather than leaving it to a reduction number two layers
+away.
+
+### Measured
+
+Per-row over the frozen corpus, 576 rows, both routes, target 0.3, against v1.4.0:
+
+| | before | after |
+|---|---|---|
+| rows byte-identical | — | **572 of 576** |
+| fallbacks fixed / new | — | **4 / 0** |
+| rows newly reducing / stopped | — | **4 / 0** |
+| rows already reducing that changed at all | — | **0** |
+
+The four are `adapters/mcp/tools.ts`, `cli/main.ts`, `gateway/exec.ts` and `gateway/proxy.ts` —
+`gateway/exec.ts` being the file that contains *"could never have worked"*. TypeScript file
+route: 39 reduced / 16 fallbacks → **43 / 12**, aggregate 18.52% → 24.58%.
+
+### The caveat that matters more than the headline
+
+**Python gained nothing — 0 of the 4.** Every recovered file is this repository's own source,
+and this repository is unusually narrative: M11 measured **32.8%** of `src/` as comment prose,
+written in a style that explains what used to be true. pip's comments describe behaviour in the
+present tense and were never caught by this rule.
+
+So the 6pp on the TypeScript bucket is **not** a portable estimate of what other codebases gain.
+It is the corpus-bias trap `CLAUDE.md` warns about, showing up as a favourable number instead of
+an unfavourable one — which is the harder direction to notice. What is portable is the shape:
+zero regressions, and four files that produced nothing now produce something.

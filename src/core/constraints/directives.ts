@@ -95,6 +95,67 @@ export function extractProseRegions(content: string, contentType: ContentType): 
 export const IMPERATIVE_DIRECTIVE_REGEX = new RegExp(IMPERATIVE_KEYWORD_SOURCE, 'i');
 
 /**
+ * `never` and `always` in a **narrative** construction — a report about what happened, not an
+ * instruction about what must happen.
+ *
+ * H6 (§42) scoped this check by *region*: an instruction lives in a comment, never in an
+ * expression. This scopes it by *mood* within that region, because a comment is also where a
+ * codebase explains itself. Measured over the code buckets of the frozen corpus, **29 of 29**
+ * fallbacks are `CONSTRAINT_DIRECTIVE_LOST`, and inspecting the matched text, roughly 12 are
+ * sentences like these:
+ *
+ *   "The MCP branch of `runCli` has always read these two"
+ *   "It never did: this branch bypassed pruning entirely"
+ *   "`HTTP_PROXY` ... could never have worked"
+ *   "a saving that never reached the wire (audit C4)"
+ *
+ * Losing one of those costs a reader some history. Losing "never hash items matching
+ * preserveKinds" costs a caller a rule. The gate cannot tell them apart by keyword, and it
+ * currently refuses the whole file for either.
+ *
+ * ### Deliberately narrow, in the safe direction
+ *
+ * Applied **only to `never` and `always`** — the two keywords that are as comfortable describing
+ * as instructing. `must`, `must not`, `do not`, `required`, `critical`, `only if`, `except when`
+ * and `make sure to` are untouched, because "must have been called before" is a requirement
+ * about a past state, not a narrative. Excluding those on a perfect-tense test would drop real
+ * constraints, which is the failure this must not have.
+ *
+ * And only for *perfect or past* constructions, which are provable from the words present:
+ * a preceding `have`/`has`/`had`, or a following past-tense verb. `"is always deterministic"`
+ * and `"do not support"` are descriptive too, and are deliberately **left firing** — the line
+ * between describing a constraint and stating one is blurry there, and a wrong call silently
+ * deletes a real directive. Under-narrowing costs reduction; over-narrowing costs content.
+ */
+const NARRATIVE_KEYWORDS = String.raw`(?:never|always)`;
+
+/** Irregular past tenses that no `-ed` rule will catch. */
+const PAST_TENSE_IRREGULARS = String.raw`(?:did|was|were|had|got|made|took|ran|read|said|meant|came|went|saw|knew|found|left|felt|kept|held|told|became|began|broke|brought|built|chose|drew|drove|fell|flew|gave|grew|hit|kept|knew|lay|led|lost|met|paid|put|sent|set|shot|shut|sold|spent|stood|struck|swore|threw|understood|withdrew|wrote|worked|wanted|needed|existed|reached|shipped|fired|failed|passed|stopped|started|used|meant)`;
+
+/**
+ * Matches a narrative use: `has always read`, `never did`, `could never have worked`,
+ * `never reached the wire`.
+ */
+const NARRATIVE_DIRECTIVE_REGEX = new RegExp(
+  String.raw`(?:\b(?:have|has|had)\s+(?:\w+\s+){0,2}${NARRATIVE_KEYWORDS}\b)` +
+    `|` +
+    String.raw`(?:\b${NARRATIVE_KEYWORDS}\s+(?:have|has|had)\b)` +
+    `|` +
+    String.raw`(?:\b${NARRATIVE_KEYWORDS}\s+(?:\w+ed|${PAST_TENSE_IRREGULARS})\b)`,
+  'i',
+);
+
+/**
+ * Whether this keyword occurrence is narrative rather than imperative.
+ *
+ * Exported so the characterization tests can assert the boundary directly rather than inferring
+ * it from a reduction figure two layers away.
+ */
+export function isNarrativeUse(segment: string): boolean {
+  return NARRATIVE_DIRECTIVE_REGEX.test(segment);
+}
+
+/**
  * Returns whether content contains a natural-language imperative constraint.
  */
 export function containsImperativeDirective(content: string): boolean {
@@ -116,6 +177,16 @@ export function extractImperativeDirectives(content: string): {
     for (const segment of extractSentenceOrClauseSegments(line)) {
       const matches = Array.from(segment.matchAll(keywordRegex));
       if (matches.length === 0) {
+        continue;
+      }
+
+      // A segment is narrative only if **every** keyword in it is one of the two that can
+      // describe as well as instruct, and the construction is perfect or past. One `must`
+      // anywhere keeps the whole segment, so "this has always been true, so you must call it
+      // first" is still a directive. Requiring unanimity is what makes the narrowing safe:
+      // the mixed case resolves toward firing.
+      const allNarrativeCapable = matches.every((match) => /^(?:never|always)$/i.test(match[0]));
+      if (allNarrativeCapable && isNarrativeUse(segment)) {
         continue;
       }
 
