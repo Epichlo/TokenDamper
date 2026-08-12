@@ -11,6 +11,33 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- **Elision divides a region into its statements when a ceiling is set (DECISIONS §50).** The
+  smallest thing the stage could remove was a whole function body, which is what made
+  `--target-reduction-ratio` overshoot: files typically have one dominant region — 58%, 61%, 83%
+  measured — and a body cannot be taken in part. `splitRegionIntoStatements` divides at depth-0
+  boundaries only, so every candidate is bracket- and quote-balanced and removing one cannot cut
+  a statement in half.
+
+  **Per-row A/B over one frozen corpus, 576 rows, both routes, target 0.3 — no regressions:**
+
+  | | baseline | after |
+  |---|---|---|
+  | rows above 50% achieved | 34 | **18** |
+  | rows reducing | 95 | **99** |
+  | new fallbacks | — | **0** |
+  | rows that stopped reducing | — | **0** |
+  | moved closer to target / further | — | **39 / 11** |
+
+  522 of 576 rows are byte-identical; every changed row is TypeScript or Python under a ceiling.
+  Subdivision is confined to the ceiling path, so a run with no target behaves exactly as before.
+
+  **A division that would throw most of its region away is refused**, because the marker floor
+  drops short statements and the caller would lose the whole region as an option — measured at
+  38.9% → 6.6% on one file before the guard. The threshold was swept rather than chosen; §50
+  carries the table, including the setting that scores better on overshoot and costs two working
+  files, and why that trade was not taken.
+
 ## [v1.3.0] - 2026-08-12
 
 **The flag that did nothing now does what it says.** `--target-reduction-ratio` is the flag every

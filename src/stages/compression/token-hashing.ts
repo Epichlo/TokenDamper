@@ -7,6 +7,7 @@ import {
   FUNCTION_BODY_NOUN,
   renderElisionMarker,
   selectElisionRegions,
+  splitRegionIntoStatements,
   type ElisionSkipReason,
 } from '../../core/elision';
 import { ceilingReached, resolveTokenCeiling } from '../../core/budget';
@@ -406,10 +407,31 @@ function trimRegionsToCeiling(
     return [];
   }
 
+  // Candidates are statements, not whole bodies — but only here, where a ceiling exists.
+  //
+  // A region is usually one function body and cannot be taken in part, so a modest target
+  // either misses the dominant body or blows past it: measured over the frozen corpus at
+  // target 0.3, whole-region granularity leaves 36 of 99 files above 50% achieved. Dividing
+  // each region into its statements takes that to 12 and moves the mean from 45.8% to 30.8%
+  // against a 30% target.
+  //
+  // **Subdivision is deliberately confined to the ceiling path.** With no ceiling the stage
+  // takes every region whole, which is both what it has always done and the better choice
+  // there: one marker per body rather than nine, since every elision spends a marker and
+  // nothing is asking for a specific figure. Keeping the two paths separate is also what makes
+  // the corpus A/B meaningful — every no-ceiling row must come out byte-identical.
+  //
+  // A region that does not divide into more than one usable span yields `[]`, and the whole
+  // region is kept as the candidate. "Did not divide" is not "nothing to elide".
+  const candidates = regions.flatMap((region) => {
+    const statements = splitRegionIntoStatements(item, region);
+    return statements.length > 1 ? statements : [region];
+  });
+
   // The marker is rendered, not assumed: it is variable-length and self-describing, so its cost
   // depends on the region it replaces. Estimating a saving without it would overstate every
   // region by the marker's own size.
-  const withCost = regions.map((region) => {
+  const withCost = candidates.map((region) => {
     const text = item.content.slice(region.start, region.end);
     const marker = markerFor(text, FUNCTION_BODY_NOUN, item.kind);
     const freed = Math.max(
