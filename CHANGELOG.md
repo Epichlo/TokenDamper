@@ -11,6 +11,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- **A narrative use of `never`/`always` in a comment is no longer a constraint directive
+  (DECISIONS §52).** The constraint gate accounts for **29 of 29** code-bucket fallbacks on the
+  frozen corpus, and roughly twelve of those were sentences like *"the MCP branch has always read
+  these two"* or *"could never have worked"* — a codebase narrating its own history, not
+  instructing anyone. §42 scoped this gate by region (a comment, not an expression); this scopes
+  it by mood within that region.
+
+  Narrowed in the safe direction three ways: only `never`/`always` (so *"must have been called"*
+  is untouched), only provable perfect/past constructions (so *"is always"* keeps firing), and
+  only when *every* keyword in the segment is narrative.
+
+  **Per-row over 576 corpus rows: 572 byte-identical, 4 fallbacks fixed, 0 new, 0 files that
+  stopped reducing, and no change to any row that was already reducing.** TypeScript file route
+  39 → 43 reducing, 16 → 12 fallbacks.
+
+  **The gain is not portable, and the caveat is the point.** All four recovered files are this
+  repository's own source, which M11 measured as 32.8% comment prose written in a
+  what-used-to-be-true style. Python gained nothing. The 6pp on the TypeScript bucket is the
+  corpus-bias trap `CLAUDE.md` warns about, appearing as a favourable number — the harder
+  direction to notice.
+
 ## [v1.4.0] - 2026-08-12
 
 **The target adheres.** v1.3.0 made `--target-reduction-ratio` bind and recorded that adherence

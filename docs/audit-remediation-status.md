@@ -3,9 +3,14 @@
 Working state for the `max_audit.md` remediation. **Read this before picking up audit work**;
 it records what is done, what is measured, and what the next batch actually requires.
 
-Last updated 2026-08-12, after **v1.4.0** — §50 (sub-region elision; the target adheres), on top
-of v1.3.0’s §48 and §49. Suite: **628 passing**, typecheck and lint clean. `npm run format` no
-longer exists; `lint` is the enforced style gate.
+Last updated 2026-08-12, after **v1.4.0** (§50, sub-region elision) **plus two unreleased changes
+on `main`**: §51 (per-item drift, closed without implementing) and §52 (a narrative `never`/
+`always` is not a directive). Suite: **657 passing**, typecheck and lint clean. `npm run format`
+no longer exists; `lint` is the enforced style gate.
+
+**§2's baseline is the v1.4.0 engine and does not include §52.** On the same frozen corpus §52
+takes the TypeScript file row to 43 reduced / 12 fallbacks / 24.58%; python is unchanged. The
+table is left at the released figures on purpose — re-point it when the next release ships.
 
 ---
 
@@ -353,8 +358,19 @@ Ordered by measured value ÷ risk. Preconditions verified as holding — as dist
    `0.4122` in §47 that motivated it came from an engine that elided everything it could. A
    token ceiling and a statement-sized unit cut symbol loss two orders of magnitude below the
    gate. **An open item is a claim about the current build, and it expires like any other.**
-5. **Make the constraint gate finer.** Where the fallbacks actually are: **29 of 29** code-bucket
-   fallbacks are `CONSTRAINT_DIRECTIVE_LOST`, and §50 measured the same gate as the reason the
-   better sub-region setting costs two working files. This is the per-item axis with something
-   on it — the one §51 was looking for on the wrong metric.
+5. ~~**Make the constraint gate finer.**~~ **First pass done — DECISIONS §52.** A narrative use of
+   `never`/`always` in a comment is no longer a directive: **4 fallbacks fixed, 0 new, 572 of 576
+   rows byte-identical**, TypeScript file route 39 → 43 reducing.
+
+   **Read §52's caveat before quoting the 6pp.** All four recovered files are this repository's
+   own source, which M11 measured as 32.8% comment prose written in a what-used-to-be-true style.
+   **Python gained zero.** That is the corpus-bias trap of §4 appearing as a *favourable* number,
+   which is the harder direction to notice.
+
+   **Still open on this axis**, and deliberately not attempted: descriptive present-tense uses
+   (*"is always deterministic"*, *"do not support"*) still raise directives. They are descriptive,
+   but the line between describing a constraint and stating one is blurry there, and this gate
+   protects content — over-narrowing deletes an instruction, which no reduction figure buys back.
+   §50's other open item is the same gate: it is why the better sub-region coverage setting costs
+   two working files.
 6. **M7**, per §6 — small, and the only thing between the audit and an empty list.
