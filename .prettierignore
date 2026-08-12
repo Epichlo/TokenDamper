@@ -1,7 +1,0 @@
-dist
-coverage
-node_modules
-.git
-tokendamper.cmd
-fixtures/**/*.txt
-test/fixtures/**/*.txt

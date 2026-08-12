@@ -197,11 +197,20 @@ and takes precedence over budget-derived knapsack selection.
 (`latest`), carrying Phase 1c and the three decisions the audit deferred. `DECISIONS.md` §36–§48
 carries the reasoning; `docs/audit-remediation-status.md` is the index and is the doc kept current.
 
-**§48 is merged to `main` and unreleased** — `--target-reduction-ratio` binds now, which moves
-every reduction number in the docs. `CHANGELOG.md` holds it under `[Unreleased]`;
-`src/version.ts` still reads `1.2.0`. Current measured baseline: python file **20.26%**,
-typescript file **17.57%** (288 files, both routes, `5c7919b`) — status doc §2, re-measured
-2026-08-12, not the Wave 2 figures a prior session may quote.
+**v1.3.0 shipped 2026-08-12** — §48 (`--target-reduction-ratio` binds, which moves every reduction
+number in the docs) and §49. Current measured baseline: python file **20.26%**, typescript file
+**17.57%** (288 files, both routes, `5c7919b`) — status doc §2, re-measured 2026-08-12, not the
+Wave 2 figures a prior session may quote.
+
+**There is no `npm run format`, and do not add one back without reading DECISIONS §49.** It was
+`prettier --check .`, it had never passed, and nothing invoked it — CI and `prepublishOnly` both
+run typecheck, lint, build, test. It failed on 148 files for two independent reasons (CRLF vs
+prettier's `endOfLine: "lf"`, plus ~5,118 lines of real drift in `src/`), so making it pass meant
+rewriting the repository including the in-source commentary. `eslint` is the style gate.
+
+**Version numbers in `ROADMAP.md` are reservations and two have been wrong.** §49's rule: a
+release whose preconditions are measured false holds **no** number. "Context Selection Quality"
+is now unnumbered for that reason — do not renumber the chain to make room for it.
 
 **One audit finding is still open: M7.** This file and the status doc both claimed every finding
 was closed; M7 was gated in the roadmap behind *"only if question B keeps the Gateway"*, B was

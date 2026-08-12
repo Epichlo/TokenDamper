@@ -11,6 +11,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [v1.3.0] - 2026-08-12
+
+**The flag that did nothing now does what it says.** `--target-reduction-ratio` is the flag every
+document and example uses, and until this release it was an on/off switch: any value produced
+byte-identical output, and compression ran to exhaustion rather than to the requested figure.
+
+**Numbered 1.3.0, and the roadmap's reservation on that number was released rather than worked
+around.** `ROADMAP.md` had v1.3.0 reserved for "Context Selection Quality & Redundancy
+Elimination", whose two headline deliverables were both measured unbuildable — BM25 has no query
+source anywhere in `src/`, and MMR found 0 of 1,486 real pairs above its threshold. A release that
+cannot be built should not hold a version number while a shipped behavioural change waits behind
+it; that section is now unnumbered and gated on its preconditions instead. The same collision
+happened once before, when v1.2.0 took the number this document had reserved for the same
+release — resolving it by renumbering the chain twice is what made it recur (DECISIONS §49).
+
+A minor rather than a patch: nothing is removed, but the same command over the same input emits
+different bytes, and `Changed` is where that belongs.
+
 ### Changed
 - **`--target-reduction-ratio` is a real target — audit H4's deferred half (DECISIONS §48).**
   It was an on/off switch: the planner read it as `> 0` and nothing else read it, so `0.01` and
@@ -54,6 +72,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`README.md`'s Phase 1c table is labelled as pre-§48.** Its 22.73% / 19.47% were measured at
   target 0.3 before that ratio bound; the same corpora now read 20.26% / 17.57% with fewer
   fallbacks.
+
+### Removed
+- **The `format` script, `prettier`, `eslint-config-prettier`, `.prettierrc.cjs` and
+  `.prettierignore` (DECISIONS §49).** `npm run format` has never passed and nothing has ever
+  invoked it: CI runs typecheck, lint, build and test, and so does `prepublishOnly`. Measured
+  before removing it, `prettier --check .` failed on **148 files** — every markdown document and
+  all 57 TypeScript sources — for two independent reasons: prettier defaults to
+  `endOfLine: "lf"` against a CRLF working tree, and the real formatting drift underneath that is
+  ~5,118 lines in `src/` plus ~1,900 in the docs.
+
+  Making it pass would have rewritten the whole repository, including the in-source commentary
+  that is 32.8% of `src/` and is maintained next to the code it explains. This is audit H4's
+  principle applied to a dev script rather than a CLI flag: **a check that has never run is not a
+  check, and leaving it red teaches everyone to ignore the one instrument that is red for a
+  reason.** `eslint` remains the enforced style gate and is green without
+  `eslint-config-prettier`, which existed only to defer to a formatter that is no longer here.
+
+### Fixed
+- **`package-lock.json` carried `"license": "MIT"` and `"version": "1.1.0"`.** Audit M3 corrected
+  the license in `package.json` and the lockfile mirror was never regenerated, so a file in the
+  repository still asserted the pre-M3 license. Not a published claim — npm reads `package.json` —
+  but M3 was about a stale copy of exactly this fact, and this was the last one.
 
 ## [v1.2.0] - 2026-08-11
 

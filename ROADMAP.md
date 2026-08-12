@@ -1,9 +1,15 @@
 # TokenDamper Product Roadmap — v1.1.0 → v2.0.0
 
-**Baseline:** **v1.2.0** (shipped — tag `v1.2.0`, see `CHANGELOG.md`), which closed the whole
-audit remediation track in one release rather than the three this document planned. All items
-below were checked against actual source, not assumed from a prior draft; file/function names
-cited are real, and known-already-shipped items have been excluded (see Appendix).
+**Baseline:** **v1.3.0** (shipped 2026-08-12 — `--target-reduction-ratio` binds, DECISIONS §48),
+on top of **v1.2.0**, which closed the whole audit remediation track in one release rather than
+the three this document planned. All items below were checked against actual source, not assumed
+from a prior draft; file/function names cited are real, and known-already-shipped items have been
+excluded (see Appendix).
+
+> **Version numbers here are reservations, and two of them have now been wrong.** v1.2.0 took the
+> number this document had reserved for "Context Selection Quality"; v1.3.0 then took it again.
+> The rule adopted in DECISIONS §49: **a release whose preconditions are measured false holds no
+> number** — it is described, gated, and numbered when it becomes buildable.
 
 > **The v1.1.x numbering below is historical.** v1.1.1 "Green Tree & Correct Metadata",
 > v1.1.2 "Data Loss & Corruption" and v1.1.3 "Honest Instruments" were never tagged separately —
@@ -58,12 +64,16 @@ v1.1.0 (tag @ 807f6f0) — never published to npm
        │      the whole v1.1.1/1.1.2/1.1.3 remediation track + the Scope
        │      Decision Gate answers (H2, M1, M11) + Phase 1c, in one release
        │
-       ├── v1.3.0: Context Selection Quality & Redundancy Elimination
-       │           ⛔ BM25 has no query source; MMR found 0 of 1,486 pairs
-       │              above its 0.90 threshold. Re-scope before starting.
+       ├── v1.3.0  SHIPPED 2026-08-12 — `--target-reduction-ratio` binds (§48)
+       │
        ├── v1.4.0: AST Code Folding ("Fast" vs "Deep") & Cache Alignment
        ├── v1.5.0: Granular Sub-Query Re-hydration & MCP Tool Extension
-       └── v2.0.0: Enterprise Gateway, Remote MCP & Guardrails  [gated on C3/H1]
+       └── v2.0.0: Enterprise Gateway, Remote MCP & Guardrails  [B answered: experimental]
+
+  unnumbered — Context Selection Quality & Redundancy Elimination
+       ⛔ Holds no version number. BM25 has no query source; MMR found 0 of
+          1,486 pairs above its 0.90 threshold. It gets a number when its
+          preconditions hold, not before.
 ```
 
 ---
@@ -182,9 +192,31 @@ before scheduling any of it.** Each is a decision with a legitimate "narrow the 
 
 ---
 
-## v1.3.0 — Context Selection Quality & Redundancy Elimination
+## v1.3.0 — `--target-reduction-ratio` Binds — **SHIPPED 2026-08-12**
 
-> ### ⛔ Both headline deliverables failed their preconditions when measured (2026-08-11).
+The flag every document and example uses was an on/off switch: the planner read it as `> 0` and
+nothing else read it at all, so `0.01` and `0.99` produced byte-identical output while compression
+ran to exhaustion. `resolveTokenCeiling` now converts the ratio into an absolute token ceiling;
+the pruner gates on it and `compression:token-hashing` stops there. DECISIONS §48, `CHANGELOG.md`.
+
+Adherence is **partial and the limit is structural** — at target 30%, 21 of 66 reducing files land
+in 25–35% and 23 still exceed 50%, because elision's smallest unit is one region. Sub-region
+elision is what closes that and is the next piece of work
+(`docs/audit-remediation-status.md` §7).
+
+---
+
+## Unnumbered — Context Selection Quality & Redundancy Elimination
+
+> ### ⛔ Holds no version number, and that is the point.
+>
+> This section had v1.3.0 reserved while both of its headline deliverables were measured
+> unbuildable, which meant a shipped behavioural change had to route around a release that cannot
+> be built. **The number was released rather than renumbered again** — the same collision had
+> already happened once, when v1.2.0 took the number this document reserved for this same release
+> (DECISIONS §49). It gets a number when its preconditions hold.
+>
+> ### Both headline deliverables failed their preconditions when measured (2026-08-11).
 >
 > The H5 blocker this notice used to carry **is resolved** — `optimize` takes multiple paths and
 > directories, and the knapsack prunes 15 of 31 files on `src/core` at `--max-input-tokens 4000`.
@@ -431,9 +463,9 @@ remediation track was inserted. Corrected below; the numbering now matches the c
 | ~~v1.1.2~~ | Data loss | C1 drift measurement gate, C2 Gateway `Buffer`, M8/M9 | Markdown survives; Gateway byte-identity | ✅ **in v1.2.0** |
 | ~~v1.1.3~~ | Honest instruments | H3 bench baseline, M5a MCP budget, M5b rehydrate marker, M6 trace | Suite can fail; trace carries real metrics | ✅ **in v1.2.0** |
 | ~~Gate~~ | Scope decisions | A: H5 · B: C3/H1 · C: H4 · D: H2 | Decisions recorded in `DECISIONS.md` | ✅ **all four answered, §41–§46** |
-| **v1.2.0** | **Baseline (shipped)** | The whole remediation track + Phase 1c | 614 tests green | **Shipped 2026-08-11, npm `latest`** |
-| **next** | **Unreleased on `main`** | §48 — `--target-reduction-ratio` is a real ceiling | 21 of 66 files on target at 0.3 | ⬜ **merged, not released; number undecided** |
-| v1.3.0 | Selection quality | BM25 + graph hybrid scorer, dual-path MMR | `<10ms` pipeline selection | ⛔ **Both preconditions measured false** — re-scope |
+| v1.2.0 | Audit remediation | The whole remediation track + Phase 1c | 614 tests green | Shipped 2026-08-11, npm `latest` |
+| **v1.3.0** | **Baseline (shipped)** | §48 — `--target-reduction-ratio` is a real ceiling | 21 of 66 files on target at 0.3 | **Shipped 2026-08-12** |
+| *unnumbered* | Selection quality | BM25 + graph hybrid scorer, dual-path MMR | `<10ms` pipeline selection | ⛔ **Both preconditions measured false** — holds no number |
 | v1.4.0 | Folding & cache | Fast (zero-dep) vs Deep (AST) mode, `cache_control` | `<1ms` Fast / `~15ms` Deep | ⚠ Re-scope; Fast largely shipped. Cache needs an exact tokenizer |
 | v1.5.0 | Retrieval | `rehydrate_context` with sub-query matching | Targeted line extraction | ✅ Unblocked (M5b shipped); response shape still to design |
 | v2.0.0 | Ecosystem | Streamable HTTP/SSE MCP, LiteLLM plugin, Prometheus metrics | High-throughput multi-agent proxy | ⚠ B answered *experimental*; **M7 before exporting metrics** |

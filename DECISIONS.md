@@ -3370,3 +3370,77 @@ Reduced counts rose and fallbacks fell in the same measurement that shows the me
 This is the third time in this project that a headline aggregate moved for a reason that is not a
 regression (§45's line endings, §46's corpus growth, this). The rule that keeps catching it:
 **compare per-file rows over one frozen corpus, never the mean across two.**
+
+---
+
+## 49. A Release That Cannot Be Built Holds No Number, and a Check That Has Never Run Is Not a Check
+
+**Date:** 2026-08-12 · **Status:** Accepted · **Closes:** the v1.3.0 numbering collision;
+retires `npm run format`
+
+Two decisions taken together because they are the same shape: a placeholder that reads as a
+commitment. One is a version number reserved for work that cannot be done, the other a quality
+gate that has never passed.
+
+### The number
+
+`--target-reduction-ratio` binding (§48) was merged and unreleased while `ROADMAP.md` reserved
+**v1.3.0** for "Context Selection Quality & Redundancy Elimination" — a release whose two headline
+deliverables were both measured unbuildable: BM25 has no query source anywhere in `src/`, and MMR
+found **0 of 1,486** real pairs above its 0.90 threshold.
+
+The options were to ship §48 as a patch, renumber the chain again, or take the number. **Taken —
+and the reservation released rather than moved**, because moving it is what made this recur. The
+identical collision happened at v1.2.0: this document had reserved that number for the same
+Selection Quality release, the remediation work shipped into it, and the chain was renumbered one
+release to the right. Doing that again would have set up the third occurrence.
+
+**The rule: a release whose preconditions are measured false is described and gated, but holds no
+version number.** It gets one when it becomes buildable. A number is a claim about sequence, and
+reserving one for work that cannot start makes every shipped release route around it.
+
+Minor rather than patch: nothing was removed, but the same command over the same input now emits
+different bytes. `1.2.1` would have understated that; the CHANGELOG files it under `Changed`, not
+`Fixed`, for the same reason.
+
+### The check
+
+`npm run format` was `prettier --check .`. It has **never passed**, and nothing has ever invoked
+it — CI runs typecheck, lint, build and test; `prepublishOnly` runs the same four. Measured before
+removing it, it failed on **148 files**: every markdown document and all 57 TypeScript sources.
+
+Two independent causes, and separating them is what decided this:
+
+| cause | size |
+|---|---|
+| prettier defaults to `endOfLine: "lf"`; the working tree is CRLF (`core.autocrlf=true`, no `.gitattributes`) | every file, whole-file diffs |
+| genuine formatting drift underneath that | ~5,118 lines in `src/`, ~1,900 in the docs |
+
+So this was never "the markdown is unformatted". Making the script pass would have rewritten the
+whole repository — including the in-source commentary that is **32.8%** of `src/` and, per
+`CLAUDE.md`, is deliberately maintained next to the code it explains rather than in the documents
+M11 retired. A formatter with `proseWrap: preserve` would not reflow that prose, but it would
+still touch every line of every file it lives in, and the blame trail is part of how this project
+reconstructs why a measurement was taken.
+
+**Removed rather than fixed or ignored**, which is audit H4's principle applied to a dev script
+instead of a CLI flag. H4 withdrew three flags that were parsed, validated and read by nothing, on
+the grounds that a dial reporting success without doing anything is worse than no dial. A check
+that has never run is the same object: it is not evidence, and leaving it red is worse than
+deleting it, because a permanently-red instrument teaches everyone to skip the one that goes red
+for a reason. That is invariant 10 read from the other end — this project has been bitten **ten**
+times by a green result from a check that never executed, and a red result nobody reads is the
+same failure wearing the opposite colour.
+
+`eslint` remains the enforced gate and is green **without** `eslint-config-prettier`, which was
+verified rather than assumed before removing it: it existed only to switch off rules that would
+conflict with a formatter that is no longer here.
+
+### Found while bumping the version
+
+`package-lock.json` carried `"license": "MIT"` and `"version": "1.1.0"`. Audit **M3** corrected
+the license in `package.json` — npm reads that file, so nothing was published wrongly — but the
+lockfile mirror was never regenerated, and a file in this repository went on asserting the
+pre-M3 license for two releases. M3 was itself a defect about **a stale second copy of one fact**,
+which is the same failure M5b's marker formats had and the same one this entry's `format` script
+had. Regenerated with the bump.

@@ -3,9 +3,9 @@
 Working state for the `max_audit.md` remediation. **Read this before picking up audit work**;
 it records what is done, what is measured, and what the next batch actually requires.
 
-Last updated 2026-08-12, after DECISIONS §48 (`--target-reduction-ratio` made real). Suite:
-**614 passing**, typecheck and lint clean. §48 is merged to `main` and **not yet released** —
-`CHANGELOG.md` carries it under `[Unreleased]` and `src/version.ts` still reads `1.2.0`.
+Last updated 2026-08-12, after **v1.3.0** — §48 (`--target-reduction-ratio` binds) and §49 (the
+numbering rule, and the retirement of `npm run format`). Suite: **614 passing**, typecheck and
+lint clean. `npm run format` no longer exists; `lint` is the enforced style gate.
 
 ---
 
@@ -322,9 +322,9 @@ Ordered by measured value ÷ risk. Preconditions verified as holding — as dist
 `ROADMAP.md`'s v1.3.0 headline features, whose preconditions were measured and **do not** hold
 (no query source for BM25; 0 of 1,486 real pairs above MMR's threshold).
 
-1. **Release §48.** It is merged, unreleased, and changes every reduction number the docs quote.
-   The version number is a decision: `ROADMAP.md` already names v1.3.0 as "Context Selection
-   Quality", the release measured as unbuildable, so shipping §48 as v1.3.0 collides with it.
+1. ~~**Release §48.**~~ **Done — v1.3.0, 2026-08-12.** The version collision it named was settled
+   by releasing the reservation rather than renumbering the chain a second time: a release whose
+   preconditions are measured false now holds no number (DECISIONS §49).
 2. **Sub-region elision.** Completes §48 rather than adding a surface: the flag now binds but
    adheres partially — at target 30%, 21 of 66 reducing files land in 25–35% and **23 exceed
    50%**, because elision's smallest unit is one region and files have one dominant region
