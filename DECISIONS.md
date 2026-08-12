@@ -3444,3 +3444,105 @@ lockfile mirror was never regenerated, and a file in this repository went on ass
 pre-M3 license for two releases. M3 was itself a defect about **a stale second copy of one fact**,
 which is the same failure M5b's marker formats had and the same one this entry's `format` script
 had. Regenerated with the bump.
+
+---
+
+## 50. A Statement Is a Smaller Thing Than a Function Body
+
+**Date:** 2026-08-12 · **Status:** Accepted · **Follows:** §48
+
+§48 made `--target-reduction-ratio` bind and recorded that adherence was **partial, and the limit
+structural**: elision's smallest unit was one region, files typically have one dominant region
+(58%, 61%, 83% measured), and a body cannot be taken in part. At target 0.3, 23 of 66 reducing
+files still exceeded 50%. This divides the region.
+
+### The precondition was measured before the feature was written
+
+The two deliverables this project has cancelled — BM25 and MMR — were cancelled because their
+preconditions failed when measured, after the specs were written. So the question here was asked
+first: **do dominant regions decompose at all?** A body that is one indivisible block gains
+nothing from finer granularity.
+
+| bucket | files | dominant >50% of file | median sub-spans | indivisible |
+|---|---|---|---|---|
+| python | 44 | 5 | 9 | **0** |
+| typescript | 55 | 22 | 9 | **1** |
+
+Dominant regions divide into ~9 pieces. The precondition holds.
+
+### The instrument was wrong first, and the corpus is what said so
+
+The first probe reported **1 sub-span covering 100% of the dominant region for 44 of 44 Python
+files** — a result too uniform to be real. `scanPythonDefBodies` returns a region starting *after*
+the first body line's indentation, so region text is dedented on line 1 and fully indented
+afterwards; taking the minimum indent across all lines yields 0 and matches only line 1.
+
+The probe's self-test passed, because its fixture began with a newline and therefore did not have
+the shape the scanner emits. **A validated instrument is only validated against the inputs it was
+shown.** The production splitter carries the same warning, and every Python fixture in
+`test/unit/sub-region-elision.test.ts` starts mid-line for this reason.
+
+### What a span may be
+
+Depth-0 boundaries only, so every span is bracket- and quote-balanced: a `;` at depth 0 or the
+`}` returning depth to 0 for TypeScript, a line at base indentation with no bracket open and no
+triple-quoted string in progress for Python. A nested `if` block is one span, not several.
+`elideRegions` would refuse an unbalanced span rather than ship it — but a refusal is a 0% run,
+and adherence is the point.
+
+Python spans start after the line's indentation, inheriting `scanPythonDefBodies`' boundary: the
+marker must hold the body's column or `PythonValidator` reports `AST_INDENTATION_ERROR`, and the
+indentation must stay outside the replaced bytes or rehydration is not byte-identical.
+`isSubstantiveRegion` runs **per span**, because a body can be substantive overall while one
+statement is nothing but a docstring — eliding that span alone is `HumanEval/0` at finer grain.
+
+### Confined to the ceiling path, which is what makes the A/B mean anything
+
+With no ceiling the stage still takes regions whole: one marker per body rather than nine, and
+nothing is asking for a figure. 522 of 576 corpus rows come out byte-identical, and every changed
+row is TypeScript or Python under a ceiling.
+
+### The guard, and the trade it resolves
+
+Statements below the marker floor are dropped. In a body of many short lines that can be nearly
+all of them, leaving the caller only the survivors and no way to reach for the region as a whole:
+one file went **38.9% → 6.6%** against a 30% target. Undershooting by 23 points is not an
+improvement on overshooting by 9. A division now stands only if what survives still covers most
+of its region.
+
+The threshold was swept, and the sweep is in the source because it shows a trade rather than an
+optimum:
+
+| coverage | rows >50% | new fallbacks | fallbacks fixed | closer to 0.3 | further |
+|---|---|---|---|---|---|
+| 0.25 (≈ no guard) | **8** | 2 | 9 | 48 | 23 |
+| 0.50 | 12 | 2 | 4 | 44 | 21 |
+| **0.75** | 18 | **0** | 4 | 39 | **11** |
+| 0.90 | 33 | 0 | 5 | 13 | 3 |
+
+Aggressive division controls overshoot best — 8 rows above 50% against a baseline of 34 — but
+converts **two rows that were reducing into fallbacks**. The cause is not the splitter: a finer
+span is likelier to contain a comment carrying an imperative, `cleanup:constraint-preservation`
+refuses to lose one, and on a single-item bundle Phase 1c has no other item to keep, so the
+refusal is a whole-file fallback. `pip/_internal/commands/cache.py` goes 34.1% → 0% on a comment
+reading *"normalized to underscores (_), meaning hyphens can never occur"*.
+
+**0.75 was chosen because it regresses nothing** — 0 new fallbacks, 0 files that stopped
+reducing, >50% still nearly halved. Buying a better headline with two working files is the trade
+this project keeps having to un-make. Revisit on multi-item bundles, where that constraint
+failure names its item and Phase 1c reverts only that one.
+
+### Final position
+
+576 rows, both routes, target 0.3, against the pre-division engine at the same frozen corpus:
+
+| | baseline | after |
+|---|---|---|
+| rows above 50% | 34 | **18** |
+| rows reducing | 95 | **99** |
+| new fallbacks / lost reductions | — | **0 / 0** |
+| closer to target / further | — | **39 / 11** |
+
+Still open: 18 rows exceed 50% because a single *statement* is itself dominant — one 83%-of-file
+span in `python-validator.ts`. Dividing that needs elision inside a control-flow block, which is
+a different question from dividing a body and is not attempted here.
