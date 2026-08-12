@@ -11,6 +11,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [v1.5.0] - 2026-08-12
+
+**The gate stops refusing a file for its own commentary.** `CONSTRAINT_DIRECTIVE_LOST` accounted
+for **29 of 29** code-bucket fallbacks (§51), and roughly twelve of those were a codebase
+narrating its own history — *"has always read these two"*, *"could never have worked"* — not
+instructing anyone. Four files that produced nothing now reduce, with 572 of 576 corpus rows
+byte-identical and no regressions.
+
+**This release also ends the version-reservation problem (DECISIONS §53).** v1.5.0 was held for
+"Granular Sub-Query Re-hydration", and unlike the previous three collisions that release is
+perfectly *buildable* — it simply had not been built, so §49's rule ("preconditions measured
+false → no number") did not cover it. The general rule replaces it: **the roadmap reserves no
+version numbers at all; a number is a fact about what shipped, assigned at ship time.** Four
+reservations in four releases were wrong, each for a different reason, which is enough evidence
+that predicting the order work finishes is not something this project should encode in a number.
+
+Minor rather than patch, consistent with v1.3.0 and v1.4.0: nothing removed, but the same command
+over the same input emits different bytes on 4 of 576 corpus rows.
+
 ### Changed
 - **A narrative use of `never`/`always` in a comment is no longer a constraint directive
   (DECISIONS §52).** The constraint gate accounts for **29 of 29** code-bucket fallbacks on the

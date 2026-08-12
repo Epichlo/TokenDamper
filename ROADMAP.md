@@ -1,17 +1,22 @@
 # TokenDamper Product Roadmap — v1.1.0 → v2.0.0
 
-**Baseline:** **v1.4.0** (shipped 2026-08-12 — sub-region elision, DECISIONS §50), on top of
+**Baseline:** **v1.5.0** (shipped 2026-08-12 — the constraint gate stops firing on narrative
+comments, DECISIONS §52), on top of **v1.4.0** (sub-region elision, §50) and
 **v1.3.0** (`--target-reduction-ratio` binds, DECISIONS §48),
 on top of **v1.2.0**, which closed the whole audit remediation track in one release rather than
 the three this document planned. All items below were checked against actual source, not assumed
 from a prior draft; file/function names cited are real, and known-already-shipped items have been
 excluded (see Appendix).
 
-> **Version numbers here are reservations, and three of them have now been wrong.** v1.2.0 took
-> the number reserved for "Context Selection Quality"; v1.3.0 took it again; v1.4.0 took the one
-> reserved for "AST Code Folding & Cache Alignment".
-> The rule adopted in DECISIONS §49: **a release whose preconditions are measured false holds no
-> number** — it is described, gated, and numbered when it becomes buildable.
+> **This document no longer reserves version numbers (DECISIONS §53).** Four reservations in four
+> releases were wrong: v1.2.0 took the number held for "Context Selection Quality", v1.3.0 took it
+> again, v1.4.0 took "AST Code Folding & Cache Alignment", and v1.5.0 took "Sub-Query
+> Re-hydration" — the last of those a release that is perfectly buildable and had simply not been
+> built yet, which is why §49's narrower rule did not cover it.
+>
+> **A number is a fact about what shipped, assigned at ship time.** Unshipped sections keep their
+> name, scope and gate; they lose only the number, which was never doing work a name could not.
+> `v2.0.0` is retained because a major signals *breaking change* rather than queue position.
 
 > **The v1.1.x numbering below is historical.** v1.1.1 "Green Tree & Correct Metadata",
 > v1.1.2 "Data Loss & Corruption" and v1.1.3 "Honest Instruments" were never tagged separately —
@@ -68,9 +73,15 @@ v1.1.0 (tag @ 807f6f0) — never published to npm
        │
        ├── v1.3.0  SHIPPED 2026-08-12 — `--target-reduction-ratio` binds (§48)
        ├── v1.4.0  SHIPPED 2026-08-12 — sub-region elision; the target adheres (§50)
+       ├── v1.5.0  SHIPPED 2026-08-12 — a comment narrates as well as instructs (§52)
        │
-       ├── v1.5.0: Granular Sub-Query Re-hydration & MCP Tool Extension
        └── v2.0.0: Enterprise Gateway, Remote MCP & Guardrails  [B answered: experimental]
+              a major signals BREAKING, not queue position — §53
+
+  unnumbered — Granular Sub-Query Re-hydration & MCP Tool Extension
+       ✅ Buildable: M5b shipped in Wave 2, so the base rehydration path
+          works. What remains is designing the targeted-match response
+          shape. It held v1.5.0 and lost it to work that finished first.
 
   unnumbered — Context Selection Quality & Redundancy Elimination
        ⛔ Holds no version number. BM25 has no query source; MMR found 0 of
@@ -399,7 +410,7 @@ export function processOrder(order: Order): Promise<Result> {
 
 ---
 
-## v1.5.0 — Granular Sub-Query Re-hydration & MCP Tool Extension
+## Unnumbered — Granular Sub-Query Re-hydration & MCP Tool Extension
 
 > **✅ Unblocked — M5b shipped in Wave 2 (DECISIONS §44).** This release adds a `query` field to
 > `rehydrate_context`, and that tool's session path had **never worked**: its regex
@@ -490,7 +501,7 @@ remediation track was inserted. Corrected below; the numbering now matches the c
 | **v1.4.0** | **Baseline (shipped)** | §50 — sub-region elision; the target adheres | rows >50%: 34 → 18, zero regressions | **Shipped 2026-08-12** |
 | *unnumbered* | Selection quality | BM25 + graph hybrid scorer, dual-path MMR | `<10ms` pipeline selection | ⛔ **Both preconditions measured false** — holds no number |
 | *unnumbered* | Folding & cache | Fast (zero-dep) vs Deep (AST) mode, `cache_control` | `<1ms` Fast / `~15ms` Deep | ⛔ Fast largely shipped; cache needs an exact tokenizer — **holds no number** |
-| v1.5.0 | Retrieval | `rehydrate_context` with sub-query matching | Targeted line extraction | ✅ Unblocked (M5b shipped); response shape still to design |
+| *unnumbered* | Retrieval | `rehydrate_context` with sub-query matching | Targeted line extraction | ✅ Unblocked (M5b shipped); response shape still to design |
 | v2.0.0 | Ecosystem | Streamable HTTP/SSE MCP, LiteLLM plugin, Prometheus metrics | High-throughput multi-agent proxy | ⚠ B answered *experimental*; **M7 before exporting metrics** |
 | Milestone 8 | Caching | MCP Schema Deduplication & Cache-Aligned Knapsack | 100% Provider Cache Hit Rates | ⚠ A answered — knapsack reachable; needs an exact tokenizer |
 | Milestone 9 | Guardrails | Agent Loop Circuit Breaking & Critical Atom Recall Tracking | $S_k \le 0.40$ enforcement | ⚠ C1 + H6 both shipped; re-derive against the current metric |

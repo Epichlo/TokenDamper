@@ -207,6 +207,13 @@ with **zero** new fallbacks and **zero** files that stopped reducing; 522 rows a
 because subdivision is confined to the ceiling path. Current measured baseline: python file
 **17.95%**, typescript file **18.52%** — status doc §2, not the figures a prior session may quote.
 
+**v1.5.0 shipped 2026-08-12** — §52 (a narrative `never`/`always` in a comment is not a directive;
+4 fallbacks fixed, 0 new, 572 of 576 rows byte-identical) and §53 (**the roadmap reserves no
+version numbers** — a number is assigned at ship time, after four reservations in four releases
+turned out wrong). §52 gained 6pp on the TypeScript bucket and **zero** on Python: the recovered
+files are all this repo’s own unusually narrative source, so that figure is corpus bias appearing
+as a favourable number, not a portable gain.
+
 **Do not read a falling aggregate here as a regression.** It has now happened four times for four
 different non-regression reasons (§45 line endings, §46 corpus growth, §48 the target binding, §50
 this). Compare per-row over one frozen corpus.
