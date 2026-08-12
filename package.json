@@ -1,6 +1,6 @@
 {
   "name": "tokendamper",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "private": false,
   "description": "Universal context optimization for AI coding assistants.",
   "engines": {

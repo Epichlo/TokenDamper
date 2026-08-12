@@ -3,14 +3,13 @@
 Working state for the `max_audit.md` remediation. **Read this before picking up audit work**;
 it records what is done, what is measured, and what the next batch actually requires.
 
-Last updated 2026-08-12, after **v1.4.0** (§50, sub-region elision) **plus two unreleased changes
-on `main`**: §51 (per-item drift, closed without implementing) and §52 (a narrative `never`/
-`always` is not a directive). Suite: **657 passing**, typecheck and lint clean. `npm run format`
-no longer exists; `lint` is the enforced style gate.
+Last updated 2026-08-12, after **v1.5.0** (§52, the constraint gate stops firing on narrative
+comments), on top of v1.4.0 (§50) and v1.3.0 (§48, §49). Suite: **657 passing**, typecheck and
+lint clean. `npm run format` no longer exists; `lint` is the enforced style gate.
 
-**§2's baseline is the v1.4.0 engine and does not include §52.** On the same frozen corpus §52
-takes the TypeScript file row to 43 reduced / 12 fallbacks / 24.58%; python is unchanged. The
-table is left at the released figures on purpose — re-point it when the next release ships.
+**§2 is the v1.4.0 baseline and does not include §52.** On the same frozen corpus §52 takes the
+TypeScript file row to 43 reduced / 12 fallbacks / 24.58%; python is unchanged. Re-freeze and
+re-measure before quoting a current figure — §4 explains why a remembered one is worse than none.
 
 ---
 

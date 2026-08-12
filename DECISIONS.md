@@ -3693,3 +3693,47 @@ So the 6pp on the TypeScript bucket is **not** a portable estimate of what other
 It is the corpus-bias trap `CLAUDE.md` warns about, showing up as a favourable number instead of
 an unfavourable one — which is the harder direction to notice. What is portable is the shape:
 zero regressions, and four files that produced nothing now produce something.
+
+---
+
+## 53. The Roadmap Stops Reserving Version Numbers
+
+**Date:** 2026-08-12 · **Status:** Accepted · **Generalises:** §49
+
+§49 ruled that **a release whose preconditions are measured false holds no version number**. That
+handled v1.2.0's collision and v1.3.0's and v1.4.0's, because in each case the reserved slot held
+work that could not be built.
+
+**v1.5.0 is the fourth collision and the rule does not cover it.** "Granular Sub-Query
+Re-hydration & MCP Tool Extension" is *buildable* — its blocker (M5b, a rehydration regex that
+could never match the emitted marker) shipped in Wave 2, and what remains is design work on the
+response shape. Its preconditions hold. It simply has not been built, while §52 has been.
+
+So the narrower rule would have forced either an arbitrary version, a patch number for a change
+that alters emitted bytes, or renumbering the chain — which is precisely the move §49 identified
+as the cause of the recurrence.
+
+### The general rule
+
+**A version number is a fact about what shipped, assigned at ship time. The roadmap describes
+releases by name and by gate, and reserves no numbers at all.**
+
+Four collisions in four releases is the evidence. A reserved number is a prediction about the
+order in which work will finish, made at the time of least information, and this project has been
+wrong about that order every single time — twice because the reserved work turned out to be
+unbuildable, once because remediation grew into a release of its own, and now once because a
+smaller change simply finished first.
+
+The unshipped sections keep their names, their scope and their measured gates. What they lose is
+the number, which was never doing work that a name could not.
+
+`v2.0.0` is retained as written, because a major version communicates *breaking change* rather
+than *position in a queue* — it is a statement about compatibility, which is a real property of
+the work it describes. If it ships as `v1.9.0` because nothing in it broke compatibility after
+all, that is the same correction this entry is making, and it costs a line in `CHANGELOG.md`.
+
+### Why this is worth an entry rather than a silent edit
+
+The failure this prevents is not a mis-numbered release; it is the **half hour each time** spent
+deciding whether taking the next number is legitimate, and the risk of resolving it by shifting
+the chain and setting up the next collision. Recording the rule ends the question.
