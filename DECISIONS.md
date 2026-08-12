@@ -3737,3 +3737,81 @@ all, that is the same correction this entry is making, and it costs a line in `C
 The failure this prevents is not a mis-numbered release; it is the **half hour each time** spent
 deciding whether taking the next number is legitimate, and the risk of resolving it by shifting
 the chain and setting up the next collision. Recording the rule ends the question.
+
+---
+
+## 54. The Gateway Forwards the Caller's Bytes, and Measures Them
+
+**Date:** 2026-08-12 · **Status:** Accepted · **Closes:** max_audit.md M7 — the last open finding
+
+M7 said Gateway savings are computed from `summary.tokenEstimate`, a property of the bundle
+*render*, while what leaves the process is `JSON.stringify({...parsedPayload, messages})`. It
+listed three consequences. Measured before fixing, all three were live, and they are not the same
+defect — the status doc's §6 warned that the re-serialization half is not a metrics bug, and that
+turned out to be the important half.
+
+### What re-serialization was doing
+
+One elision firing on a hand-written payload — the only shape the Gateway saves on at all:
+
+| client sent | provider received |
+|---|---|
+| `"temperature": 1.0` | `"temperature":1` |
+| `"top_p": 1e3` | `"top_p":1000` |
+| `"seed": 12345678901234567890` | `"seed":12345678901234567000` |
+
+The first two are cosmetic. **The third is a different number.** An integer past 2^53 does not
+survive `JSON.parse` → `JSON.stringify`, so a provider was being asked for a seed the caller never
+chose, by a proxy whose entire promise is faithfulness. Duplicate keys collapse the same way.
+
+This is the mechanism the project already identified as the phantom `-1.39%` in the Python
+benchmark harness (Issue 5), reproduced in production code — found there by measuring, and found
+here the same way.
+
+### The fix is a splice, not a smaller re-serialization
+
+Elided content is written **into the caller's own bytes**: each message's content is located by
+the canonical JSON encoding of the text the parser produced, searched forward from the previous
+message's end, and only that span is replaced. Every other byte is the caller's.
+
+**The forward cursor is the whole design.** A first version searched globally and refused
+ambiguous matches, which declined **every** payload the Gateway can save on — `session-dedup`
+preserves the first copy of a block and elides the later ones, so the encoded text appears more
+than once *by construction*. Walking every message in order, replaced or not, keeps position and
+identity in agreement. That version's tests passed, because with the splice declining, nothing
+changed and every assertion held.
+
+Where the caller's escaping differs from ours the text is equal after parsing but absent from the
+raw bytes; there the splice **declines** and the original body is forwarded. Invariant 3's
+direction: a lost saving costs tokens, a corrupted field costs correctness, and only one of those
+is recoverable by the caller. The same rule refuses any spliced body that is not smaller than the
+one that arrived — M7's third consequence, which nothing had ever asserted.
+
+### The metrics were the mild half
+
+Reported against measured, on that same payload: **48.5% claimed, 47.1% on the wire.** Directionally
+right and about 1.4pp optimistic — the gap being JSON structural overhead, which the render never
+sees and the provider always bills. After pointing the estimate at the forwarded body: **46.3%
+against 46.5%.**
+
+Still counted in **tokens**, still through `estimateBundleTokens`. A saving denominated in bytes
+and compared against a budget denominated in tokens is precisely the two-estimator defect §19
+exists to prevent; what changed is the artefact measured, not the unit.
+
+### The test file was green before it was right
+
+`test/integration/gateway-wire-metrics.test.ts` passed on its first run — 4520 bytes in, 4520 out,
+`tokensSaved: 0`. `cleanup:session-dedup` elides a block only once a previous turn has registered
+its hash, so a single-turn fixture elides nothing and every assertion holds vacuously. Each test
+now asserts the elision fired *before* asserting anything about it, and the file says why.
+
+That is the tenth instance of this project's oldest failure and the second in two sessions: a
+green result from a check that never ran. It is worth noticing that both recent instances were in
+**new tests written to prove a fix**, which is the moment the temptation to believe a pass is
+highest.
+
+### M7 was the last open audit finding
+
+`max_audit.md` is now closed in full. It was gated behind *"only if question B keeps the Gateway"*,
+B was answered in §41, and nothing carried it across — recorded in §6 of the status doc rather
+than quietly fixed, because the way an item disappears matters more than the item.

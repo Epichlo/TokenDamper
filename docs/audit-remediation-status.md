@@ -22,7 +22,7 @@ re-measure before quoting a current figure — §4 explains why a remembered one
 | **2** | M5a, M5b, H4, M8, M9, M10 + M5 minor | ✅ **done — DECISIONS §44** |
 | **3** | C3/H1 ✅, H6 ✅, H5 ✅, C4 ✅ | ✅ **done — C4 in DECISIONS §45** |
 | Decisions | H2, M1, M11 | ✅ **decided and done — DECISIONS §46** |
-| **Unscheduled** | **M7** | ⬜ **open — never entered a wave. See §6.** |
+| **Unscheduled** | **M7** | ✅ **closed — DECISIONS §54.** See §6 for how it was lost and found. |
 
 **Phase 1c is closed** (DECISIONS §47), which was the binding constraint on multi-file value,
 and §48 closed H4's deferred half. §5 records what is left on the architectural axis.
@@ -30,9 +30,10 @@ and §48 closed H4's deferred half. §5 records what is left on the architectura
 **This document claimed "every audit item is now closed" and that was wrong: M7 was never
 scheduled.** It appears in no wave table above, and the last document to mention it is
 `DECISIONS` §41 — "M7 … remains open", written before Wave 2. Re-verified against source
-2026-08-12: still open, in full. §6 records it. The failure mode is worth naming, because it is
-this project's own §4 rule turned on its documentation: **an item that is in no table reads as
-done, exactly like a check that never ran reads as a pass.**
+2026-08-12: open in full, and **closed the same day** (§54). §6 records both. The failure mode is
+worth naming even now that the item is done, because it is this project's own §4 rule turned on
+its documentation: **an item that is in no table reads as done, exactly like a check that never
+ran reads as a pass.**
 
 The three decisions were taken as: **H2 — report why** (keep accepting every language, but say
 when elision cannot reduce it, rather than narrowing the accepted set); **M1 — correct the
@@ -295,10 +296,12 @@ Learned the hard way during Waves 0–3.
 
 ---
 
-## 6. M7 — the one audit item still open
+## 6. M7 — closed, and how it went missing
 
 **Gateway savings are measured against an abstraction, not against the bytes sent.**
-`max_audit.md` §M7. Re-verified against source **2026-08-12** — open in full, nothing partial.
+`max_audit.md` §M7. Re-verified open in full **2026-08-12**, then **closed the same day —
+DECISIONS §54**. All three consequences below were live when measured. `max_audit.md` is now
+closed in full.
 
 | M7's three consequences | state at `5c7919b` |
 |---|---|
@@ -372,4 +375,6 @@ Ordered by measured value ÷ risk. Preconditions verified as holding — as dist
    protects content — over-narrowing deletes an instruction, which no reduction figure buys back.
    §50's other open item is the same gate: it is why the better sub-region coverage setting costs
    two working files.
-6. **M7**, per §6 — small, and the only thing between the audit and an empty list.
+6. ~~**M7.**~~ **Done — DECISIONS §54.** The audit is closed in full. The re-serialization half
+   was the one that mattered: a seed past 2^53 reached the provider as a different number. The
+   metrics half was mild — 48.5% claimed against 47.1% on the wire, now 46.3% against 46.5%.

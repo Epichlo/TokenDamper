@@ -11,6 +11,35 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **The Gateway forwards the caller's bytes instead of a re-encoding of them — audit M7, the last
+  open finding (DECISIONS §54).** When an elision fired, the proxy rebuilt the request with
+  `JSON.stringify`, which rewrote fields it had never touched. Measured on one payload:
+
+  | client sent | provider received |
+  |---|---|
+  | `"temperature": 1.0` | `"temperature":1` |
+  | `"top_p": 1e3` | `"top_p":1000` |
+  | `"seed": 12345678901234567890` | `"seed":12345678901234567000` |
+
+  The first two are cosmetic. **The third is a different number** — an integer past 2^53 does not
+  survive `JSON.parse` → `JSON.stringify` — so a provider was asked for a seed the caller never
+  chose. Duplicate keys collapsed the same way. Elided content is now spliced into the original
+  bytes and everything else is left alone; where the caller's escaping differs from ours the
+  splice declines and the request is forwarded unchanged, because a lost saving costs tokens and
+  a corrupted field costs correctness.
+
+- **A forwarded body can no longer be larger than the one that arrived.** M7's third consequence;
+  nothing had ever asserted it.
+
+### Changed
+- **Gateway savings measure the bytes forwarded, not the bundle render (M7).** `rawTokens` and
+  `optimizedTokens` came from `summary.tokenEstimate`, a property of items joined for a human or
+  a model rather than the JSON a provider bills. Reported against measured on the same payload:
+  **48.5% claimed against 47.1% actual**, now **46.3% against 46.5%**. Still counted in tokens
+  through the one estimator — a saving in bytes compared against a budget in tokens is the
+  two-estimator defect DECISIONS §19 exists to prevent.
+
 ## [v1.5.0] - 2026-08-12
 
 **The gate stops refusing a file for its own commentary.** `CONSTRAINT_DIRECTIVE_LOST` accounted
