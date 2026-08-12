@@ -3546,3 +3546,70 @@ failure names its item and Phase 1c reverts only that one.
 Still open: 18 rows exceed 50% because a single *statement* is itself dominant — one 83%-of-file
 span in `python-validator.ts`. Dividing that needs elision inside a control-flow block, which is
 a different question from dividing a body and is not attempted here.
+
+---
+
+## 51. Per-Item Drift Has Nothing to Attribute, Because §48 and §50 Closed It
+
+**Date:** 2026-08-12 · **Status:** Accepted · **Closes:** the per-item drift item, without
+implementing it
+
+Phase 1c (§47) made validation failures repairable per item and recorded one axis as unfinished:
+
+> Still open on this axis: drift remains a bundle-scoped score. It is *repairable in practice*
+> (reverting items lowers it — 0.4122 → 0.0056 on TypeScript) but it never names an item itself,
+> so a bundle failing on drift alone still falls back whole.
+
+That was true when written. **It is no longer reachable**, and the two releases since are why.
+
+### The measurement
+
+Frozen corpus, 288 files, file route, target 0.3. Every fallback classified by its actual
+`fallbackReason`:
+
+| cause | count | already attributable? |
+|---|---|---|
+| `CONSTRAINT_DIRECTIVE_LOST` | 29 | **yes** — per item, §47 |
+| `SEMANTIC_DRIFT_UNMEASURABLE` | 87 | **yes** — `unwitnessedItemIds`, §33 |
+| input not valid UTF-8 | 1 | correct, and unrelated (§35) |
+| **`SEMANTIC_DRIFT_EXCEEDED`** | **0** | — the only code that is not |
+
+`SEMANTIC_DRIFT_EXCEEDED` is the sole drift failure per-item attribution would help, and it does
+not occur. On multi-item bundles — `src/core` (33 items), `src/stages`, `src/gateway`,
+`src/adapters`, pip's 45 Python files, this repository's 62 TypeScript sources — `S_k` measures
+**0.0024 to 0.0056** against a threshold of **0.40**, and does not move at ratios 0.3, 0.5, 0.7
+or 0.9. It is roughly two orders of magnitude under the gate.
+
+### Why the premise expired
+
+§47's `0.4122` was measured on an engine that elided everything it could. §48 gave the stage a
+token ceiling to stop at, and §50 made the unit it removes a statement rather than a whole
+function body. Together they cut symbol loss so far that the drift gate no longer binds:
+the number that motivated this work is a property of a pipeline that has since been changed
+twice. **An open item is a claim about the current build, and it expires like any other.**
+
+### The mechanism is real, and reachable only by asking for it
+
+At `--max-drift 0.001` — four hundred times stricter than the default — the failure does fire,
+and behaves exactly as §47 predicted: drift names no item, so `hasUnattributableError` is set,
+repair is declined, and **7 items that would otherwise have been reverted were not**. The bundle
+fell back whole, and the reported reason was the *constraint* failure the repair would have
+fixed.
+
+So the design note is correct about what would happen. What is absent is any default-configured
+input on which it happens. Building it would be ~1,000 lines with no observable effect on output
+the product can currently emit — the H5 condition, and the same reason BM25 and MMR were not
+built (§ROADMAP). The difference worth recording is that this item was not wrong when written;
+it was **closed by other work and nobody re-measured it.**
+
+### What would make it live again
+
+Any change that raises symbol loss back above the gate on a default run: whole-item elision of
+symbol-bearing content becoming possible again (§43 refuses it), a much more aggressive default
+ratio, or a language whose symbol extraction is sparse enough that modest elision destroys most
+of the set. **Re-measure before implementing — the check is the table above, and it takes one
+corpus run.**
+
+The constraint gate is where the fallbacks actually are: 29 of 29 code-bucket fallbacks, and
+§50 measured it as the reason the better sub-region setting costs two files. That is the
+per-item axis with something on it.
