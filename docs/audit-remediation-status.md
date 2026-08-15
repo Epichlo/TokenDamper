@@ -3,9 +3,14 @@
 Working state for the `max_audit.md` remediation. **Read this before picking up audit work**;
 it records what is done, what is measured, and what the next batch actually requires.
 
-Last updated 2026-08-12, after **v1.5.0** (§52, the constraint gate stops firing on narrative
-comments), on top of v1.4.0 (§50) and v1.3.0 (§48, §49). Suite: **657 passing**, typecheck and
-lint clean. `npm run format` no longer exists; `lint` is the enforced style gate.
+Last updated 2026-08-15, after **§54** (M7) and **§55** (the LOW table), on top of **v1.5.0**
+(§52, the constraint gate stops firing on narrative comments), v1.4.0 (§50) and v1.3.0 (§48, §49).
+Suite: **669 passing**, typecheck, lint and build clean. `npm run format` no longer exists;
+`lint` is the enforced style gate.
+
+**`max_audit.md` is closed in full — every severity band, verified against source 2026-08-15.**
+§54 and §55 are what closed it, and both were items this document had already declared done. Read
+§1 before trusting any "all closed" line here, including this one.
 
 **§2 is the v1.4.0 baseline and does not include §52.** On the same frozen corpus §52 takes the
 TypeScript file row to 43 reduced / 12 fallbacks / 24.58%; python is unchanged. Re-freeze and
@@ -23,17 +28,28 @@ re-measure before quoting a current figure — §4 explains why a remembered one
 | **3** | C3/H1 ✅, H6 ✅, H5 ✅, C4 ✅ | ✅ **done — C4 in DECISIONS §45** |
 | Decisions | H2, M1, M11 | ✅ **decided and done — DECISIONS §46** |
 | **Unscheduled** | **M7** | ✅ **closed — DECISIONS §54.** See §6 for how it was lost and found. |
+| **Never scheduled** | **L1, L4–L9** | ✅ **closed — DECISIONS §55.** L2/L3 closed incidentally by C2. See §8. |
 
 **Phase 1c is closed** (DECISIONS §47), which was the binding constraint on multi-file value,
 and §48 closed H4's deferred half. §5 records what is left on the architectural axis.
 
-**This document claimed "every audit item is now closed" and that was wrong: M7 was never
-scheduled.** It appears in no wave table above, and the last document to mention it is
+**This document has claimed "every audit item is now closed" twice, and been wrong twice.**
+
+First M7 (§6). It appears in no wave table above, and the last document to mention it was
 `DECISIONS` §41 — "M7 … remains open", written before Wave 2. Re-verified against source
-2026-08-12: open in full, and **closed the same day** (§54). §6 records both. The failure mode is
-worth naming even now that the item is done, because it is this project's own §4 rule turned on
-its documentation: **an item that is in no table reads as done, exactly like a check that never
-ran reads as a pass.**
+2026-08-12: open in full, and **closed the same day** (§54). The failure mode was named then, as
+this project's own §4 rule turned on its documentation: **an item that is in no table reads as
+done, exactly like a check that never ran reads as a pass.**
+
+Then the entire **LOW table** (§8). `max_audit.md` §2 ends with nine LOW rows. The wave tables
+above account for every CRITICAL, HIGH and MEDIUM finding, and **L1, L4, L5, L6, L7, L8 and L9
+appear in no wave, no decision and no row of this document**. Re-verified 2026-08-15: all seven
+open. Closed the same day (§55).
+
+**Naming the rule did not stop it recurring three days later, which says the rule was not the
+fix.** The fix is procedural and is now the first line of §8: *close a document against its own
+list of findings, not against the list of work that was done.* A severity band nobody scheduled
+looks exactly like a severity band everybody finished.
 
 The three decisions were taken as: **H2 — report why** (keep accepting every language, but say
 when elision cannot reduce it, rather than narrowing the accepted set); **M1 — correct the
@@ -43,7 +59,9 @@ narratives and the root planning artifacts**. Each is argued in §46.
 ### Corresponding DECISIONS entries
 
 §36 license · §37 C1a · §38 C2 · §39 M6 · §40 C1b · §41 C3/H1 · §42 H6 · §43 H5 · §44 Wave 2 ·
-§45 C4 · §46 H2/M1/M11 · §47 Phase 1c
+§45 C4 · §46 H2/M1/M11 · §47 Phase 1c · §48 target binds · §50 sub-region elision ·
+§51 per-item drift closed unbuilt · §52 narrative directives · §53 no reserved numbers ·
+§54 M7 · §55 the LOW table
 
 ---
 
@@ -375,6 +393,60 @@ Ordered by measured value ÷ risk. Preconditions verified as holding — as dist
    protects content — over-narrowing deletes an instruction, which no reduction figure buys back.
    §50's other open item is the same gate: it is why the better sub-region coverage setting costs
    two working files.
-6. ~~**M7.**~~ **Done — DECISIONS §54.** The audit is closed in full. The re-serialization half
-   was the one that mattered: a seed past 2^53 reached the provider as a different number. The
-   metrics half was mild — 48.5% claimed against 47.1% on the wire, now 46.3% against 46.5%.
+6. ~~**M7.**~~ **Done — DECISIONS §54.** ~~The audit is closed in full.~~ The re-serialization
+   half was the one that mattered: a seed past 2^53 reached the provider as a different number.
+   The metrics half was mild — 48.5% claimed against 47.1% on the wire, now 46.3% against 46.5%.
+   The struck sentence is §8's subject: it was written the day M7 closed and the LOW table was
+   still open.
+7. ~~**The LOW table.**~~ **Done — DECISIONS §55.** See §8.
+
+**With that, the audit is closed in full and nothing here blocks feature work.** §3 of this
+section is the largest measured gain still available: elision reduces **3 of 17** languages, and
+every other bucket in §2 is 0.00%.
+
+---
+
+## 8. The LOW table — closed, and the second time this happened
+
+**Seven findings (L1, L4, L5, L6, L7, L8, L9) were in no wave, no decision and no row of this
+document.** L2 and L3 were closed incidentally by the C2 `Buffer` work — which is the tell: the
+two that got fixed are the two that happened to sit inside someone else's diff. Verified against
+source 2026-08-15; all seven open. Closed the same day, **DECISIONS §55**.
+
+**The rule, and it is the whole point of this section: close a document against its own list of
+findings, not against the list of work that was done.** §6 named the M7 version of this failure
+three days earlier — *an item that is in no table reads as done* — and naming it did not prevent
+the recurrence, because the check being run was still "what did we work on?". A severity band
+nobody scheduled looks exactly like a severity band everybody finished.
+
+| # | What it was | Disposition |
+|---|---|---|
+| L1 | `TOKENDAMPER_*` enum values silently dropped where the CLI flag throws | **fixed** — rejected through one helper, all four variables |
+| L4 | `constraint-preservation` chains the previous `contentHash` into the new one | **recorded** — unreachable; the audit's premise is also wrong (see below) |
+| L5 | `getOverallConfidence` returns the minimum, not an aggregate | **doc corrected** — the minimum is right for a safety gate |
+| L6 | a "Branch & Bound" comment on code that does no such search | **comment corrected** |
+| L7 | a blank first body line loses the Python region | **fixed**, and it was rated too low |
+| L8 | escaped newline not counted, so reported lines drift | **fixed** |
+| L9 | 12-hex marker prefix described as "ample" for identity | **doc corrected** — not widened; the failure is already safe |
+
+### Two things worth carrying forward
+
+**L7 was rated "fails safe (skip)" and costs the whole file.** A one-region file has nothing else
+to elide, so the skip is a fallback. Measured: 434 → 96 bytes without a blank line after `def`,
+436 → 436 with one.
+
+**And the corpus cannot see it.** Per-row over the frozen 288-file corpus, **576 of 576 rows are
+byte-identical** across all fifteen fields — because **0 of 45** Python corpus files have a blank
+line in that position. pip internals and this repository's own Python are uniformly PEP 8 there.
+This is §4's corpus-bias trap with the sign reversed: §52 produced a favourable number from
+corpus bias, and here the bias hides a real gain. **Do not read "576 of 576 byte-identical" as
+"inert"** — ask first whether the corpus contains the shape.
+
+**L4's premise does not hold, which is why it is recorded rather than fixed.** It says the hash
+"is no longer a hash of `item.content`", implying it was one. On the route that reaches this
+stage it never was — `createContextBundle` hashes a provenance object and sets `id` to it. The
+narrower defect (the value is chained) is real and unreachable: the one consumer treating this
+hash as a content identity is `cleanup:session-dedup`, which runs only under `session_dedup`
+planner mode, where `constraint-preservation` is not planned. Changing it moves `bundle.contentHash`
+and every pinned id in the suite while moving no output byte. The condition that would make it
+live is recorded at the site.

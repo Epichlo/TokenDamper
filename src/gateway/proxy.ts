@@ -398,12 +398,21 @@ function passThroughUnrepresentable(
   };
 }
 
+/**
+ * What the optimizer produced, and deliberately **not** what it cost.
+ *
+ * This carried `rawTokens`, `optimizedTokens` and `tokensSaved` off
+ * `summary.tokenEstimate` until audit M7 (DECISIONS §54) moved the measurement onto the bytes
+ * actually forwarded. `wireTokenMetrics` computes them now, from `rawBody` and `finalBody`,
+ * and both call sites spread it — so these three were still being computed and read by nobody.
+ *
+ * Removed rather than left in place, because the two sets disagree by design: the render-based
+ * numbers read 48.5% where the wire saw 47.1%, and a field that looks authoritative next to the
+ * one that replaced it is how a fixed finding comes back.
+ */
 interface GatewayOptimizationOutcome {
   readonly finalBundle: ContextBundle;
   readonly fallbackUsed: boolean;
-  readonly rawTokens: number;
-  readonly optimizedTokens: number;
-  readonly tokensSaved: number;
 }
 
 /**
@@ -465,9 +474,6 @@ function runGatewayOptimization(
     currentTurn: session.turnCount + 1,
   });
 
-  const rawTokens = initialBundle.summary.tokenEstimate;
-  const optimizedTokens = result.finalBundle.summary.tokenEstimate;
-
   return {
     // DO NOT switch this to `result.emittedOutput` — doing so reintroduces Issue 5 on
     // live provider traffic.
@@ -484,9 +490,6 @@ function runGatewayOptimization(
     // how this path satisfies invariant 3 structurally rather than by test enforcement.
     finalBundle: result.finalBundle,
     fallbackUsed: result.fallbackUsed,
-    rawTokens,
-    optimizedTokens,
-    tokensSaved: Math.max(0, rawTokens - optimizedTokens),
   };
 }
 

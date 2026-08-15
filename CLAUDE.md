@@ -228,12 +228,32 @@ rewriting the repository including the in-source commentary. `eslint` is the sty
 release whose preconditions are measured false holds **no** number. "Context Selection Quality"
 is now unnumbered for that reason — do not renumber the chain to make room for it.
 
-**One audit finding is still open: M7.** This file and the status doc both claimed every finding
-was closed; M7 was gated in the roadmap behind *"only if question B keeps the Gateway"*, B was
-answered in §41, and nothing carried it across the answer. Gateway savings are still computed
-from `summary.tokenEstimate` — the bundle render — rather than the bytes on the wire, and nothing
-asserts the rewritten body is no larger than the original. Status doc §6 has the scope, including
-why the re-serialization half is not a metrics fix.
+**`max_audit.md` is closed in full — every severity band, verified 2026-08-15.** Getting there
+took two corrections to the claim that it was already closed, and both are worth knowing because
+they are the same mistake:
+
+- **M7** was gated behind *"only if question B keeps the Gateway"*. B was answered in §41 and
+  nothing carried M7 across the answer, so it entered no wave table and this file said the audit
+  was closed. Fixed and recorded in **§54**: the Gateway splices elided content into the caller's
+  own bytes instead of re-serializing around them (a seed past 2^53 was reaching the provider as
+  a different number), and savings are measured on the bytes forwarded.
+- **The nine-row LOW table was never scheduled either** — L1 and L4 through L9 appear in no wave,
+  no decision and no status-doc row. All seven were open when checked. **§55** disposes of them:
+  L1, L7 and L8 fixed; L4, L5, L9 recorded at their sites with the reason they are acceptable
+  rather than correct; L6 was a comment that named a search the code does not perform. L2 and L3
+  had been closed incidentally by the C2 `Buffer` work, which is the tell — the two that got
+  fixed are the two that happened to sit inside someone else's diff.
+
+**Both are the same failure, and it is invariant 10 pointed at the paperwork: an item that is in
+no table reads as done, exactly like a check that never ran reads as a pass.** Before claiming a
+document is closed, enumerate its own list rather than the list of things that were worked on.
+
+**L7 is also a standing lesson about the corpus.** A Python function with a blank line after
+`def foo():` was unoptimizable end-to-end — 436 bytes in, 436 out, against 434 → 96 for the same
+function without the blank line. The fix moves **0 of 576** corpus rows, because **0 of 45**
+Python corpus files have a blank line in that position. A real gain the instrument is blind to is
+§52's corpus-bias caveat with the sign reversed; do not read "576 of 576 byte-identical" as
+"inert".
 
 The roadmap's feature gate is open. **But two of the next release's headline deliverables failed
 their preconditions when measured, and that is recorded rather than discovered again:**
@@ -273,10 +293,11 @@ finish what Phase 1c started; sub-region elision, which is what would make
 > actually emits, the Gateway no longer reads test seams from `process.env` or returns the
 > caller's credentials as response headers, `bench` runs when installed, and three knobs that did
 > nothing are gone from the surface. **C4 is closed too (§45).** The three decisions (H2, M1, M11)
-> are taken (§46) and Phase 1c is done (§47). ~~Every task-shaped audit item is done~~ — **M7 is
-> not**, and was never in a wave; see the note above and status doc §6. That sentence is left
-> struck through rather than deleted, because "every item is done" is precisely the kind of claim
-> this project keeps having to correct by measuring.
+> are taken (§46) and Phase 1c is done (§47). ~~Every task-shaped audit item is done~~ — **M7 was
+> not** (§54), ~~and M7 was the last~~ — **nor was the whole LOW table** (§55). Every finding is
+> closed now, and the strikethroughs are left rather than deleted: "every item is done" is a claim
+> this project has had to correct **twice**, both times because the check enumerated the work that
+> had been done instead of the document's own list.
 >
 > §45 is worth reading even if you never touch the Gateway: C4 was recorded as "masked by the
 > drift gate — that is luck", and measurement found it **live** on within-payload duplication,

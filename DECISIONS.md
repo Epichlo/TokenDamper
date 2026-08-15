@@ -3815,3 +3815,101 @@ highest.
 `max_audit.md` is now closed in full. It was gated behind *"only if question B keeps the Gateway"*,
 B was answered in §41, and nothing carried it across — recorded in §6 of the status doc rather
 than quietly fixed, because the way an item disappears matters more than the item.
+
+---
+
+## 55. The LOW Table Was Never Scheduled, Which Is §54's Failure Mode One Band Down
+
+**Date:** 2026-08-15 · **Status:** accepted · **Scope:** `max_audit.md` L1, L4–L9
+
+§54 closed M7 and recorded *why it went missing*: it sat behind a conditional, the conditional
+was resolved, and nothing carried it across, so it entered no wave table. The status doc named
+the general rule — **an item that is in no table reads as done, exactly like a check that never
+ran reads as a pass** — and then the audit was declared closed in full.
+
+It was not. `max_audit.md` §2 ends with a nine-row LOW table. Waves 0–3, the three decisions and
+the unscheduled-M7 row account for every CRITICAL, HIGH and MEDIUM finding. **No wave, no
+decision and no status-doc row has ever mentioned L1, L4, L5, L6, L7, L8 or L9.** L2 and L3 are
+closed, incidentally, by the C2 `Buffer` work — which is the tell: the two that got fixed are the
+two that happened to sit inside someone else's diff.
+
+Re-verified against source 2026-08-15. All seven were open.
+
+### What each one turned out to be
+
+| # | Verified | Disposition |
+|---|---|---|
+| L1 | open | fixed — env enum values are rejected, not dropped |
+| L4 | open, premise wrong | recorded at the site; unreachable, and changing it churns every pinned id |
+| L5 | open as documentation | doc corrected; the minimum is right and is kept |
+| L6 | open | comment corrected — it is not branch-and-bound |
+| L7 | open, **and costlier than rated** | fixed |
+| L8 | open | fixed |
+| L9 | open as documentation | doc corrected; not widened, because the failure is already safe |
+
+### L7 was rated too low, and the rating is the interesting part
+
+The audit says `scanPythonDefBodies` "fails safe (skip) but silently loses the region" — true,
+and it reads like the cost is one region. Measured end-to-end it is the whole file, because a
+one-region file has nothing else to elide. Two functions differing only by a blank line after
+the `def`:
+
+```
+normal.py       434 bytes -> 96 bytes   (77.9%)
+blank_first.py  436 bytes -> 436 bytes  (0%, fallback)
+```
+
+The `last` scan in that function already skipped blank lines when finding the body's end. Only
+the line that reads the body *indent* did not, so the two disagreed about where the body starts.
+`indentOf('')` is 0, the region began at column 0, the marker inherited column 0,
+`PythonValidator` reported `AST_INDENTATION_ERROR`, and `elideRegions` skipped it as
+`post_condition_rejected`.
+
+**The corpus cannot see this fix, and that is a fact about the corpus.** Per-row over the frozen
+288-file corpus, **576 of 576 rows are byte-identical** across all fifteen compared fields. The
+reason is not that the fix is inert: **0 of 45** Python corpus files contain a blank line directly
+after a `def` — pip internals and this repository's own Python are uniformly PEP 8 in that spot.
+A real gain that the measurement instrument is structurally blind to is the mirror image of §52's
+caveat, where a favourable number came from corpus bias. Same lesson, opposite sign.
+
+### L4's premise does not hold, and that changed the disposition
+
+L4 says that after `cleanup:constraint-preservation` an item's `contentHash` "is no longer a hash
+of `item.content`", implying it was one before. On the route that reaches this stage it never
+was: `createContextBundle` hashes `{source, sourcePath, content, kind, contentType, metadata,
+language}` — a provenance hash — and sets `id` to it. Only `createContextItem`'s default is
+content-only.
+
+The narrower defect is real: `hashContent({ ...item, metadata })` folds the *previous* hash in,
+so the value is chained and two items identical in every field hash differently on different
+histories. It is not changed, because it is unreachable and the change is not free. The one
+consumer treating this hash as a content identity is `cleanup:session-dedup`, which keys
+cross-turn dedup on it — and that stage runs only under `session_dedup` planner mode, where this
+stage is not planned. The knapsack list that plans this stage never plans that one. Changing it
+moves `bundle.contentHash` and every pinned id in the suite while moving no output byte.
+
+Recorded at the site with the condition that would make it live: planning both stages in one
+list, or any new consumer comparing this hash across a bundle boundary.
+
+### L1 is §30 arriving by the other door
+
+`TOKENDAMPER_PLANNER_MODE=session_dedup` was silently discarded while `--planner-mode
+session_dedup` threw. `session_dedup` is a real member of `OptimizationMode`, so it is the worst
+shape of the defect — a user has every reason to think it took effect.
+
+§30 established that a flag the command does not consume is a parse error naming where it *does*
+apply, because a setting that reports success and changes nothing is worse than one that fails.
+An environment variable is the same setting arriving by a different door. All four enum parsers
+now reject through one helper rather than one being fixed and three keeping the trap; the
+accepted sets are unchanged, and widening `defaultMode` past `pass_through` is left as the
+separate question it is.
+
+### Method note
+
+Every fixed case was run against the unfixed engine first: **5 of 7 assertions fail there**, and
+the 2 that pass are the negative controls — the no-blank-line region and the still-accepted
+environment values — which must pass both ways or they are testing nothing.
+
+`test/unit/audit-low-findings.test.ts`. L4, L5 and L9 are deliberately not pinned there; a test
+asserting current behaviour that this entry argues is *acceptable rather than correct* would be a
+hazard-pinning test without the hazard.

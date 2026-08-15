@@ -212,7 +212,25 @@ function scanPythonDefBodies(content: string): ReadonlyArray<ElisionRegion> {
       continue;
     }
 
-    const firstBody = lineAt(i + 1);
+    // The *first non-blank* body line, not `lineAt(i + 1)` — audit L7.
+    //
+    // A blank line between `def foo():` and the first statement is ordinary Python style, and
+    // reading the indent off it gave `indentOf('') === 0`. The region then began at column 0
+    // of the blank line, the marker inherited column 0, `PythonValidator` reported
+    // `AST_INDENTATION_ERROR`, and `elideRegions` skipped the region as
+    // `post_condition_rejected`. The audit rated that "fails safe (skip) but silently loses
+    // the region"; measured end-to-end it loses the whole file, because a one-region file has
+    // nothing else to elide. Two otherwise identical functions: 434 -> 96 bytes without the
+    // blank line, 436 -> 436 with it.
+    //
+    // The `last` scan above already skipped blanks; only this line did not, which is why the
+    // two disagreed.
+    let firstBodyIndex = i + 1;
+    while (firstBodyIndex < last && lineAt(firstBodyIndex).text.trim().length === 0) {
+      firstBodyIndex++;
+    }
+
+    const firstBody = lineAt(firstBodyIndex);
     const bodyIndent = indentOf(firstBody.text.replace(/\r$/, ''));
     regions.push({ start: firstBody.start + bodyIndent, end: lineAt(last).end });
   }

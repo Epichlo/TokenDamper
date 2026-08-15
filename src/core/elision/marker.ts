@@ -3,10 +3,19 @@ import type { ContentType } from '../model/types';
 /**
  * How many leading hex characters of the content hash appear in a marker.
  *
- * Twelve, matching `cleanup:session-dedup`'s existing `ref=${hash.slice(0, 12)}`. The hash in
- * a marker is there for provenance and cross-turn identity, and 48 bits is ample for both. A
- * full 64-character digest would be 53% of the marker's length and would defeat the one
- * property the marker exists to have — that a person can read it.
+ * Twelve, matching `cleanup:session-dedup`'s existing `ref=${hash.slice(0, 12)}`. A full
+ * 64-character digest would be 53% of the marker's length and would defeat the one property the
+ * marker exists to have — that a person can read it.
+ *
+ * **48 bits is ample for provenance and thinner than it looks for identity** — audit L9 is right
+ * about the distinction, and the earlier "ample for both" here was not. As provenance the digest
+ * only has to let a human tell two markers apart. As a *lookup key* it is birthday-bound: a
+ * session store holding n blocks collides with probability ~n²/2^49, which is negligible at
+ * hundreds of blocks and stops being so somewhere in the millions.
+ *
+ * It is not widened, because the failure is already safe: `TokenHasher.resolve` treats an
+ * ambiguous prefix as unresolvable and returns nothing, so a collision costs a rehydration, not
+ * a wrong one. Widen this before building anything that assumes a prefix uniquely names a block.
  */
 export const ELISION_HASH_PREFIX_LENGTH = 12;
 
