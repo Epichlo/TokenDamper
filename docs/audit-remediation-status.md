@@ -3,7 +3,8 @@
 Working state for the `max_audit.md` remediation. **Read this before picking up audit work**;
 it records what is done, what is measured, and what the next batch actually requires.
 
-Last updated 2026-08-15, after **§54** (M7) and **§55** (the LOW table), on top of **v1.5.0**
+Last updated 2026-08-15, after **§54** (M7), **§55** (the LOW table) and **§56** (the measured
+precondition for widening elision, §9), on top of **v1.5.0**
 (§52, the constraint gate stops firing on narrative comments), v1.4.0 (§50) and v1.3.0 (§48, §49).
 Suite: **669 passing**, typecheck, lint and build clean. `npm run format` no longer exists;
 `lint` is the enforced style gate.
@@ -363,12 +364,22 @@ Ordered by measured value ÷ risk. Preconditions verified as holding — as dist
    50%**, because elision's smallest unit is one region and files have one dominant region
    (58%, 61%, 83% measured). Narrowest blast radius; `test/unit/target-reduction-ratio.test.ts`
    already pins the limit and is where the tightening would be asserted.
-3. **Widen elision beyond TypeScript/JavaScript/Python.** Largest raw gain — every other bucket
-   in §2 is 0.00%. **It is not one gate, despite `supportsRegionElision` being one function.**
+3. **Widen elision beyond TypeScript/JavaScript/Python — the only item left here, and its
+   precondition is now measured. DECISIONS §56, and §9 below.** Largest raw gain: every other
+   bucket in §2 is 0.00%, and a real Go corpus offers **55–65%** of its bytes as elidable
+   function body against TypeScript's 57.78% — at least as much material as the product's best
+   language.
+
+   **It is not one gate, despite `supportsRegionElision` being one function.**
    `regionElisionLanguage` derives its answer from `selectValidator().language`, so a new
-   language needs a validator *and* `extractSymbols` coverage as well as a region scanner; add
-   the scanner alone and §33's measurement gate refuses the item, converting a 0% into a
-   fallback.
+   language needs a validator *and* `extractSymbols` coverage as well as a region scanner.
+
+   ~~Add the scanner alone and §33's measurement gate refuses the item, converting a 0% into a
+   fallback.~~ **Measured false, in the dangerous direction — §9.** That happens only for a file
+   with no struct, class or import. Real Go/C/Java/Rust carries one, which manufactures a symbol
+   body elision cannot destroy, so the gate passes with `astMeasured: true` and `S_k = 0.0000`
+   having witnessed nothing. **Scanner-first yields silent unmeasured elision, not a visible
+   zero.** Order: `extractSymbols`, then the validator, then the scanner.
 4. ~~**Per-item drift.**~~ **Closed without implementing — DECISIONS §51.** The precondition was
    measured and fails: `SEMANTIC_DRIFT_EXCEEDED` — the only drift failure that is not already
    attributable — accounts for **0 of 117** corpus fallbacks, and multi-item bundles measure
@@ -450,3 +461,52 @@ hash as a content identity is `cleanup:session-dedup`, which runs only under `se
 planner mode, where `constraint-preservation` is not planned. Changing it moves `bundle.contentHash`
 and every pinned id in the suite while moving no output byte. The condition that would make it
 live is recorded at the site.
+
+---
+
+## 9. Widening elision — the measured precondition
+
+Full reasoning in **DECISIONS §56**. This is the index and the numbers to compare against.
+
+### Material available
+
+Ceiling = share of bytes inside function bodies clearing the shipped filters
+(`MIN_REGION_BYTES` 104, `isSubstantiveRegion`), on the `scanBraceSpans` between-brace boundary.
+TypeScript and Python measured with the **shipped** `selectElisionRegions`.
+
+| corpus | files | ceiling, non-test | ceiling, all | median/file | no region |
+|---|---|---|---|---|---|
+| Go — app (`cli/cli`, `cobra`, `gin`) | 1,028 | **65.36%** | 81.44% | 63.3% | 9.5% |
+| Go — stdlib (`golang/go` `src/`) | 5,387 | **54.78%** | 59.81% | 39.5% | 28.2% |
+| TypeScript — this repo | 62 | 57.78% | — | 58.6% | 11.3% |
+| Python — pip | 45 | 46.88% | — | 53.8% | 2.2% |
+
+TypeScript turns 57.78% into **24.56%** achieved at target 0.3. On that conversion Go projects to
+**23–28%**. **Go first**, on `func` being an unambiguous header keyword where C's
+`int foo(...)` is not, and Go having no preprocessor and no header/impl split.
+
+### Three things to carry into the work
+
+- **Sequence is `extractSymbols` → validator → scanner, and the reason is a safety hole, not
+  tidiness.** A Go file with a struct or import yields symbols body elision cannot destroy, so
+  scanner-first passes every gate while measuring nothing. §33 closed the empty-before-set case;
+  this is the non-empty-but-irrelevant one, and §33 does not cover it. Step 1 alone is a free
+  negative control: reduction must stay 0% everywhere while drift on a hand-elided file becomes
+  non-zero.
+- **Test files are the larger prize.** `_test.go` is 53 MB against 36 MB of source in the app
+  corpus, at **92.22%** elidable. Nothing in this project has been counting them.
+- **The ceiling is not the constraint; the gates are.** Target 0.9 on the frozen corpus gives
+  TypeScript **21.37%** with 25 files unchanged, against **24.56%** with 12 at target 0.3.
+  Pushing harder trips the constraint and drift gates. More material does not lift that ceiling.
+
+### What is not established
+
+The 23–28% projection borrows TypeScript's conversion factor, which embeds **TypeScript's**
+fallback rate. Go's own fallback rate is unmeasurable until the validator and `extractSymbols`
+exist. Go's lower comment density should make `CONSTRAINT_DIRECTIVE_LOST` fire less — an
+expectation, not a measurement.
+
+**The cross-check is the part worth imitating.** App-only read 65.36% and the stdlib pulled it to
+54.78%; the cause was checked rather than averaged — **21.7% of stdlib source bytes are in files
+with no elidable region**, mostly generated tables (`opGen.go` alone is 3.99 MB). One corpus would
+have overstated this by ten points, which is §4's bias trap arriving on the feature side.
