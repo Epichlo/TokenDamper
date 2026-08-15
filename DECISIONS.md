@@ -3913,3 +3913,105 @@ environment values — which must pass both ways or they are testing nothing.
 `test/unit/audit-low-findings.test.ts`. L4, L5 and L9 are deliberately not pinned there; a test
 asserting current behaviour that this entry argues is *acceptable rather than correct* would be a
 hazard-pinning test without the hazard.
+
+---
+
+## 56. Go Has the Material, and the Sequencing Warning Was Wrong in the Dangerous Direction
+
+**Date:** 2026-08-15 · **Status:** accepted · **Scope:** precondition check for widening elision
+
+Widening elision beyond TypeScript/JavaScript/Python is the one roadmap item whose preconditions
+still hold. Before writing any of it, two things were measured: **how much material a real Go
+corpus actually offers**, and **what happens to the safety gates if the region scanner ships
+first**. The second turned out to matter more.
+
+### The gates, measured
+
+`selectValidator` returns `null` for Go, C, Java and Rust, so `regionElisionLanguage` is
+`undefined` and `selectElisionRegions` returns `[]`. That much was known. What was not:
+`extractSymbols` yields **no function symbols at all** for any of them. Probed on one file per
+language, the only symbols harvested were incidental matches by the TypeScript regexes —
+`type:Point` (because `struct` is an alternative in the class regex) and `import:fmt`.
+`computeTotal`, `renderReport` and `do_work` are invisible.
+
+Simulating what a region scanner would produce — signatures kept, bodies replaced, `item.id`
+preserved the way real stages preserve it:
+
+| case | symbolsBefore | S_k | astMeasured | measurementGate | fallback |
+|---|---|---|---|---|---|
+| Go **with** `struct`/`import` | `type:Point, import:fmt` | 0.0000 | **true** | **pass** | **false** |
+| Go **without** either | *(none)* | 0.0000 | false | refuse | true |
+| C without a struct | *(none)* | 0.0000 | false | refuse | true |
+
+**`ROADMAP.md` and §7 of the status doc both said: add the scanner alone and §33's measurement
+gate refuses the item, converting a 0% into a fallback. That is the bottom two rows only.** Real
+Go, C, Java and Rust source nearly always carries a struct, class or import, and those manufacture
+a symbol that body elision **cannot destroy**, because signatures are retained by construction. So
+the gate reports `astMeasured: true`, scores perfect retention, and passes — having tracked
+nothing the transform could break. Every function body in the file could be deleted and `S_k`
+stays `0.0000`.
+
+**This is C1's shape one step over, and §33 does not cover it.** §33 closed *"the before-set is
+empty, so `R_AST` defaults to 1.0"*. This is the sibling: the before-set is **non-empty but
+structurally incapable of registering the loss**. §33's gate asks *did evidence exist?*, not *was
+the evidence capable of witnessing this transform?* Shipping the scanner first therefore produces
+silent unmeasured elision rather than a visible zero — the worse of the two failures, and the one
+the docs promised could not happen.
+
+**Order, for that reason:** `extractSymbols` first, then the validator, then
+`REGION_ELISION_LANGUAGES` plus the scanner. Step 1 alone is also a free negative control —
+reduction must stay 0% everywhere, while drift on a hand-elided file becomes non-zero.
+
+### The material, measured
+
+Ceiling = share of bytes inside `func` bodies clearing the shipped filters (`MIN_REGION_BYTES`
+104, `isSubstantiveRegion`), using `scanBraceSpans`'s between-brace boundary. TypeScript and
+Python are measured with the **shipped** `selectElisionRegions` over the frozen corpus.
+
+| corpus | files | ceiling, non-test | ceiling, all | median/file | no region |
+|---|---|---|---|---|---|
+| Go — app (`cli/cli`, `cobra`, `gin`) | 1,028 | **65.36%** | 81.44% | 63.3% | 9.5% |
+| Go — stdlib (`golang/go` `src/`) | 5,387 | **54.78%** | 59.81% | 39.5% | 28.2% |
+| TypeScript — this repo | 62 | 57.78% | — | 58.6% | 11.3% |
+| Python — pip | 45 | 46.88% | — | 53.8% | 2.2% |
+
+TypeScript converts a 57.78% ceiling into **24.56%** achieved at target 0.3. On that conversion Go
+lands at roughly **23–28%** — around or above the product's best language. **The precondition
+holds.**
+
+### The cross-check moved the number, which is why it was run
+
+App-only read 65.36%; the stdlib pulled it to 54.78%. The cause was checked rather than averaged:
+**21.7% of stdlib source bytes sit in files with no elidable region**, dominated by machine-
+generated tables the `DO NOT EDIT` filter missed — `cmd/compile/internal/ssa/opGen.go` alone is
+3.99 MB, `p256_table.go` 523 KB — plus a long tail of tiny files (median no-region file: 659
+bytes). That content is atypical of what a coding assistant is pointed at. **The honest range is
+55–65%, not 65%**, and §52's caveat is why a single corpus was not trusted.
+
+### Two findings worth more than the headline
+
+**Test files are the larger prize.** In the app corpus `_test.go` is 53 MB against 36 MB of
+source — more bytes than the code — at **92.22%** elidable body with 0.7% having no region. Go's
+table-driven test convention puts large literal slices inside function bodies. If Go elision
+ships, tests are where most of the saving comes from, and nothing in this project has been
+counting them.
+
+**The ceiling is not the constraint; the gates are.** Measured on the frozen corpus, target 0.9
+gives TypeScript **21.37%** with 25 files unchanged, against **24.56%** with 12 unchanged at
+target 0.3. Pushing harder trips the constraint and drift gates and converts reducing files into
+fallbacks — §48's finding reproduced, and it bounds what Go can realise regardless of how much
+material it has.
+
+### What this does not establish
+
+The 23–28% projection borrows TypeScript's conversion factor, which embeds **TypeScript's**
+fallback rate. **Go's fallback rate cannot be measured until the validator and `extractSymbols`
+exist**, because both gates are language-dependent — the same ordering argument, now with a
+number attached to why it is worth doing. Go's much lower comment density than this repo's TS
+(M11 measured 32.8% comment prose) should make `CONSTRAINT_DIRECTIVE_LOST` fire less, which would
+push the figure up; that is an expectation, not a measurement.
+
+The instrument was validated before the result was believed — 12/12 cases including raw-string
+literals, both comment forms, interface methods with no body, and closures counted once — because
+a scanner that silently misses bodies would understate the ceiling and kill the feature on a
+false negative.

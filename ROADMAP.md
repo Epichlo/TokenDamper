@@ -285,14 +285,23 @@ elision is what closes that and is the next piece of work
 
 ### What to do instead — preconditions verified as holding
 
-1. **Widen elision beyond TypeScript/JavaScript and Python.** H2 measured **3 of 17** languages
-   reducible; a Go or Java region selector converts whole corpora from 0.00% to something. The
-   largest real-world gain available — and the only one on this list still open.
+1. **Widen elision beyond TypeScript/JavaScript and Python — precondition measured, DECISIONS
+   §56.** H2 measured **3 of 17** languages reducible. The largest real-world gain available, the
+   only one on this list still open, and now the only one with a number: a real Go corpus offers
+   **55–65%** of its bytes as elidable function body against TypeScript's **57.78%**, projecting
+   to **23–28%** achieved — at or above the product's best language. **Go first**, because `func`
+   is an unambiguous header keyword where C's `int foo(...)` is not.
 
    **It is not one gate, despite `supportsRegionElision` being one function.**
    `regionElisionLanguage` derives its answer from `selectValidator().language`, so a new language
-   needs a validator *and* `extractSymbols` coverage as well as a region scanner. Add the scanner
-   alone and §33's measurement gate refuses the item, converting a 0% into a fallback.
+   needs a validator *and* `extractSymbols` coverage as well as a region scanner.
+
+   ~~Add the scanner alone and §33's measurement gate refuses the item, converting a 0% into a
+   fallback.~~ **Measured false, and in the dangerous direction (§56).** That holds only for a
+   file with no struct, class or import. Real Go/C/Java/Rust carries one, and it manufactures a
+   symbol that body elision cannot destroy — so the gate passes with `astMeasured: true` and
+   `S_k = 0.0000` having witnessed nothing. **Scanner-first is silent unmeasured elision, not a
+   visible zero.** Build `extractSymbols` first, then the validator, then the scanner.
 2. ~~**Sub-region elision.**~~ **Shipped — v1.4.0, §50.** Rows above 50% achieved went 34 → 18
    with zero regressions.
 3. ~~**Per-item drift.**~~ **Closed without implementing — §51.** The precondition was measured
