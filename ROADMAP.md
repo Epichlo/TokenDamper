@@ -1,7 +1,8 @@
 # TokenDamper Product Roadmap — v1.1.0 → v2.0.0
 
 **Baseline:** **v1.5.0** (shipped 2026-08-12 — the constraint gate stops firing on narrative
-comments, DECISIONS §52), on top of **v1.4.0** (sub-region elision, §50) and
+comments, DECISIONS §52), plus unreleased work that closed `max_audit.md` in full
+(**§54** M7, **§55** the LOW table), on top of **v1.4.0** (sub-region elision, §50) and
 **v1.3.0** (`--target-reduction-ratio` binds, DECISIONS §48),
 on top of **v1.2.0**, which closed the whole audit remediation track in one release rather than
 the three this document planned. All items below were checked against actual source, not assumed
@@ -46,23 +47,28 @@ excluded (see Appendix).
 > This document encoded it as: **v1.2.0 does not start until the v1.1.x remediation track lands
 > and the Scope Decision Gate is answered.**
 >
-> ## ✅ That gate is now open — v1.2.0 shipped 2026-08-11.
+> ## ✅ Gate open since v1.2.0 — and `max_audit.md` is closed in full as of 2026-08-15.
 >
-> Every finding in `max_audit.md` is closed, and the three preconditions this notice named are
-> answered rather than deferred:
+> The three preconditions this notice named are answered rather than deferred:
 >
 > - **H5 — the knapsack is reachable.** `optimize` takes multiple paths and directories; measured
 >   on `src/core` at `--max-input-tokens 4000`, 15 of 31 files pruned, 20,540 tokens saved. So
->   v1.2.0's BM25 scorer and MMR refinement now build on a solver that can affect output.
+>   the BM25 scorer and MMR refinement now build on a solver that can affect output.
 > - **C1 — markdown is no longer deleted whole with every gate green** (DECISIONS §33–§34).
 > - **H3 — the instruments are honest.** `bench` runs the shipped fixture set, `baseline.json`
 >   asserts measured truth, and a 0% result reports whether a budget was in effect and whether any
 >   transform could reduce the language.
 >
+> **"Every finding is closed" was written here twice before it was true.** M7 was open until
+> DECISIONS §54 (2026-08-12) and the nine-row LOW table until §55 (2026-08-15). Both were missed
+> the same way — they sat in no wave table, and a check that enumerates the work done instead of
+> the document's own findings cannot see them. Close a document against its own list.
+>
 > **Read `docs/audit-remediation-status.md` §4 before starting feature work.** It carries the traps
 > this codebase has for anyone changing it — chiefly that `src/` is its own measurement corpus, so
 > aggregate reduction figures are not comparable across a commit and only a per-row A/B over one
-> frozen corpus means anything.
+> frozen corpus means anything. §8 adds the newest one: **byte-identical is not the same as
+> inert** — check whether the corpus contains the shape before reading 576/576 as "no effect".
 
 ```
 v1.1.0 (tag @ 807f6f0) — never published to npm
@@ -74,6 +80,9 @@ v1.1.0 (tag @ 807f6f0) — never published to npm
        ├── v1.3.0  SHIPPED 2026-08-12 — `--target-reduction-ratio` binds (§48)
        ├── v1.4.0  SHIPPED 2026-08-12 — sub-region elision; the target adheres (§50)
        ├── v1.5.0  SHIPPED 2026-08-12 — a comment narrates as well as instructs (§52)
+       │
+       ├── unreleased — M7 (§54) and the LOW table (§55).
+       │      max_audit.md closed in full. Number assigned at ship time (§53).
        │
        └── v2.0.0: Enterprise Gateway, Remote MCP & Guardrails  [B answered: experimental]
               a major signals BREAKING, not queue position — §53
@@ -194,12 +203,15 @@ before scheduling any of it.** Each is a decision with a legitimate "narrow the 
   masked by H1, which is luck, not safety" was **half wrong** — measured, within-payload
   duplication is drift-exempt and shipped a `tool_result` block as a bare string with
   `fallbackUsed: false`. It was live, on the one path the Gateway saves anything on.
-- **M7** — measure savings against the bytes on the wire rather than the newline-joined render.
-  **Still open — the only audit item that is, and this conditional is why.** It read *"Only if B
-  keeps the Gateway"*; B was answered in §41 (the Gateway is kept, labelled experimental), and
-  nothing carried M7 across the answer, so it entered no wave and
-  `docs/audit-remediation-status.md` went on to claim every item was closed. Re-verified open in
-  full 2026-08-12; scope and the re-serialization caution are in that document's §6.
+- ~~**M7**~~ — **done, DECISIONS §54.** Savings are measured on the bytes forwarded, and elided
+  content is spliced into the caller's own bytes rather than re-serialized around them — a seed
+  past 2^53 was reaching the provider as a different number. It read *"Only if B keeps the
+  Gateway"*; B was answered in §41, nothing carried M7 across the answer, so it entered no wave
+  and `docs/audit-remediation-status.md` went on to claim every item was closed.
+- ~~**L1, L4–L9**~~ — **done, DECISIONS §55.** The audit's nine-row LOW table was never scheduled
+  either, for the same reason M7 was not: it is in no wave above. L1, L7 and L8 fixed; L4, L5 and
+  L9 recorded at their sites as acceptable rather than correct; L6 was a comment naming a search
+  the code does not perform. **`max_audit.md` is now closed in full.**
 - ~~**M1 + M11**~~ — **done.** "Syntax validity" is now "bracket/quote integrity" in the README
   and `CLAUDE.md`, with a per-language table of what each validator does and does not catch,
   pinned by `test/unit/validator-guarantee.test.ts`; the phase narratives are retired to git
@@ -275,14 +287,20 @@ elision is what closes that and is the next piece of work
 
 1. **Widen elision beyond TypeScript/JavaScript and Python.** H2 measured **3 of 17** languages
    reducible; a Go or Java region selector converts whole corpora from 0.00% to something. The
-   largest real-world gain available, and the gate (`supportsRegionElision`) is already the
-   single place that decides.
-2. **Sub-region elision.** `--target-reduction-ratio` is now a real target (§48) but adheres
-   only partially: elision’s smallest unit is one region, files typically have one dominant
-   region (58%, 61%, 83% measured), and at target 30% **23 of 66** reducing files still exceed
-   50%. Finer granularity is what closes that.
-3. **Per-item drift.** Phase 1c repairs AST and constraint failures per item; drift remains
-   bundle-scoped, so a drift failure still reverts everything.
+   largest real-world gain available — and the only one on this list still open.
+
+   **It is not one gate, despite `supportsRegionElision` being one function.**
+   `regionElisionLanguage` derives its answer from `selectValidator().language`, so a new language
+   needs a validator *and* `extractSymbols` coverage as well as a region scanner. Add the scanner
+   alone and §33's measurement gate refuses the item, converting a 0% into a fallback.
+2. ~~**Sub-region elision.**~~ **Shipped — v1.4.0, §50.** Rows above 50% achieved went 34 → 18
+   with zero regressions.
+3. ~~**Per-item drift.**~~ **Closed without implementing — §51.** The precondition was measured
+   and fails: `SEMANTIC_DRIFT_EXCEEDED` accounts for **0 of 117** corpus fallbacks, and multi-item
+   bundles measure `S_k` at 0.0024–0.0056 against a 0.40 threshold. §48 and §50 cut symbol loss
+   two orders of magnitude below the gate; the entry was not wrong when written and expired.
+4. **Sub-region elision, finer still.** 18 rows still exceed 50% because a single *statement* is
+   dominant. Dividing that needs elision inside a control-flow block.
 
 ---
 
@@ -337,6 +355,48 @@ path. DECISIONS §50.
 Still open on this axis: 18 rows exceed 50% because a single *statement* is dominant (an
 83%-of-file span in `python-validator.ts`). Dividing that needs elision inside a control-flow
 block, which is a different question from dividing a body.
+
+---
+
+## v1.5.0 — A Comment Narrates As Well As Instructs — **SHIPPED 2026-08-12**
+
+`CONSTRAINT_DIRECTIVE_LOST` accounted for **29 of 29** code-bucket fallbacks, and a large share
+of those were a codebase narrating its own history — *"has always read these two"*, *"could never
+have worked"* — rather than instructing anyone. The gate no longer reads a narrative
+`never`/`always` in a comment as a directive: **4 fallbacks fixed, 0 new, 572 of 576 rows
+byte-identical**, TypeScript file route 39 → 43 reducing. DECISIONS §52.
+
+**Read the caveat before quoting the 6pp.** All four recovered files are this repository's own
+source, which M11 measured as 32.8% comment prose written in a what-used-to-be-true style.
+**Python gained zero.** That is corpus bias appearing as a *favourable* number, which is the
+harder direction to notice.
+
+This release also ended the version-reservation problem (DECISIONS §53) — see the notice at the
+top of this document.
+
+Still open on this axis, deliberately: descriptive present-tense uses (*"is always
+deterministic"*, *"do not support"*) still raise directives. The line between describing a
+constraint and stating one is blurry there, and over-narrowing deletes an instruction, which no
+reduction figure buys back.
+
+---
+
+## Unreleased — `max_audit.md` Closed In Full
+
+Not a feature release, and it holds no number until it ships (§53).
+
+- **M7 (§54)** — the Gateway forwards the caller's bytes. Elided content is spliced into the
+  original body instead of the body being rebuilt with `JSON.stringify`, which had been rewriting
+  fields it never touched: a `seed` past 2^53 reached the provider as a different number. Savings
+  are measured on the bytes forwarded (48.5% claimed against 47.1% actual, now 46.3% against
+  46.5%), and a forwarded body can no longer be larger than the one that arrived.
+- **The LOW table (§55)** — L1, L4–L9, none of which had ever been scheduled. L1 (environment
+  enums rejected rather than dropped), L7 (a blank line after `def` no longer costs the whole
+  file) and L8 (escaped newlines counted) are fixed; L4, L5 and L9 are recorded at their sites as
+  acceptable rather than correct; L6 was a comment naming a search the code does not perform.
+
+**576 of 576 corpus rows byte-identical**, which here means the corpus cannot see L7 rather than
+that L7 is inert — 0 of 45 Python corpus files have a blank line after a `def`.
 
 ---
 
@@ -467,11 +527,15 @@ Update `TOOL_DEFINITIONS` in `src/adapters/mcp/tools.ts` — this matches the to
 > appears, either resolvability was implemented or the gate was relaxed. Within-payload dedup
 > does save, and is the one path C4 was live on.
 >
-> **So the sequencing constraint stands even though the gate is open.** A Prometheus `/metrics`
-> endpoint on a pass-through that saves nothing cross-turn instruments nothing — and per **M7**,
-> still open and re-verified 2026-08-12, the numbers it would export
-> (`rawTokens`/`optimizedTokens` from `summary.tokenEstimate`) measure the bundle render, not the
-> bytes forwarded. **Fix the measurement (M7) before exporting it.**
+> **The measurement half of the sequencing constraint is now satisfied (M7, DECISIONS §54).**
+> `rawTokens`/`optimizedTokens` came from `summary.tokenEstimate` — the bundle render — and now
+> come from the bytes actually forwarded, so a `/metrics` endpoint would export a number that
+> means what it says. The three stale render-based fields were removed rather than left beside
+> the new ones.
+>
+> **The premise half still stands.** A Prometheus endpoint on a pass-through that saves nothing
+> cross-turn instruments nothing. What is worth exporting today is within-payload dedup and the
+> fallback rate — both real — not a cross-turn saving that invariant 8 says will be zero.
 
 **Core objective:** enterprise-grade proxy integration and multi-agent remote access.
 
@@ -498,21 +562,28 @@ remediation track was inserted. Corrected below; the numbering now matches the c
 | ~~Gate~~ | Scope decisions | A: H5 · B: C3/H1 · C: H4 · D: H2 | Decisions recorded in `DECISIONS.md` | ✅ **all four answered, §41–§46** |
 | v1.2.0 | Audit remediation | The whole remediation track + Phase 1c | 614 tests green | Shipped 2026-08-11, npm `latest` |
 | v1.3.0 | Prior release | §48 — `--target-reduction-ratio` is a real ceiling | 21 of 66 files on target at 0.3 | Shipped 2026-08-12 |
-| **v1.4.0** | **Baseline (shipped)** | §50 — sub-region elision; the target adheres | rows >50%: 34 → 18, zero regressions | **Shipped 2026-08-12** |
+| v1.4.0 | Prior release | §50 — sub-region elision; the target adheres | rows >50%: 34 → 18, zero regressions | Shipped 2026-08-12 |
+| **v1.5.0** | **Baseline (shipped)** | §52 — a comment narrates as well as instructs | 4 fallbacks fixed, 0 new, 572/576 identical | **Shipped 2026-08-12** |
+| *unnumbered* | Audit closed in full | §54 M7 (wire bytes + wire metrics) · §55 the LOW table | 576/576 rows identical; 669 tests green | ✅ Merged, unreleased — number at ship time |
 | *unnumbered* | Selection quality | BM25 + graph hybrid scorer, dual-path MMR | `<10ms` pipeline selection | ⛔ **Both preconditions measured false** — holds no number |
 | *unnumbered* | Folding & cache | Fast (zero-dep) vs Deep (AST) mode, `cache_control` | `<1ms` Fast / `~15ms` Deep | ⛔ Fast largely shipped; cache needs an exact tokenizer — **holds no number** |
 | *unnumbered* | Retrieval | `rehydrate_context` with sub-query matching | Targeted line extraction | ✅ Unblocked (M5b shipped); response shape still to design |
-| v2.0.0 | Ecosystem | Streamable HTTP/SSE MCP, LiteLLM plugin, Prometheus metrics | High-throughput multi-agent proxy | ⚠ B answered *experimental*; **M7 before exporting metrics** |
+| v2.0.0 | Ecosystem | Streamable HTTP/SSE MCP, LiteLLM plugin, Prometheus metrics | High-throughput multi-agent proxy | ⚠ B answered *experimental*. M7 done (§54), so metrics now measure the wire; the premise — nothing to instrument cross-turn — still stands |
 | Milestone 8 | Caching | MCP Schema Deduplication & Cache-Aligned Knapsack | 100% Provider Cache Hit Rates | ⚠ A answered — knapsack reachable; needs an exact tokenizer |
 | Milestone 9 | Guardrails | Agent Loop Circuit Breaking & Critical Atom Recall Tracking | $S_k \le 0.40$ enforcement | ⚠ C1 + H6 both shipped; re-derive against the current metric |
 
 **Not in this table, because it is not a release: `docs/audit-remediation-status.md` §7 carries
-the near-term work** — sub-region elision, widening elision beyond three languages, per-item
-drift, and M7. Those have measured preconditions that hold, which the v1.3.0 row does not.
+the near-term work.** Four of the five items it listed are now closed — sub-region elision
+shipped (§50), per-item drift closed unbuilt (§51), the constraint gate narrowed (§52) and M7
+done (§54). **Widening elision beyond three languages is what remains**, and its precondition
+holds, which the "Selection quality" row's does not.
 
-### Measured starting position (2026-08-07, `f93c385`)
+### Measured starting position (2026-08-07, `f93c385`) — historical
 
-The numbers any of the above will be judged against. Source: `max_audit.md` Appendix B.
+**These are the audit's numbers, not the current ones.** They record where the product was when
+the findings were written, and every one of them has since moved. **For a current figure, freeze
+a corpus and measure** — `docs/audit-remediation-status.md` §2 carries the live baseline and §4
+explains why a remembered number is worse than none. Source: `max_audit.md` Appendix B.
 
 | Metric | Value |
 |---|---|
