@@ -68,6 +68,25 @@ export function runConstraintPreservationStage(
       imperativeKeywords: imperativeKeywordsJson,
     });
 
+    // This folds the *previous* `contentHash` into the new one, because `...item` carries it.
+    // Audit L4, recorded rather than changed — and its premise needs correcting first.
+    //
+    // L4 says that after this stage `item.contentHash` is "no longer a hash of `item.content`",
+    // implying it was one before. On the route that reaches this stage it never was:
+    // `createContextBundle` hashes `{source, sourcePath, content, kind, contentType, metadata,
+    // language}` — a provenance hash — and sets `id` to it. Only `createContextItem`'s default
+    // is content-only. So the real defect is narrower: the value is *chained*, so two items
+    // identical in every field after this stage hash differently if their histories differed.
+    //
+    // Not changed, for two reasons. It is unreachable: the one consumer that treats this hash as
+    // a content identity is `cleanup:session-dedup`, which keys cross-turn dedup on it, and that
+    // stage runs only under `session_dedup` planner mode — where this stage is not planned. The
+    // knapsack list that does plan this stage never plans that one. And changing it would move
+    // `bundle.contentHash` and every id pinned in the suite while moving no output byte, which
+    // is the churn-for-nothing shape this project has talked itself out of before.
+    //
+    // What would make it live: planning both stages in one list, or any new consumer comparing
+    // this hash across a bundle boundary. Do that and fix this first.
     const newContentHash = hashContent({
       ...item,
       metadata: updatedMetadata,

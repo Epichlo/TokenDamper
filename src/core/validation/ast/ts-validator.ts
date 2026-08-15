@@ -151,8 +151,18 @@ export class TypeScriptValidator implements AstValidator {
       // Handle regex literal mode
       if (inRegex) {
         if (char === '\\') {
+          // An escaped newline still ends a line — audit L8. Both escape sites (here and the
+          // string one below) advanced `i` by two without asking what the skipped character
+          // was, so a backslash-newline left `line` one short for the whole rest of the file.
+          // Cosmetic in that it only moves reported positions, but a validator that names the
+          // wrong line is the surface a person reads to find the real one.
+          if (content[i + 1] === '\n') {
+            line++;
+            column = 0;
+          } else {
+            column++;
+          }
           i += 2;
-          column++;
           continue;
         }
         if (char === '[') {
@@ -170,9 +180,16 @@ export class TypeScriptValidator implements AstValidator {
       // Handle string quote mode
       if (stringQuote !== null) {
         if (char === '\\') {
-          // Escaped character, skip next char
+          // Escaped character, skip next char. A line continuation (`\` then newline) is legal
+          // in a string and common in template literals, so the newline still counts — L8, see
+          // the regex-mode site above.
+          if (content[i + 1] === '\n') {
+            line++;
+            column = 0;
+          } else {
+            column++;
+          }
           i += 2;
-          column++;
           continue;
         }
 

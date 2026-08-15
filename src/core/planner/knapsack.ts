@@ -97,7 +97,14 @@ function solveKnapsackGreedy(
     }
   }
 
-  // Branch & Bound heuristic check: compare with best single item that fits
+  // Not branch-and-bound, and it was labelled that until audit L6 said so.
+  //
+  // There is no branching and no bound here: it is the standard guard on density-ordered
+  // greedy, which has an unbounded worst case (one heavy high-value item that density order
+  // ranks last). Comparing the greedy pick against the best single item that fits is what
+  // makes this a 1/2-approximation instead. The correct name matters because the old one
+  // claimed a search this code does not perform, and the DP path next door is the one that is
+  // actually exact.
   let bestSingleItem: KnapsackItem | null = null;
   for (const item of candidates) {
     if (item.weight <= capacity) {

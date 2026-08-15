@@ -398,12 +398,21 @@ function passThroughUnrepresentable(
   };
 }
 
+/**
+ * What the optimizer produced, and deliberately **not** what it cost.
+ *
+ * This carried `rawTokens`, `optimizedTokens` and `tokensSaved` off
+ * `summary.tokenEstimate` until audit M7 (DECISIONS §54) moved the measurement onto the bytes
+ * actually forwarded. `wireTokenMetrics` computes them now, from `rawBody` and `finalBody`,
+ * and both call sites spread it — so these three were still being computed and read by nobody.
+ *
+ * Removed rather than left in place, because the two sets disagree by design: the render-based
+ * numbers read 48.5% where the wire saw 47.1%, and a field that looks authoritative next to the
+ * one that replaced it is how a fixed finding comes back.
+ */
 interface GatewayOptimizationOutcome {
   readonly finalBundle: ContextBundle;
   readonly fallbackUsed: boolean;
-  readonly rawTokens: number;
-  readonly optimizedTokens: number;
-  readonly tokensSaved: number;
 }
 
 /**
@@ -465,9 +474,6 @@ function runGatewayOptimization(
     currentTurn: session.turnCount + 1,
   });
 
-  const rawTokens = initialBundle.summary.tokenEstimate;
-  const optimizedTokens = result.finalBundle.summary.tokenEstimate;
-
   return {
     // DO NOT switch this to `result.emittedOutput` — doing so reintroduces Issue 5 on
     // live provider traffic.
@@ -484,9 +490,6 @@ function runGatewayOptimization(
     // how this path satisfies invariant 3 structurally rather than by test enforcement.
     finalBundle: result.finalBundle,
     fallbackUsed: result.fallbackUsed,
-    rawTokens,
-    optimizedTokens,
-    tokensSaved: Math.max(0, rawTokens - optimizedTokens),
   };
 }
 
@@ -603,6 +606,117 @@ function replacementFor(item: ContextItem | undefined, originalText: string): st
   return item.metadata[CONTENT_SHAPE_METADATA_KEY] === 'structured' ? undefined : item.content;
 }
 
+/**
+ * Rewrites elided content **inside the caller's own bytes**, instead of re-serializing the
+ * payload around it. Audit M7.
+ *
+ * `JSON.stringify({...parsedPayload, messages})` produces a body that is *equivalent* to the
+ * request but is not the request. Measured on a hand-written payload with one elision firing —
+ * the only shape the Gateway saves on — the proxy rewrote three fields it had no reason to
+ * touch:
+ *
+ * | client sent | provider received |
+ * |---|---|
+ * | `"temperature": 1.0` | `"temperature":1` |
+ * | `"top_p": 1e3` | `"top_p":1000` |
+ * | `"seed": 12345678901234567890` | `"seed":12345678901234567000` |
+ *
+ * The first two are cosmetic. **The third is a different number**: an integer past 2^53 does not
+ * survive `JSON.parse` → `JSON.stringify`, so the provider is asked for a seed the caller never
+ * chose. Duplicate keys collapse the same way, and pretty-printing is lost. This is the same
+ * re-serialization mechanism the project already identified as the phantom "-1.39%" in the
+ * Python harness (Issue 5), reproduced in production code — and it is *not* a metrics bug, which
+ * is why fixing it is not the same work as fixing the numbers.
+ *
+ * ### How a splice can be safe
+ *
+ * Each entry is located by the **canonical JSON encoding** of the text the parser produced,
+ * searched **forward from the previous entry's end**. The cursor is what makes duplicates work,
+ * and duplicates are the whole point: `session-dedup` preserves the first copy of a block and
+ * elides the later ones, so the encoded text deliberately appears more than once and a global
+ * "must be unique" rule would decline every payload the Gateway can actually save on. Walking
+ * every message in order — replaced or not — keeps position and identity in agreement.
+ *
+ * A client that escaped a character differently (`A` for `A`) yields a string equal after
+ * parsing but absent from the raw bytes. Then this **declines**: the caller's bytes are
+ * forwarded unchanged and the saving is lost.
+ *
+ * That direction is deliberate and follows invariant 3. Losing a saving costs tokens; corrupting
+ * a request field costs correctness, and only one of them is recoverable by the caller.
+ */
+function spliceIntoRawBody(
+  rawBody: string,
+  entries: ReadonlyArray<{ readonly from: string; readonly to?: string }>,
+): string | undefined {
+  let out = '';
+  let cursor = 0;
+
+  for (const entry of entries) {
+    const encodedFrom = JSON.stringify(entry.from);
+    const at = rawBody.indexOf(encodedFrom, cursor);
+    if (at === -1) {
+      return undefined;
+    }
+    out += rawBody.slice(cursor, at) + (entry.to === undefined ? encodedFrom : JSON.stringify(entry.to));
+    cursor = at + encodedFrom.length;
+  }
+
+  return out + rawBody.slice(cursor);
+}
+
+/**
+ * The body to forward, given the caller's bytes and the replacements the optimizer produced.
+ *
+ * Refuses to grow the request. Nothing asserted that before (audit M7's third consequence), and
+ * a proxy that makes a request *more* expensive than the one it received has inverted its own
+ * purpose — so if the spliced body is not smaller, the caller's bytes go out untouched.
+ */
+/**
+ * What the turn actually cost and saved, measured on the bytes that leave the process.
+ *
+ * The other half of audit M7. `rawTokens` and `optimizedTokens` came from
+ * `summary.tokenEstimate` — a token estimate over the *bundle render*, which is items joined for
+ * a human or a model, not the JSON a provider is billed for. Measured on the one payload shape
+ * the Gateway saves on, the render reported a **48.5%** saving where the wire saw **47.1%**; the
+ * gap is the JSON structural overhead — keys, braces, escaping — that the render never sees and
+ * the provider always charges for.
+ *
+ * Still counted in **tokens**, and still through `estimateBundleTokens`, because a saving
+ * denominated in bytes and compared against a budget denominated in tokens is the two-estimator
+ * defect DECISIONS §19 exists to prevent. What changes is the artefact measured, not the unit.
+ */
+function wireTokenMetrics(
+  rawBody: string,
+  finalBody: string,
+): { rawTokens: number; optimizedTokens: number; tokensSaved: number; dedupRatio: number } {
+  const asItem = (content: string) => ({ content }) as unknown as ContextItem;
+  const rawTokens = estimateBundleTokens([asItem(rawBody)]);
+  const optimizedTokens = estimateBundleTokens([asItem(finalBody)]);
+  const tokensSaved = Math.max(0, rawTokens - optimizedTokens);
+
+  return {
+    rawTokens,
+    optimizedTokens,
+    tokensSaved,
+    dedupRatio: rawTokens > 0 ? tokensSaved / rawTokens : 0,
+  };
+}
+
+function forwardableBody(
+  rawBody: string,
+  entries: ReadonlyArray<{ readonly from: string; readonly to?: string }>,
+): string {
+  if (!entries.some((entry) => entry.to !== undefined)) {
+    return rawBody;
+  }
+
+  const spliced = spliceIntoRawBody(rawBody, entries);
+  if (spliced === undefined || Buffer.byteLength(spliced, 'utf8') >= Buffer.byteLength(rawBody, 'utf8')) {
+    return rawBody;
+  }
+  return spliced;
+}
+
 function processOpenAiRequest(
   rawBody: string,
   session: ReturnType<GatewaySessionStore['getOrCreateSession']>,
@@ -686,28 +800,23 @@ function processOpenAiRequest(
 
   const outcome = runGatewayOptimization(rawBody, initialBundle, session, options);
 
-  let finalBody = rawBody;
   const bySlot = indexBySlot(outcome.finalBundle.items);
-  const updatedMessages = messages.map((msg, idx) => {
-    if (!msg) return msg;
-    const replacement = replacementFor(bySlot.get(`messages[${idx}]`), flattenMessageContent(msg.content).text);
-    return replacement === undefined ? msg : { ...msg, content: replacement };
+  // Every message, in payload order — not only the changed ones. The splice walks a forward
+  // cursor, so an unchanged message still has to be stepped over for the next one to be found
+  // at the right occurrence (audit M7).
+  const entries = messages.map((msg, idx) => {
+    const original = msg ? flattenMessageContent(msg.content).text : '';
+    const replacement = msg ? replacementFor(bySlot.get(`messages[${idx}]`), original) : undefined;
+    return replacement === undefined ? { from: original } : { from: original, to: replacement };
   });
 
-  if (updatedMessages.some((msg, idx) => msg !== messages[idx])) {
-    finalBody = JSON.stringify({
-      ...parsedPayload,
-      messages: updatedMessages,
-    });
-  }
+  // Spliced into the caller's bytes rather than re-serialized around them (audit M7).
+  const finalBody = forwardableBody(rawBody, entries);
 
   options.sessionStore.recordTurn(
     session.sessionId,
     {
-      rawTokens: outcome.rawTokens,
-      optimizedTokens: outcome.optimizedTokens,
-      tokensSaved: outcome.tokensSaved,
-      dedupRatio: outcome.rawTokens > 0 ? outcome.tokensSaved / outcome.rawTokens : 0,
+      ...wireTokenMetrics(rawBody, finalBody),
       fallbackUsed: outcome.fallbackUsed,
     },
     contentEntries,
@@ -815,13 +924,9 @@ function processAnthropicRequest(
 
   const outcome = runGatewayOptimization(rawBody, initialBundle, session, options);
 
-  let finalBody = rawBody;
   const bySlot = indexBySlot(outcome.finalBundle.items);
-  const updatedMessages = messages.map((msg, idx) => {
-    if (!msg) return msg;
-    const replacement = replacementFor(bySlot.get(`messages[${idx}]`), flattenMessageContent(msg.content).text);
-    return replacement === undefined ? msg : { ...msg, content: replacement };
-  });
+  // Every message, in payload order — see the OpenAI path: the splice walks a forward cursor.
+  const entries: Array<{ from: string; to?: string }> = [];
 
   // The system prompt is mapped back too.
   //
@@ -829,26 +934,29 @@ function processAnthropicRequest(
   // was silently dropped from `finalBody` — while `optimizedTokens`, and therefore the reported
   // `tokensSaved` and `dedupRatio`, still counted it as saved. The turn's metrics described a
   // saving that never reached the wire (audit C4).
-  const updatedSystem = parsedPayload.system
-    ? replacementFor(bySlot.get(SYSTEM_SLOT), flattenMessageContent(parsedPayload.system).text)
-    : undefined;
-
-  const messagesChanged = updatedMessages.some((msg, idx) => msg !== messages[idx]);
-  if (messagesChanged || updatedSystem !== undefined) {
-    finalBody = JSON.stringify({
-      ...parsedPayload,
-      ...(updatedSystem === undefined ? {} : { system: updatedSystem }),
-      messages: updatedMessages,
-    });
+  //
+  // `system` is listed first because Anthropic payloads carry it ahead of `messages`. If a
+  // caller orders it the other way the forward cursor will not find the messages after it, the
+  // splice declines, and the caller's bytes go out unchanged — a lost saving, not a corruption.
+  if (parsedPayload.system) {
+    const originalSystem = flattenMessageContent(parsedPayload.system).text;
+    const updatedSystem = replacementFor(bySlot.get(SYSTEM_SLOT), originalSystem);
+    entries.push(updatedSystem === undefined ? { from: originalSystem } : { from: originalSystem, to: updatedSystem });
   }
+
+  messages.forEach((msg, idx) => {
+    const original = msg ? flattenMessageContent(msg.content).text : '';
+    const replacement = msg ? replacementFor(bySlot.get(`messages[${idx}]`), original) : undefined;
+    entries.push(replacement === undefined ? { from: original } : { from: original, to: replacement });
+  });
+
+  // Spliced into the caller's bytes rather than re-serialized around them (audit M7).
+  const finalBody = forwardableBody(rawBody, entries);
 
   options.sessionStore.recordTurn(
     session.sessionId,
     {
-      rawTokens: outcome.rawTokens,
-      optimizedTokens: outcome.optimizedTokens,
-      tokensSaved: outcome.tokensSaved,
-      dedupRatio: outcome.rawTokens > 0 ? outcome.tokensSaved / outcome.rawTokens : 0,
+      ...wireTokenMetrics(rawBody, finalBody),
       fallbackUsed: outcome.fallbackUsed,
     },
     contentEntries,

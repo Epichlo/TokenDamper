@@ -180,22 +180,62 @@ function buildBudgetOverridesFromEnv(env: NodeJS.ProcessEnv): Partial<TokenDampe
   return override as Partial<TokenDamperConfig['budget']>;
 }
 
+/**
+ * Reads an enumerated environment variable, and **rejects** an unrecognized value rather than
+ * dropping it — audit L1.
+ *
+ * Each of the four parsers below used to return `undefined` for anything off its list, which
+ * `?? base.x` then turned into "the default, silently". `TOKENDAMPER_PLANNER_MODE=session_dedup`
+ * is the case the audit names, and it is the worst shape of it: `session_dedup` is a real
+ * member of `OptimizationMode`, so a user setting it has every reason to think it took effect.
+ * The equivalent `--planner-mode` flag throws on the same input.
+ *
+ * That asymmetry is DECISIONS §30 with the sides swapped. §30 established that a flag the
+ * command does not consume is a parse error naming where it *does* apply, on the reasoning that
+ * a setting which reports success and changes nothing is worse than one that fails. An
+ * environment variable is the same setting arriving by a different door.
+ *
+ * The accepted set is unchanged. Widening `defaultMode` past `pass_through` is a separate
+ * question — `session_dedup` is pinned by the Gateway (invariant 8) and `topology_knapsack` is
+ * budget-derived — and this fix deliberately does not answer it. It only stops the door from
+ * swallowing the answer.
+ */
+function parseEnvEnum<T extends string>(
+  variable: string,
+  value: string | undefined,
+  accepted: ReadonlyArray<T>,
+): T | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if ((accepted as ReadonlyArray<string>).includes(value)) {
+    return value as T;
+  }
+  throw new Error(
+    `Invalid value for ${variable}: ${JSON.stringify(value)}. Accepted values: ${accepted.join(', ')}.`,
+  );
+}
+
 function parseAppMode(value: string | undefined): TokenDamperConfig['appMode'] | undefined {
-  return value === 'optimize' || value === 'explain' || value === 'bench' ? value : undefined;
+  return parseEnvEnum('TOKENDAMPER_APP_MODE', value, ['optimize', 'explain', 'bench'] as const);
 }
 
 function parsePlannerMode(value: string | undefined): TokenDamperConfig['planner']['defaultMode'] | undefined {
-  return value === 'pass_through' ? value : undefined;
+  return parseEnvEnum('TOKENDAMPER_PLANNER_MODE', value, ['pass_through'] as const);
 }
 
 function parseTraceOutput(value: string | undefined): TokenDamperConfig['traceOutput'] | undefined {
-  return value === 'stderr' || value === 'stdout' ? value : undefined;
+  return parseEnvEnum('TOKENDAMPER_TRACE_OUTPUT', value, ['stderr', 'stdout'] as const);
 }
 
 function parseLogLevel(value: string | undefined): TokenDamperConfig['logging']['level'] | undefined {
-  return value === 'silent' || value === 'error' || value === 'warn' || value === 'info' || value === 'debug'
-    ? value
-    : undefined;
+  return parseEnvEnum('TOKENDAMPER_LOG_LEVEL', value, [
+    'silent',
+    'error',
+    'warn',
+    'info',
+    'debug',
+  ] as const);
 }
 
 function parseNumber(value: string | undefined): number | undefined {

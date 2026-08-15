@@ -11,6 +11,74 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **The Gateway forwards the caller's bytes instead of a re-encoding of them — audit M7, the last
+  open finding (DECISIONS §54).** When an elision fired, the proxy rebuilt the request with
+  `JSON.stringify`, which rewrote fields it had never touched. Measured on one payload:
+
+  | client sent | provider received |
+  |---|---|
+  | `"temperature": 1.0` | `"temperature":1` |
+  | `"top_p": 1e3` | `"top_p":1000` |
+  | `"seed": 12345678901234567890` | `"seed":12345678901234567000` |
+
+  The first two are cosmetic. **The third is a different number** — an integer past 2^53 does not
+  survive `JSON.parse` → `JSON.stringify` — so a provider was asked for a seed the caller never
+  chose. Duplicate keys collapsed the same way. Elided content is now spliced into the original
+  bytes and everything else is left alone; where the caller's escaping differs from ours the
+  splice declines and the request is forwarded unchanged, because a lost saving costs tokens and
+  a corrupted field costs correctness.
+
+- **A forwarded body can no longer be larger than the one that arrived.** M7's third consequence;
+  nothing had ever asserted it.
+
+- **A Python function whose body starts after a blank line is optimizable again — audit L7
+  (DECISIONS §55).** `scanPythonDefBodies` read the body indent off `def` + 1 without checking
+  whether that line was blank; `indentOf('')` is 0, so the region began at column 0, the marker
+  inherited column 0, and `PythonValidator` rejected it. The audit rated this "fails safe (skip)"
+  — measured, it costs the whole file, because a one-region file has nothing else to elide:
+
+  | file | in | out |
+  |---|---|---|
+  | no blank line after `def` | 434 B | **96 B** (77.9%) |
+  | blank line after `def` | 436 B | 436 B (0%, fallback) |
+
+  **576 of 576 corpus rows are byte-identical**, because 0 of 45 Python corpus files have a blank
+  line in that position. The instrument is blind to this one, which is §52's corpus-bias caveat
+  with the sign reversed.
+
+- **An unrecognized `TOKENDAMPER_*` enum value is rejected instead of silently ignored — audit
+  L1.** `TOKENDAMPER_PLANNER_MODE=session_dedup` was discarded and the default used, while
+  `--planner-mode session_dedup` threw; `session_dedup` is a real `OptimizationMode`, so nothing
+  told the user their setting had not applied. All four enum variables now reject through one
+  helper, naming the accepted values. Accepted sets are unchanged.
+
+- **The TypeScript validator counts a line continuation as a line — audit L8.** Both escape sites
+  advanced two characters without asking whether the skipped one was a newline, so every reported
+  position after a `\`-newline read one line short.
+
+### Changed
+- **Three dead Gateway metric fields removed (M7 residue).** `GatewayOptimizationOutcome` still
+  computed `rawTokens`/`optimizedTokens`/`tokensSaved` from `summary.tokenEstimate` after
+  `wireTokenMetrics` replaced them at both call sites. The two disagree by design — 48.5% against
+  47.1% on the same payload — and a field that looks authoritative next to the one that replaced
+  it is how a closed finding comes back.
+
+- **Three LOW findings are recorded rather than changed, with the reason at the site (DECISIONS
+  §55).** L4 (`contentHash` chaining — unreachable; the audit's premise that it was ever a
+  content-only hash does not hold), L5 (`getOverallConfidence` returns the minimum — correct for
+  a safety gate; the doc comment was what was wrong), L9 (a 12-hex prefix is ample for provenance
+  and birthday-bound for identity — not widened, because `TokenHasher.resolve` already treats an
+  ambiguous prefix as unresolvable). L6's "Branch & Bound" comment named a search the code does
+  not perform and now names the 1/2-approximation guard it is.
+
+- **Gateway savings measure the bytes forwarded, not the bundle render (M7).** `rawTokens` and
+  `optimizedTokens` came from `summary.tokenEstimate`, a property of items joined for a human or
+  a model rather than the JSON a provider bills. Reported against measured on the same payload:
+  **48.5% claimed against 47.1% actual**, now **46.3% against 46.5%**. Still counted in tokens
+  through the one estimator — a saving in bytes compared against a budget in tokens is the
+  two-estimator defect DECISIONS §19 exists to prevent.
+
 ## [v1.5.0] - 2026-08-12
 
 **The gate stops refusing a file for its own commentary.** `CONSTRAINT_DIRECTIVE_LOST` accounted

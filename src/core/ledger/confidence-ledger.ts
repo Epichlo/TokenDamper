@@ -65,7 +65,15 @@ export class ConfidenceLedger {
       confidence: initialConfidence,
     };
 
-    // Key by itemId and blockHash for dual lookup
+    // Two keys, one map, on purpose: callers hold an item id in some places and a block hash in
+    // others, and `getUniqueRecords` de-duplicates by identity so the double entry never
+    // double-counts.
+    //
+    // Audit L5 notes the collision this admits — one item's id equal to another's block hash
+    // would silently overwrite. Left as is, and worth knowing why: block hashes are 64-char
+    // sha256 hex and item ids are either the same (`createContextBundle` sets `id = contentHash`)
+    // or a short prefixed form (`msg-0-abc12345`), so a collision is a sha256 collision, not a
+    // namespace accident. Splitting the map would be the fix if ids ever become caller-supplied.
     this.records.set(params.itemId, record);
     this.records.set(params.blockHash, record);
 
@@ -106,8 +114,17 @@ export class ConfidenceLedger {
   }
 
   /**
-   * Computes the aggregated overall restoration safety confidence across all active elisions.
-   * Returns 1.0 if no elisions are currently tracked.
+   * The **minimum** restoration-safety confidence across all active elisions, not a mean.
+   *
+   * Audit L5 flagged the old wording ("aggregated") as describing something this does not do,
+   * and the name still reads that way. The minimum is the right choice and is kept: the caller
+   * is `validation.minimumConfidence`, a gate deciding whether the bundle is safe to emit, and
+   * one elision that cannot be restored makes the bundle unsafe however many others are fine.
+   * An average would let a hundred safe elisions outvote the one that matters.
+   *
+   * Returns 1.0 if no elisions are currently tracked — vacuously safe, because nothing was
+   * removed. That default is the same empty-set shape invariant 10 is about, and it is sound
+   * here only because "no records" and "nothing elided" are the same state for this ledger.
    */
   public getOverallConfidence(currentTurn: number): number {
     const unique = this.getUniqueRecords(currentTurn);
