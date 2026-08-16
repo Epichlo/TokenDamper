@@ -12,6 +12,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
+- **A file that documents the block-hash placeholder format is no longer mistaken for a corrupted
+  one — DECISIONS §57.** `detectCorruptedPlaceholders` scanned for `<BLOCK_HASH:([^>]+)>`, matching
+  any text up to the next `>`. This repository's own `src/core/elision/regions.ts` contains the
+  line *fixed width of `` `<BLOCK_HASH:` `` + 64 hex + `` `>` ``*, so the scan captured
+  `` ` + 64 hex + ` `` as a hash, found it absent from the store, and failed the whole run.
+
+  | | before | after |
+  |---|---|---|
+  | `regions.ts` over MCP | 0.00%, fallback | **32.00%** |
+  | `token-hasher.ts` over MCP | fallback | **35.28%** |
+
+  **22 files in this repo** carry a `<BLOCK_HASH:…>`-shaped string — `ARCHITECTURE.md` and
+  `CHANGELOG.md` among them — and every one was unoptimizable over MCP. The capture now requires
+  `[a-f0-9]{12,64}`, matching `ELISION_MARKER_PATTERN` beside it; a genuine placeholder absent
+  from the store is still reported, which the tests pin as a negative control.
+
+  **Only MCP was affected, and that is why nothing caught it.** The check returns early without a
+  `TokenHasher` and the CLI supplies none, so the corpus harness — which drives the CLI — could
+  not reach the gate. **576 of 576 corpus rows are byte-identical**, and here that means the
+  instrument never ran the check rather than that the change is inert.
+
 - **The Gateway forwards the caller's bytes instead of a re-encoding of them — audit M7, the last
   open finding (DECISIONS §54).** When an elision fired, the proxy rebuilt the request with
   `JSON.stringify`, which rewrote fields it had never touched. Measured on one payload:
