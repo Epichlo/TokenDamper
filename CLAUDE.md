@@ -560,6 +560,11 @@ whether a check actually ran.
   the harness does not emit, collapsing 594 rows to 2 and reporting no differences), plus the
   newer one from §56 — **byte-identical is not the same as inert**, because the corpus may not
   contain the shape being fixed.
+- **`release`** — cutting a release: choosing the number (§53 — the roadmap reserves none, a
+  number is a fact about what shipped), the single version source and the one genuine second edit,
+  and the fact that **npm publish is the user's step** because it needs their 2FA. Carries the
+  correction that there is **no `--version` flag** — it prints usage, and the trace has no
+  `adapterVersion`, so the built artifact is checked three other ways.
 - **`widen-language`** — adding a language to the elision path. The order is `extractSymbols`,
   then the validator, then the region scanner, and that is not a style preference: §56 measured
   that scanner-first produces **silent unmeasured elision**, not the visible zero the docs

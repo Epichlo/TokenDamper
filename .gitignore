@@ -237,5 +237,9 @@ diff_report.html
 # or view. Never content; appears untracked in every `git status` until ignored.
 desktop.ini
 Thumbs.db
-
-
+# Local MCP server declarations. `tokendamper mcp` is a shipping entry mode, so pointing an MCP
+# client at this repo's own build is a useful way to exercise the adapter end-to-end — M5a, M5b
+# and DECISIONS §57 were all defects that route hid from the unit suite. That config is per
+# developer (it hardcodes a path into `dist/`, which a fresh clone does not have), so it stays
+# out of the repo. Delete this line if a shared, committed server declaration is ever wanted.
+.mcp.json
