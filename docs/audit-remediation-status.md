@@ -235,6 +235,13 @@ Learned the hard way during Waves 0–3.
   from working-tree files written with LF, and committing normalized them to CRLF, adding a byte
   per line to the repo's own sources, which are the corpus. Only the per-row A/B over one frozen
   corpus means anything.
+- **A route the harness does not drive is a route nothing measures.** `tools/corpus-harness`
+  runs the CLI. Checks that are inert on the CLI — anything gated on a `TokenHasher`, a session
+  context or a multi-turn payload — are invisible to every number this project has ever recorded.
+  §57 found a gate that failed *every* MCP run on 22 of this repo's files while the corpus stayed
+  576/576 byte-identical, because the CLI supplies no hasher and the check returns early. Before
+  reading a byte-identical A/B as "no effect", ask whether the measured route executes the code
+  being changed.
 - **The audit's findings hold; its reachability assessments have not.** Three now: §40's proposed
   `filepath:` fix was measured inert, §42's imperative scoping was wrong, and §45 found C4 live
   on the one path the Gateway saves anything on, against an audit that called it masked and "that

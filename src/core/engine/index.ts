@@ -595,7 +595,28 @@ function detectCorruptedPlaceholders(bundle: ContextBundle, hasher?: TokenHasher
   }
 
   const corruptedHashes: string[] = [];
-  const regex = new RegExp(`${ELISION_MARKER_PATTERN.source}|<BLOCK_HASH:([^>]+)>`, 'g');
+  // The legacy alternative captures a **hash**, not "anything up to the next `>`".
+  //
+  // It was `<BLOCK_HASH:([^>]+)>`, which matched prose. This repository's own
+  // `src/core/elision/regions.ts` contains the line
+  //
+  //     fixed width of `<BLOCK_HASH:` + 64 hex + `>`; markers are now variable-length
+  //
+  // so the scan captured "` + 64 hex + `" as a hash, found it absent from the store, and
+  // failed the whole run as corrupted — 29.60% reduction on the CLI, 0% and a fallback on MCP.
+  // Twenty-two files in this repo carry a `<BLOCK_HASH:…>`-shaped string, `ARCHITECTURE.md` and
+  // `CHANGELOG.md` among them, and every one was unoptimizable over MCP.
+  //
+  // `createBlockPlaceholder` emits `<BLOCK_HASH:${hashContent(...)}>` — a sha256 digest — so
+  // requiring hex costs no real detection while removing every prose match. The bound matches
+  // `ELISION_MARKER_PATTERN`'s own `[a-f0-9]{12,64}`, which had this right all along; the two
+  // alternatives sitting in one regex with different strictness is what hid it.
+  //
+  // **This was invisible to the corpus harness by construction.** The check returns early
+  // without a hasher and the harness drives the CLI, which supplies none — so no measurement in
+  // this project could see it. Found by pointing an MCP client at this repository's own source.
+  // DECISIONS §57.
+  const regex = new RegExp(`${ELISION_MARKER_PATTERN.source}|<BLOCK_HASH:([a-f0-9]{12,64})>`, 'g');
   for (const item of bundle.items) {
     let match: RegExpExecArray | null;
     while ((match = regex.exec(item.content)) !== null) {

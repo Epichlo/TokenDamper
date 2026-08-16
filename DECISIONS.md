@@ -4015,3 +4015,83 @@ The instrument was validated before the result was believed — 12/12 cases incl
 literals, both comment forms, interface methods with no body, and closures counted once — because
 a scanner that silently misses bodies would understate the ceiling and kill the feature on a
 false negative.
+
+---
+
+## 57. A File That Documents the Placeholder Format Is Not a Corrupted Placeholder
+
+**Date:** 2026-08-16 · **Status:** accepted · **Scope:** `detectCorruptedPlaceholders`
+
+`src/core/elision/regions.ts` reduces **29.60%** on the CLI and fell back to **0%** on MCP. Same
+file, same ratio, same engine. The trace named the reason:
+
+```
+fallbackReason: "Block hash corruption detected: missing block hash [` + 64 hex + `] in token hasher."
+```
+
+That is not a hash. It is prose from `regions.ts:17` — *fixed width of `` `<BLOCK_HASH:` `` + 64
+hex + `` `>` ``* — the line describing the format the placeholder used to have.
+
+### The defect
+
+```js
+new RegExp(`${ELISION_MARKER_PATTERN.source}|<BLOCK_HASH:([^>]+)>`, 'g')
+```
+
+Two alternatives in one regex with different strictness. `ELISION_MARKER_PATTERN` requires
+`sha256:([a-f0-9]{12,64})`; the legacy alternative accepted `([^>]+)` — anything up to the next
+`>`. So it matched from a backtick-quoted `<BLOCK_HASH:` through to a later `>`, captured
+`` ` + 64 hex + ` `` as a hash, found it absent from the store, and failed the entire run.
+
+`createBlockPlaceholder` emits `<BLOCK_HASH:${hashContent(...)}>` — a sha256 digest — so
+requiring hex removes every prose match at no cost to real detection. The bound now matches the
+pattern beside it.
+
+**Blast radius: 22 files in this repository** carry a `<BLOCK_HASH:…>`-shaped string, including
+`marker.ts`, `token-hasher.ts`, `token-hashing.ts`, `ARCHITECTURE.md` and `CHANGELOG.md`. Every
+one was unoptimizable over MCP, as is any user documentation quoting the legacy format.
+
+### Why no measurement could see it
+
+The check opens `if (!hasher) return []`. **The CLI supplies no `TokenHasher`** — deliberate, and
+correct: with no store nothing claims to hold the content, so nothing can be missing. MCP supplies
+one at `tools.ts:236`.
+
+`tools/corpus-harness` drives the CLI. **Every corpus number in this project was measured on the
+one route where this check is disabled**, so the instrument was structurally blind to it. The
+per-row A/B confirms that from the other side: **576 of 576 rows byte-identical** across all
+fifteen fields after the fix, because the CLI route never ran the check either before or after.
+
+That is a new shape of §56's caution. There, byte-identical meant *the corpus lacks the shape*.
+Here it means *the harness cannot reach the gate*. Both read as "no effect" and neither is.
+
+### It is §52's defect in a second gate
+
+§52 stopped `CONSTRAINT_DIRECTIVE_LOST` refusing a file for its own narrative comments. This is
+the block-hash integrity gate refusing a file for **describing the mechanism that processes it** —
+and `regions.ts`, the file that defines region elision, was the one it refused.
+
+Two gates have now made the same mistake. Any check that scans emitted content for the product's
+own markers is a candidate for the third; the discriminator is that a marker has a *shape*, and
+matching on the prefix alone is not enough.
+
+### Measured
+
+| | before | after |
+|---|---|---|
+| `regions.ts` over MCP | 0.00%, fallback | **32.00%** |
+| `token-hasher.ts` over MCP | fallback | **35.28%** |
+| minimal file + one `<BLOCK_HASH:…>` comment | 0.00%, fallback | **81.6%** |
+| CLI corpus, 576 rows | — | **576/576 byte-identical** |
+
+`test/unit/block-hash-false-positive.test.ts` — 6 of 8 assertions fail against the unfixed engine.
+The 2 that pass are the negative controls, and they are the point: a genuine 64-hex placeholder
+absent from the store is **still** reported as corruption, and one the hasher knows still
+resolves. Narrowing a detector must not cost the detection.
+
+### Provenance
+
+Found by adding `tokendamper mcp` to `.mcp.json` and pointing it at this repository's own source —
+the first non-trivial thing tried. M5a and M5b were also MCP-adapter defects that a full unit
+suite did not catch. Three findings on that adapter now share a cause: it is the entry mode with
+the least end-to-end exercise, not the least tested one.
