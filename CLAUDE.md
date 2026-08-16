@@ -547,6 +547,24 @@ scoring, MMR, AST folding and Prometheus metrics on top of a pipeline that curre
   output bug, unbounded `traceStore`, missing SIGINT/SIGTERM, gateway body-size cap).
   Verify against source before implementing anything from a planning doc.
 
+## Skills in this repo
+
+Two project skills in `.claude/skills/` encode the procedures this codebase keeps getting wrong.
+They are not summaries of this file — they are the step order, the traps, and the checks that say
+whether a check actually ran.
+
+- **`measure-corpus`** — the freeze -> pin -> vary-only-`dist/` -> per-row-diff loop. Use it
+  before claiming any change did or did not move a number, and before writing a measured figure
+  into `DECISIONS.md`. Carries the two silent no-ops that have both happened (a failed build
+  leaving the previous `dist/` so an engine is compared against itself; a diff keyed on a field
+  the harness does not emit, collapsing 594 rows to 2 and reporting no differences), plus the
+  newer one from §56 — **byte-identical is not the same as inert**, because the corpus may not
+  contain the shape being fixed.
+- **`widen-language`** — adding a language to the elision path. The order is `extractSymbols`,
+  then the validator, then the region scanner, and that is not a style preference: §56 measured
+  that scanner-first produces **silent unmeasured elision**, not the visible zero the docs
+  promised, because a struct or import manufactures a symbol that body elision cannot destroy.
+
 ## Reference docs in repo
 
 **`docs/audit-remediation-status.md`** — current audit state, measured baseline, what is next.
