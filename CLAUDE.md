@@ -207,6 +207,13 @@ with **zero** new fallbacks and **zero** files that stopped reducing; 522 rows a
 because subdivision is confined to the ceiling path. Current measured baseline: python file
 **17.95%**, typescript file **18.52%** — status doc §2, not the figures a prior session may quote.
 
+**v1.6.0 shipped 2026-08-16** — §54 (M7: the Gateway forwards the caller's bytes and measures
+them), §55 (the never-scheduled LOW table), §56 (the measured Go precondition) and §57 (a file
+documenting the placeholder format is not a corrupted placeholder). **`max_audit.md` is closed in
+full.** One change can break a startup: an unrecognized `TOKENDAMPER_*` enum value is now a hard
+error rather than silently ignored — nothing that worked stopped working, because the setting
+never took effect.
+
 **v1.5.0 shipped 2026-08-12** — §52 (a narrative `never`/`always` in a comment is not a directive;
 4 fallbacks fixed, 0 new, 572 of 576 rows byte-identical) and §53 (**the roadmap reserves no
 version numbers** — a number is assigned at ship time, after four reservations in four releases

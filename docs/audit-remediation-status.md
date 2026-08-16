@@ -3,10 +3,10 @@
 Working state for the `max_audit.md` remediation. **Read this before picking up audit work**;
 it records what is done, what is measured, and what the next batch actually requires.
 
-Last updated 2026-08-15, after **§54** (M7), **§55** (the LOW table) and **§56** (the measured
-precondition for widening elision, §9), on top of **v1.5.0**
-(§52, the constraint gate stops firing on narrative comments), v1.4.0 (§50) and v1.3.0 (§48, §49).
-Suite: **669 passing**, typecheck, lint and build clean. `npm run format` no longer exists;
+Last updated 2026-08-16, **shipped as v1.6.0** — §54 (M7), §55 (the LOW table), §56 (the measured
+precondition for widening elision, §9) and §57 (the block-hash false positive), on top of
+**v1.5.0** (§52, the constraint gate stops firing on narrative comments), v1.4.0 (§50) and
+v1.3.0 (§48, §49). Suite: **677 passing**, typecheck, lint and build clean. `npm run format` no longer exists;
 `lint` is the enforced style gate.
 
 **`max_audit.md` is closed in full — every severity band, verified against source 2026-08-15.**

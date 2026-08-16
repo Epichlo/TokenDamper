@@ -1,8 +1,8 @@
 # TokenDamper Product Roadmap — v1.1.0 → v2.0.0
 
-**Baseline:** **v1.5.0** (shipped 2026-08-12 — the constraint gate stops firing on narrative
-comments, DECISIONS §52), plus unreleased work that closed `max_audit.md` in full
-(**§54** M7, **§55** the LOW table), on top of **v1.4.0** (sub-region elision, §50) and
+**Baseline:** **v1.6.0** (shipped 2026-08-16 — `max_audit.md` closed in full: **§54** M7,
+**§55** the LOW table, **§57** the block-hash false positive), on top of **v1.5.0** (the
+constraint gate stops firing on narrative comments, §52), **v1.4.0** (sub-region elision, §50) and
 **v1.3.0** (`--target-reduction-ratio` binds, DECISIONS §48),
 on top of **v1.2.0**, which closed the whole audit remediation track in one release rather than
 the three this document planned. All items below were checked against actual source, not assumed
@@ -572,8 +572,8 @@ remediation track was inserted. Corrected below; the numbering now matches the c
 | v1.2.0 | Audit remediation | The whole remediation track + Phase 1c | 614 tests green | Shipped 2026-08-11, npm `latest` |
 | v1.3.0 | Prior release | §48 — `--target-reduction-ratio` is a real ceiling | 21 of 66 files on target at 0.3 | Shipped 2026-08-12 |
 | v1.4.0 | Prior release | §50 — sub-region elision; the target adheres | rows >50%: 34 → 18, zero regressions | Shipped 2026-08-12 |
-| **v1.5.0** | **Baseline (shipped)** | §52 — a comment narrates as well as instructs | 4 fallbacks fixed, 0 new, 572/576 identical | **Shipped 2026-08-12** |
-| *unnumbered* | Audit closed in full | §54 M7 (wire bytes + wire metrics) · §55 the LOW table | 576/576 rows identical; 669 tests green | ✅ Merged, unreleased — number at ship time |
+| v1.5.0 | Prior release | §52 — a comment narrates as well as instructs | 4 fallbacks fixed, 0 new, 572/576 identical | Shipped 2026-08-12 |
+| **v1.6.0** | **Baseline (shipped)** | §54 M7 (wire bytes + wire metrics) · §55 the LOW table · §57 the block-hash false positive | 576/576 rows identical; 677 tests green | **Shipped 2026-08-16** |
 | *unnumbered* | Selection quality | BM25 + graph hybrid scorer, dual-path MMR | `<10ms` pipeline selection | ⛔ **Both preconditions measured false** — holds no number |
 | *unnumbered* | Folding & cache | Fast (zero-dep) vs Deep (AST) mode, `cache_control` | `<1ms` Fast / `~15ms` Deep | ⛔ Fast largely shipped; cache needs an exact tokenizer — **holds no number** |
 | *unnumbered* | Retrieval | `rehydrate_context` with sub-query matching | Targeted line extraction | ✅ Unblocked (M5b shipped); response shape still to design |

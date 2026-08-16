@@ -11,6 +11,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [v1.6.0] - 2026-08-16
+
+**Two defects that reached provider traffic, and an audit closed in full.** `max_audit.md` had
+been declared closed twice while findings were open; this release ships the work that actually
+closed it, plus a defect found by pointing an MCP client at this repository's own source.
+
+**The one thing that can break a startup:** an unrecognized `TOKENDAMPER_*` enum value is now a
+hard error instead of being silently ignored. Nothing that worked stops working — the setting
+never took effect — but a stale or typo'd `TOKENDAMPER_LOG_LEVEL=verbose` that used to fall back
+to the default now fails at startup. See the L1 entry below.
+
+Minor rather than major on this project's standing rule: nothing removed, but the same command
+over the same input emits different bytes. Minor rather than patch for the same reason.
+
 ### Fixed
 - **A file that documents the block-hash placeholder format is no longer mistaken for a corrupted
   one — DECISIONS §57.** `detectCorruptedPlaceholders` scanned for `<BLOCK_HASH:([^>]+)>`, matching
