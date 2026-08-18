@@ -4095,3 +4095,66 @@ Found by adding `tokendamper mcp` to `.mcp.json` and pointing it at this reposit
 the first non-trivial thing tried. M5a and M5b were also MCP-adapter defects that a full unit
 suite did not catch. Three findings on that adapter now share a cause: it is the entry mode with
 the least end-to-end exercise, not the least tested one.
+
+---
+
+## 58. Docstrings Are Where a Function's Why Survives Elision, So Keeping Them Is a Flag
+
+**Date:** 2026-08-16 · **Status:** accepted · **Scope:** `--keep-docstrings`, Python only
+
+The retention test (an agent answering questions about a codebase it can only see through the
+optimizer) found that **3 of the 4** questions the compressed version could not answer lived in
+docstrings that body elision had removed — the *why* of a function, not its shape. That pointed
+at keeping docstrings. Measured before building, it is a trade rather than a free win, which is
+why it ships as an opt-in flag with the default unchanged.
+
+### The measurement
+
+Ceiling = the share of currently-elided body tokens that the leading docstring represents,
+measured with real `cl100k_base` over the elidable def bodies of two corpora:
+
+| corpus | bodies with a docstring | tokens given back if kept |
+|---|---|---|
+| 45-file pip (real third-party) | 42.8% | **14.2%** of the saving |
+| expense-analyzer (doc-heavy) | 100% | **21.1%** of the saving |
+
+End-to-end on the doc-heavy project, per-file at target 0.3: **33.4% -> 27.5%** saved, and
+docstrings preserved went 26 -> 51. That 5.9pp is the trade, live.
+
+**So it cannot be the default.** On doc-heavy source it gives back a fifth of the win, and the
+default path being byte-identical is load-bearing here — the corpus A/B and every published
+number depend on it. It is a retention dial the caller opts into.
+
+### The seam, and why it avoids the frozen model
+
+`--keep-docstrings` threads as a *runtime option*, never as a budget field:
+`SelectRegionsOptions.keepDocstrings` -> `TokenHashingStageOptions` -> `EngineOptimizationOptions`
+-> the CLI flag. `OptimizationBudget` is pinned frozen by `ARCHITECTURE.md` (the H4 disposition),
+and this needed nothing from it — it is a transform option like `tokenHasher`, not a budget.
+
+One engine change was required beyond threading: `tokenHashingOptions` was built only when a
+`tokenHasher` was present, and the CLI supplies none. Left alone, the flag would have been
+silently dropped on the exact route that uses it — the §57 shape again. The context is now built
+whenever *either* the hasher or `keepDocstrings` is set.
+
+### Where the region actually changes
+
+Only `scanPythonDefBodies` consults the flag: it advances the region start past a leading
+docstring (a `"""..."""` triple-quote, single-line or multi-line, or a single-quoted one-liner)
+and any blank lines after it. `splitRegionIntoStatements` never sees the docstring because it
+operates *within* the already-narrowed region. If the docstring is the whole substantive body,
+the region collapses and `MIN_REGION_BYTES` drops it — correct, since there is no code left to
+remove.
+
+**TypeScript and JavaScript are unaffected by construction**, and that is asserted, not assumed:
+their doc comments (JSDoc) sit *above* the function, outside the brace-span body the selector
+returns, so there is no leading docstring inside the region to keep. `--keep-docstrings` is a
+Python-only behaviour with a language-agnostic name, and the name is honest because on other
+languages it is simply inert rather than wrong.
+
+### Method
+
+`test/unit/keep-docstrings.test.ts`: the two behaviour-changing cases fail against the unfixed
+engine; the three invariants (a body with no docstring is unchanged, a whole-body docstring drops
+the region, TypeScript is untouched) pass both ways as negative controls. The default path is
+**576/576 byte-identical** on the corpus A/B, because the flag is off.

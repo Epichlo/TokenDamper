@@ -30,6 +30,7 @@ const VALUE_FOR: Readonly<Record<string, string | null>> = {
   '--diff-html': 'out.html',
   '--max-debt': '10',
   '--max-drift': '0.5',
+  '--keep-docstrings': null,
   '--language': 'python',
   '--input-name': 'snippet.py',
   '--report-json': 'report.json',

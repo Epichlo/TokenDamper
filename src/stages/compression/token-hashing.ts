@@ -39,6 +39,8 @@ export interface TokenHashingStageOptions {
   readonly tokenHasher?: TokenHasher;
   readonly minContentLength?: number;
   readonly tokenizer?: TokenizerAdapter;
+  /** Keep leading docstrings outside the elided region (Python only). See `SelectRegionsOptions`. */
+  readonly keepDocstrings?: boolean;
 }
 
 /**
@@ -162,7 +164,7 @@ export function runTokenHashingStage(
     // `selectElisionRegions` returns nothing for content it cannot segment safely — JSON,
     // prose, logs, truncated code with no complete body — and the whole-item path below
     // still handles those exactly as before.
-    const allRegions = selectElisionRegions(item);
+    const allRegions = selectElisionRegions(item, { keepDocstrings: options?.keepDocstrings ?? false });
     // Trimmed to what the target actually needs.
     //
     // The item-level check above cannot bind on the commonest CLI shape: `optimize one-file.ts`

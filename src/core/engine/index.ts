@@ -21,6 +21,7 @@ import { estimateBundleTokens } from '../hashing/tokenizer';
 import type { ConfidenceLedger } from '../ledger/confidence-ledger';
 import { DebtTracker, type DebtTrackerOptions } from '../ledger/debt-tracker';
 import type { DeltaCompressionOptions } from '../../stages/compression/delta-compression';
+import type { TokenHashingStageOptions } from '../../stages/compression/token-hashing';
 
 export interface EngineOptimizationOptions {
   readonly sessionContext?: SessionDedupContext;
@@ -48,6 +49,11 @@ export interface EngineOptimizationOptions {
    * silent crash to anything consuming the output — invariant 10's shape.
    */
   readonly inputNotRepresentable?: string;
+  /**
+   * Keep leading docstrings outside elided regions (Python only). Off by default; the CLI wires
+   * it to `--keep-docstrings`. A retention/size trade the caller opts into — DECISIONS §58.
+   */
+  readonly keepDocstrings?: boolean;
 }
 
 /**
@@ -75,9 +81,20 @@ export function optimize(
     let stageFailed = false;
     let failureReason: string | undefined;
 
+    // `tokenHashingOptions` carries both the (optional) store and `keepDocstrings`, so it is
+    // built whenever *either* is present — the CLI supplies no hasher but can still ask for
+    // docstrings to be kept, which the old `tokenHasher ? …` guard would have dropped.
+    const tokenHashingOptions: TokenHashingStageOptions | undefined =
+      options?.tokenHasher || options?.keepDocstrings
+        ? {
+            ...(options?.tokenHasher ? { tokenHasher: options.tokenHasher } : {}),
+            ...(options?.keepDocstrings ? { keepDocstrings: true } : {}),
+          }
+        : undefined;
+
     const compressionContext: CompressionStageContext = {
       ...(options?.sessionContext ? { sessionContext: options.sessionContext } : {}),
-      ...(options?.tokenHasher ? { tokenHashingOptions: { tokenHasher: options.tokenHasher } } : {}),
+      ...(tokenHashingOptions ? { tokenHashingOptions } : {}),
       ...(options?.deltaOptions ? { deltaOptions: options.deltaOptions } : {}),
     };
 

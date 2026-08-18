@@ -181,6 +181,7 @@ export function runCli(
     const result = optimize(request, {
       ...(parsed.maxDebt !== undefined ? { maxDebtThreshold: parsed.maxDebt } : {}),
       ...(parsed.maxDrift !== undefined ? { maxDriftThreshold: parsed.maxDrift } : {}),
+      ...(parsed.keepDocstrings ? { keepDocstrings: true } : {}),
       ...(inputSurvivesDecoding
         ? {}
         : {
@@ -277,6 +278,7 @@ function runMultiFileOptimize(
   const result = optimize(request, {
     ...(parsed.maxDebt !== undefined ? { maxDebtThreshold: parsed.maxDebt } : {}),
     ...(parsed.maxDrift !== undefined ? { maxDriftThreshold: parsed.maxDrift } : {}),
+    ...(parsed.keepDocstrings ? { keepDocstrings: true } : {}),
     ...(unrepresentable.length === 0
       ? {}
       : {
@@ -381,6 +383,8 @@ export interface ParsedArguments {
   readonly diffHtmlPath?: string;
   readonly maxDebt?: number;
   readonly maxDrift?: number;
+  /** `--keep-docstrings`: keep leading docstrings outside elided regions (Python only). */
+  readonly keepDocstrings?: boolean;
   /** `--language`: what the content is, declared by the caller. */
   readonly language?: string;
   /** `--input-name`: the filename stdin content would have had. Never opened. */
@@ -437,6 +441,7 @@ export const SUPPORTED_FLAGS: Readonly<Record<'optimize' | 'bench' | 'mcp', Read
     '--diff-html',
     '--max-debt',
     '--max-drift',
+    '--keep-docstrings',
     '--language',
     '--input-name',
   ]),
@@ -523,6 +528,7 @@ export function parseArguments(argv: readonly string[], cwd: string): ParsedArgu
   let diffHtmlPath: string | undefined;
   let maxDebt: number | undefined;
   let maxDrift: number | undefined;
+  let keepDocstrings = false;
   let reportJsonPath: string | undefined;
   let quiet = false;
   let language: string | undefined;
@@ -659,6 +665,11 @@ export function parseArguments(argv: readonly string[], cwd: string): ParsedArgu
       continue;
     }
 
+    if (flag === '--keep-docstrings') {
+      keepDocstrings = true;
+      continue;
+    }
+
     if (flag === '--diff-html') {
       const value = args.shift();
       if (!value) {
@@ -780,6 +791,7 @@ export function parseArguments(argv: readonly string[], cwd: string): ParsedArgu
     ...(diffHtmlPath ? { diffHtmlPath } : {}),
     ...(maxDebt !== undefined ? { maxDebt } : {}),
     ...(maxDrift !== undefined ? { maxDrift } : {}),
+    ...(keepDocstrings ? { keepDocstrings } : {}),
     configOverrides: resolvedOverrides,
   };
 }

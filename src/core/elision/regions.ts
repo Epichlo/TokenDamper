@@ -173,7 +173,7 @@ function scanBraceSpans(content: string): ReadonlyArray<BraceSpan> {
  * rehydrated text is not byte-identical. Those two requirements are only jointly satisfiable
  * at this boundary.
  */
-function scanPythonDefBodies(content: string): ReadonlyArray<ElisionRegion> {
+function scanPythonDefBodies(content: string, keepDocstrings = false): ReadonlyArray<ElisionRegion> {
   const regions: ElisionRegion[] = [];
   const lineStarts: number[] = [0];
   for (let i = 0; i < content.length; i++) {
@@ -188,6 +188,39 @@ function scanPythonDefBodies(content: string): ReadonlyArray<ElisionRegion> {
   };
 
   const indentOf = (text: string): number => text.length - text.trimStart().length;
+
+  /**
+   * If the body line at `index` opens a docstring, returns the index of the first line *after*
+   * it; otherwise returns `index` unchanged.
+   *
+   * Only consulted under `keepDocstrings`. A docstring is a string-literal statement at the top
+   * of the body, and it is the one place a function's *why* survives elision — the retention
+   * test measured 3 of 4 lost answers living in one. Matched by its opening quote (`"""`, `'''`,
+   * or a single/double quote) and scanned to the matching close, so a multi-line docstring is
+   * skipped whole. A one-line `"""..."""` closes on its own line.
+   */
+  const skipDocstring = (index: number, upperBound: number): number => {
+    const first = lineAt(index).text.replace(/\r$/, '').trimStart();
+    const triple = first.startsWith('"""') ? '"""' : first.startsWith("'''") ? "'''" : undefined;
+    if (triple) {
+      // A single-line docstring both opens and closes on this line: `"""text"""`.
+      const afterOpen = first.slice(3);
+      if (afterOpen.includes(triple)) {
+        return index + 1;
+      }
+      for (let j = index + 1; j <= upperBound; j++) {
+        if (lineAt(j).text.includes(triple)) {
+          return j + 1;
+        }
+      }
+      return index; // unterminated: leave it in the region rather than guess
+    }
+    // A single- or double-quoted one-line docstring, e.g. `"short."`.
+    if ((first.startsWith('"') || first.startsWith("'")) && /^(['"]).*\1\s*$/.test(first)) {
+      return index + 1;
+    }
+    return index;
+  };
 
   for (let i = 0; i < lineStarts.length; i++) {
     const line = lineAt(i);
@@ -228,6 +261,22 @@ function scanPythonDefBodies(content: string): ReadonlyArray<ElisionRegion> {
     let firstBodyIndex = i + 1;
     while (firstBodyIndex < last && lineAt(firstBodyIndex).text.trim().length === 0) {
       firstBodyIndex++;
+    }
+
+    if (keepDocstrings) {
+      // Start the region *after* the docstring, and skip any blank lines between it and the
+      // first real statement, so the elided span is code only. If the docstring is the whole
+      // body, `firstBodyIndex` reaches past `last` and the region below collapses to nothing,
+      // which `selectElisionRegions` then drops on the `MIN_REGION_BYTES` / substantive filter
+      // — correctly, since there is no code to remove.
+      const afterDoc = skipDocstring(firstBodyIndex, last);
+      firstBodyIndex = afterDoc;
+      while (firstBodyIndex <= last && lineAt(firstBodyIndex).text.trim().length === 0) {
+        firstBodyIndex++;
+      }
+      if (firstBodyIndex > last) {
+        continue;
+      }
     }
 
     const firstBody = lineAt(firstBodyIndex);
@@ -691,6 +740,16 @@ function stripPython(text: string): string {
 
 export interface SelectRegionsOptions {
   readonly minRegionBytes?: number;
+  /**
+   * Keep a function's leading docstring outside the elided region (Python only).
+   *
+   * Off by default, and deliberately: measured, keeping docstrings gives back 14.2% of the
+   * saved tokens on real pip code and 21.1% on doc-heavy source, so it is a retention/size
+   * trade the caller opts into, not a free win. It has no effect on TypeScript/JavaScript,
+   * whose doc comments sit *above* the function outside the brace-span body this selector
+   * returns. DECISIONS §58.
+   */
+  readonly keepDocstrings?: boolean;
 }
 
 /**
@@ -755,7 +814,7 @@ export function selectElisionRegions(
 
   const candidates: ElisionRegion[] =
     language === 'python'
-      ? [...scanPythonDefBodies(content)]
+      ? [...scanPythonDefBodies(content, options?.keepDocstrings ?? false)]
       : scanBraceSpans(content)
           .filter((span) => FUNCTION_HEADER.test(span.header) && !CONTROL_FLOW_HEADER.test(span.header))
           .map((span) => ({ start: span.start, end: span.end }));
