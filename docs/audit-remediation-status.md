@@ -3,11 +3,13 @@
 Working state for the `max_audit.md` remediation. **Read this before picking up audit work**;
 it records what is done, what is measured, and what the next batch actually requires.
 
-Last updated 2026-08-16, **shipped as v1.6.0** — §54 (M7), §55 (the LOW table), §56 (the measured
-precondition for widening elision, §9) and §57 (the block-hash false positive), on top of
-**v1.5.0** (§52, the constraint gate stops firing on narrative comments), v1.4.0 (§50) and
-v1.3.0 (§48, §49). Suite: **677 passing**, typecheck, lint and build clean. `npm run format` no longer exists;
-`lint` is the enforced style gate.
+Last updated 2026-08-16. **Unreleased on `main` since v1.6.0:** a pruned-file warning (§7.8) and
+`--keep-docstrings` (DECISIONS §58, §7.9) — both found by dogfooding, not the audit. **Shipped as
+v1.6.0** — §54 (M7), §55 (the LOW table), §56 (the measured precondition for widening elision, §9)
+and §57 (the block-hash false positive), on top of **v1.5.0** (§52, the constraint gate stops
+firing on narrative comments), v1.4.0 (§50) and v1.3.0 (§48, §49). Suite: **684 passing**,
+typecheck, lint and build clean. `npm run format` no longer exists; `lint` is the enforced style
+gate.
 
 **`max_audit.md` is closed in full — every severity band, verified against source 2026-08-15.**
 §54 and §55 are what closed it, and both were items this document had already declared done. Read
@@ -371,11 +373,11 @@ Ordered by measured value ÷ risk. Preconditions verified as holding — as dist
    50%**, because elision's smallest unit is one region and files have one dominant region
    (58%, 61%, 83% measured). Narrowest blast radius; `test/unit/target-reduction-ratio.test.ts`
    already pins the limit and is where the tightening would be asserted.
-3. **Widen elision beyond TypeScript/JavaScript/Python — the only item left here, and its
-   precondition is now measured. DECISIONS §56, and §9 below.** Largest raw gain: every other
-   bucket in §2 is 0.00%, and a real Go corpus offers **55–65%** of its bytes as elidable
-   function body against TypeScript's 57.78% — at least as much material as the product's best
-   language.
+3. **Widen elision beyond TypeScript/JavaScript/Python — the only open item on this list, and
+   its precondition is measured. DECISIONS §56, and §9 below.** Everything else here is done;
+   this is the next piece of work. Largest raw gain: every other bucket in §2 is 0.00%, and a
+   real Go corpus offers **55–65%** of its bytes as elidable function body against TypeScript's
+   57.78% — at least as much material as the product's best language.
 
    **It is not one gate, despite `supportsRegionElision` being one function.**
    `regionElisionLanguage` derives its answer from `selectValidator().language`, so a new
@@ -417,6 +419,19 @@ Ordered by measured value ÷ risk. Preconditions verified as holding — as dist
    The struck sentence is §8's subject: it was written the day M7 closed and the LOW table was
    still open.
 7. ~~**The LOW table.**~~ **Done — DECISIONS §55.** See §8.
+8. ~~**Warn when whole files are dropped.**~~ **Done — unreleased on `main`.** `optimize ./dir`
+   dropped whole files via the knapsack with no stdout signal, so a caller piping the output to
+   a model saw a silently incomplete codebase. The CLI now names dropped files on stderr. Found
+   by dogfooding on the expense-analyzer project, not the audit. Measuring the fixture also
+   established that **pruning fires at every ratio from 0.05 to 0.5** — it is common, not
+   exceptional.
+9. ~~**`--keep-docstrings`.**~~ **Done — DECISIONS §58, unreleased on `main`.** The retention
+   test found 3 of 4 lost answers lived in docstrings elision had removed. Opt-in, because
+   measured it gives back 14.2%–21.1% of the saving; the default stays 576/576 byte-identical.
+   Python-only, threaded as a runtime option so it never touches the frozen `OptimizationBudget`.
+
+**With those two merged, item 3 (widen to Go) is the single remaining item on this list.** §9
+carries its measured precondition and the sequencing the `widen-language` skill encodes.
 
 **With that, the audit is closed in full and nothing here blocks feature work.** §3 of this
 section is the largest measured gain still available: elision reduces **3 of 17** languages, and
