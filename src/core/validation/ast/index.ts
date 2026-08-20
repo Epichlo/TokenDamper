@@ -1,4 +1,5 @@
 import type { ContentType, ContextBundle, ContextItem } from '../../model/types';
+import { GoValidator } from './go-validator';
 import { JsonValidator } from './json-validator';
 import { PythonValidator } from './python-validator';
 import { TypeScriptValidator } from './ts-validator';
@@ -13,6 +14,7 @@ export * from './types';
 export * from './ts-validator';
 export * from './json-validator';
 export * from './python-validator';
+export * from './go-validator';
 
 export interface BundleAstValidationResult {
   readonly valid: boolean;
@@ -29,6 +31,7 @@ export interface BundleAstValidationResult {
 const tsValidator = new TypeScriptValidator();
 const jsonValidator = new JsonValidator();
 const pythonValidator = new PythonValidator();
+const goValidator = new GoValidator();
 
 /**
  * The complete map from `ContentType` to the validator that governs it.
@@ -69,6 +72,11 @@ const CONTENT_TYPE_VALIDATORS: Readonly<Record<ContentType, AstValidator | null>
   // `selectValidator`, which run *first* and are unchanged. What changes is that the
   // remainder now report `validated: false` and appear on `trace.astCoverage`, which is
   // §23's distinction — an unexamined item is not a passing one.
+  //
+  // **Go joined that list in §60 and did not change this entry.** It reaches `GoValidator`
+  // through the same two branches, by its own grammar rather than by being lexed as
+  // TypeScript — which is the distinction this `null` exists to preserve, not one it
+  // contradicts.
   code: null,
   text: null,
   markdown: null,
@@ -97,6 +105,9 @@ export function selectValidator(item: ContextItem): AstValidator | null {
     if (['py', 'python'].includes(lang)) {
       return pythonValidator;
     }
+    if (['go', 'golang'].includes(lang)) {
+      return goValidator;
+    }
   }
 
   if (item.path) {
@@ -109,6 +120,9 @@ export function selectValidator(item: ContextItem): AstValidator | null {
     }
     if (ext === 'py') {
       return pythonValidator;
+    }
+    if (ext === 'go') {
+      return goValidator;
     }
   }
 

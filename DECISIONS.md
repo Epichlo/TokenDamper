@@ -4264,3 +4264,120 @@ fitting. Recorded in the recipe's own log; prose aggregates from here are not co
 - **A Go raw string holding source at column 0 yields a symbol.** Characterized in the test rather
   than fixed: it errs conservatively, because such a symbol sits inside a body, so elision removes
   it and drift becomes more likely to refuse, not less.
+
+---
+
+## 60. Go Gets Its Own Lexer, Because Raw Strings Are Where the TypeScript One Invents Findings
+
+**Date:** 2026-08-21 · **Status:** accepted · **Scope:** `GoValidator`, `selectValidator`
+
+Step 2 of the three that widen elision to Go (§56 fixed the order, §59 was step 1). **Go is still
+unelidable after it**: `regionElisionLanguage` requires the language to be in
+`REGION_ELISION_LANGUAGES` *as well as* to have a validator, and `'go'` joins that list in step 3.
+What this step buys is **coverage** — a `.go` item stops reporting `validated: false` and starts
+being checked, which is §23's distinction that an unexamined item is not a passing one.
+
+### Why not just point Go at `TypeScriptValidator`
+
+The grammars share `//`, `/* */` and the three bracket pairs, which is exactly the resemblance
+that makes substitution look free. Measured over **9,181 real Go files, 100.8 MB** (`cli/cli`,
+`cobra`, `gin`, `golang/go` `src/` — §56's corpus, its stdlib subset hash-verified **5,387 of
+5,387** against that session's manifest):
+
+| validator | files flagged | rate |
+|---|---|---|
+| `TypeScriptValidator` | **73** | 0.80% |
+| `GoValidator` | **1** | 0.01% |
+
+The single Go flag is `cmd/compile/internal/syntax/testdata/issue20789.go`, whose own header reads
+*"Make sure this doesn't crash the compiler"* — deliberately malformed input, so a **true
+positive**. The 72 files the two disagree on are raw strings:
+
+- `` strings.Contains(v, `\`) `` — `cmd/go/internal/fips140`. A TS lexer reads the backslash as
+  escaping the closing backtick, never closes the literal, and swallows the rest of the file.
+- `cobra/zsh_completions.go` — a 200-line shell template inside one raw string.
+
+Three lexical facts drive all of it. Go's `` ` `` string spans lines, has **no escapes at all**
+and routinely holds `"`, `{`, `}` and `\` (struct tags, SQL, templates); rune literals are single
+characters, including `'"'`; and there are **no regex literals**, so the TS lexer's
+`/`-may-start-a-regex heuristic has nothing to be right about and every wrong guess swallows a
+line. This is §17's finding — a verdict decided by quote parity is not validating anything —
+measured for Go instead of for shell, perl and tcl.
+
+### 0 findings is what a validator that examines nothing also reports
+
+Invariant 10, so the control runs the other way. Over a 1,312-file deterministic spread of the
+same corpus, deleting the last column-0 `}` is caught in **1,159 of 1,163** files (**99.66%**).
+Five further mutation classes — dropping the first `{`, mismatching a pair, opening an
+unterminated interpreted string, an unterminated raw string, an unterminated block comment — run
+95%–100% on the same sample.
+
+**Every non-catch was inspected rather than tolerated, and all of them are mutations that are not
+defects**: the brace deleted sits inside a raw string (`internal/platform/zosarch_test.go`, whose
+template holds generated Go), inside a `//` comment (`cmd/gofmt/doc.go`, `cmd/cgo/.../callstub`),
+or inside a cgo `/* … */` C preamble (`runtime/testdata/.../testsyscallc.go`). Deleting a brace
+there changes nothing, so a non-flag is correct — and it is the same property that separates this
+validator from the TypeScript one, showing up as an apparent miss.
+
+### The step-2 negative control
+
+Two frozen corpora, engine varied and nothing else, both arms built with an `src`-only tsconfig.
+
+**A Go corpus, 80 files / 160 rows** (frozen separately via `collect.js --recipe`; the shipped
+`recipe.json` is untouched, because these roots are a scratch clone and a temp directory is not a
+stable root to bake into the repo):
+
+| | step 1 | step 2 |
+|---|---|---|
+| file route, items no validator looked at | 40 + 40 | **0 + 0** |
+| stdin route, same | 40 + 40 | 40 + 40 |
+| reduction, every bucket and route | 0.00% | **0.00%** |
+| fallbacks | 0 | **0** |
+| `outputSha` identical between arms | — | **160/160** |
+
+Exactly **three fields move, on exactly the 80 file-route rows**: `astChecked` 0→1,
+`astUnchecked` 1→0, `symbolBearingItems` 0→1. **Coverage moves; output does not.**
+
+The stdin row staying at 40 is not a regression: a piped `.go` carries no filename, and there is
+deliberately no Go content probe (§31's rule — a probe may only claim content its validator
+already accepts, and §4's TS-versus-prose overlap is why probes are added sparingly).
+`--language go` and `--input-name x.go` both reach the validator, and `go`/`golang` were already
+accepted spellings.
+
+**The 287-file main corpus is 574/574 byte-identical, 0 rows differing across 17 fields.** As in
+§59 that is the corpus lacking the shape rather than the change being inert — it contains no Go
+at all, which is why the Go corpus above exists.
+
+### The finding this exposed: `symbolBearingItems` counts the wrong thing
+
+`DriftCoverage.symbolBearingItems` is computed as the set of items **a validator covered**, not
+items bearing symbols — it is `astChecked` by another route. The name has been wrong since it was
+introduced and nothing could see it, because until §59 every language with symbols also had a
+validator and every language without one had neither.
+
+Go between §59 and §60 is the first case where those came apart, and the reported pair is
+self-contradicting: over the 80 frozen Go files on the file route, **all 80** report
+`symbolsBefore = 3` or more next to `symbolBearingItems = 0`. `symbolsBefore` is the field that
+actually counts symbols.
+
+Recorded at the computation site and **deliberately not fixed here**. It is a trace field
+consumers parse, so renaming it — or making it count what its name says, which moves the number
+for every language and invalidates recorded baselines — is a decision with its own blast radius,
+not a ride-along in the commit that exposed it. This is §55's lesson pointed the other way: the
+two LOW items that got fixed were the two that happened to sit inside someone else's diff.
+
+### What this does not establish
+
+- **Go's fallback rate under elision is still unmeasured.** The 0 fallbacks above are 0 out of 160
+  rows on which *nothing was elided*, so they say nothing about what the constraint and drift
+  gates will do once step 3 selects regions. §56's 23–28% projection still borrows TypeScript's
+  conversion factor.
+- **The guarantee is balance, not syntax** — the same one the README's table states for
+  TypeScript. Balanced but meaningless Go passes. What it is for is the failure mode step 3
+  introduces: an elision landing inside a raw string, or dropping a `}`, is an unbalanced bracket.
+- **The Go corpus is alphabetically-first selection**, which is deterministic and not
+  representative (the harness README's own caveat). It is adequate for a coverage measurement and
+  would not be adequate for a reduction one.
+- **`code` still maps to no validator.** Go reaches `GoValidator` through the `language` and
+  `path` branches, by its own grammar — which is the distinction that `null` exists to preserve,
+  not one this contradicts. Rust, C, Java, shell and the rest are unchanged and still uncovered.

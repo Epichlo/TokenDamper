@@ -4,12 +4,13 @@ Working state for the `max_audit.md` remediation. **Read this before picking up 
 it records what is done, what is measured, and what the next batch actually requires.
 
 Last updated 2026-08-20. **Unreleased on `main` since v1.6.0:** a pruned-file warning (§7.8),
-`--keep-docstrings` (DECISIONS §58, §7.9) — both found by dogfooding, not the audit — and **step 1
-of widening elision to Go** (DECISIONS §59, §7.3, §9), which adds Go function and method symbols
-to `DriftTracker.extractSymbols` and changes no output anywhere. **Shipped as
+`--keep-docstrings` (DECISIONS §58, §7.9) — both found by dogfooding, not the audit — and **steps 1 and 2
+of widening elision to Go** (DECISIONS §59 and §60, §7.3, §9) — Go function and method symbols
+in `DriftTracker.extractSymbols`, and a Go validator so `.go` items are checked rather than
+skipped. Neither changes output anywhere; Go is still unelidable until step 3. **Shipped as
 v1.6.0** — §54 (M7), §55 (the LOW table), §56 (the measured precondition for widening elision, §9)
 and §57 (the block-hash false positive), on top of **v1.5.0** (§52, the constraint gate stops
-firing on narrative comments), v1.4.0 (§50) and v1.3.0 (§48, §49). Suite: **698 passing**,
+firing on narrative comments), v1.4.0 (§50) and v1.3.0 (§48, §49). Suite: **723 passing**,
 typecheck, lint and build clean. `npm run format` no longer exists; `lint` is the enforced style
 gate.
 
@@ -376,10 +377,11 @@ Ordered by measured value ÷ risk. Preconditions verified as holding — as dist
    (58%, 61%, 83% measured). Narrowest blast radius; `test/unit/target-reduction-ratio.test.ts`
    already pins the limit and is where the tightening would be asserted.
 3. **Widen elision beyond TypeScript/JavaScript/Python — the only open item on this list, and
-   its precondition is measured. DECISIONS §56, and §9 below. Step 1 of 3 has landed (DECISIONS
-   §59): `extractSymbols` now harvests Go `func` and method declarations, Go is still unelidable,
-   and the corpus is 574/574 byte-identical. Steps 2 (validator) and 3 (`REGION_ELISION_LANGUAGES`
-   plus the region scanner) are open, and the order is not negotiable — see §9.** Largest raw
+   its precondition is measured. DECISIONS §56, and §9 below. Steps 1 and 2 of 3 have landed
+   (DECISIONS §59, §60): `extractSymbols` harvests Go `func` and method declarations, and
+   `GoValidator` checks `.go` items instead of skipping them. Go is still unelidable and both
+   corpora are byte-identical. Step 3 (`REGION_ELISION_LANGUAGES` plus the region scanner) is
+   the only one left, and it is the one that changes output — see §9.** Largest raw
    gain: every other bucket in §2 is 0.00%, and a
    real Go corpus offers **55–65%** of its bytes as elidable function body against TypeScript's
    57.78% — at least as much material as the product's best language.
@@ -555,6 +557,40 @@ pass both ways are named in the file header.
 
 **Still unmeasured after step 1:** Go’s fallback rate, which is what the 23–28% projection
 borrows from TypeScript. That needs step 2.
+### Step 2 landed — coverage moves, output does not (DECISIONS §60)
+
+`GoValidator` is a Go lexer, not a reuse of the TypeScript one, and the difference is the
+measurement that justified writing it — 9,181 real Go files, 100.8 MB, the stdlib subset
+hash-verified 5,387/5,387 against §56's manifest:
+
+| validator | files flagged | rate |
+|---|---|---|
+| `TypeScriptValidator` | **73** | 0.80% |
+| `GoValidator` | **1** | 0.01% |
+
+The one Go flag is the compiler's own `testdata/issue20789.go`, whose header says *"Make sure
+this doesn't crash the compiler"* — a true positive. The 72 disagreements are raw strings:
+Go's backtick string spans lines, has **no escapes**, and holds quotes and braces. §17's
+finding, measured for Go.
+
+**0 findings is also what a validator that examines nothing reports**, so the control runs the
+other way: deleting the last column-0 `}` is caught in **1,159 of 1,163** files (99.66%), and
+all four non-catches were inspected and are braces inside a raw string, a `//` comment or a
+cgo C preamble — mutations that are not defects.
+
+On a separately frozen 80-file Go corpus, step 1 → step 2: items no validator looked at go
+**80 → 0** on the file route, reduction stays **0.00%**, fallbacks stay **0**, and output is
+**160/160 byte-identical**. Exactly three fields move, on exactly the 80 file-route rows.
+The main 287-file corpus is **574/574 byte-identical**. The stdin route is unchanged at 40 per
+bucket, because a piped `.go` has no filename and there is deliberately no Go content probe
+(§31); `--language go` reaches the validator.
+
+**It also exposed a reporting defect.** `DriftCoverage.symbolBearingItems` counts
+validator-*covered* items rather than items bearing symbols. Go with §59 but without §60 was
+the first language ever to have symbols and no validator, and all 80 frozen Go rows reported
+`symbolsBefore = 3`+ next to `symbolBearingItems = 0`. Recorded at the site and not fixed here
+— it is a parsed trace field, so changing it is its own decision.
+
 ### What is not established
 
 The 23–28% projection borrows TypeScript's conversion factor, which embeds **TypeScript's**

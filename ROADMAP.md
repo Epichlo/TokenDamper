@@ -303,7 +303,13 @@ elision is what closes that and is the next piece of work
    `S_k = 0.0000` having witnessed nothing. **Scanner-first is silent unmeasured elision, not a
    visible zero.** Build `extractSymbols` first, then the validator, then the scanner.
 
-   **Step 1 of 3 is built (§59).** `extractSymbols` harvests `fn:Name` and `method:Recv.Name`
+   **Steps 1 and 2 of 3 are built (§59, §60).** Step 2 is `GoValidator`, a Go lexer rather than
+   a reuse of the TypeScript one: measured over 9,181 real Go files the TS lexer flags 73 and
+   this one flags 1, and that file is the compiler's own malformed testdata. On a frozen 80-file
+   Go corpus, items no validator looked at go 80 → 0 while reduction stays 0.00% and output is
+   160/160 byte-identical. **Only step 3 is left, and it is the one that changes output.**
+
+   **Step 1 (§59).** `extractSymbols` harvests `fn:Name` and `method:Recv.Name`
    from Go declarations; Go remains unelidable and the corpus is 574/574 byte-identical, which is
    the step-1 negative control. The hole it closes is measurement, not reduction: a Go file with
    every function deleted scored `S_k = 0.0000` with both gates green, and now scores 0.6667 with
