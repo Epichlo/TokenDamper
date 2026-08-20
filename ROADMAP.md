@@ -311,6 +311,13 @@ elision is what closes that and is the next piece of work
 4. **Sub-region elision, finer still.** 18 rows still exceed 50% because a single *statement* is
    dominant. Dividing that needs elision inside a control-flow block.
 
+**Two non-roadmap improvements shipped to `main` since v1.6.0**, both from dogfooding rather than
+this plan: a CLI warning when the knapsack drops whole files (they were leaving stdout with no
+marker), and `--keep-docstrings` (DECISIONS §58) — an opt-in flag keeping a Python function's
+docstring when its body is elided, default byte-identical. Unreleased; see
+`docs/audit-remediation-status.md` §7.8–§7.9. **Widening to Go (item 1) is still the sole open
+roadmap item with a holding precondition.**
+
 ---
 
 ### The original specification, retained for reference

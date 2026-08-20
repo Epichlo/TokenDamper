@@ -207,6 +207,13 @@ with **zero** new fallbacks and **zero** files that stopped reducing; 522 rows a
 because subdivision is confined to the ceiling path. Current measured baseline: python file
 **17.95%**, typescript file **18.52%** — status doc §2, not the figures a prior session may quote.
 
+**Unreleased on `main` since v1.6.0** — two improvements found by dogfooding, not the audit: a CLI
+warning when the knapsack drops whole files to meet the budget (they were vanishing from stdout
+with no marker), and `--keep-docstrings` (DECISIONS §58), an opt-in flag that keeps a Python
+function's docstring when its body is elided. The default path stays 576/576 byte-identical; §58
+measured the trade at 14.2%–21.1% of the saving. Not yet released — decide a version at ship time
+(§53).
+
 **v1.6.0 shipped 2026-08-16** — §54 (M7: the Gateway forwards the caller's bytes and measures
 them), §55 (the never-scheduled LOW table), §56 (the measured Go precondition) and §57 (a file
 documenting the placeholder format is not a corrupted placeholder). **`max_audit.md` is closed in
