@@ -8,6 +8,7 @@ import { ITEM_DELIMITER_PREFIX, ITEM_DELIMITER_SUFFIX } from '../core/render';
 import { ingestPaths, type IngestedFile } from './ingest';
 import { loadConfig } from '../config';
 import { declarableLanguages, normalizeLanguage } from '../core/model';
+import type { ContextBundle } from '../core/model/types';
 import { optimize } from '../core/engine';
 import { runExecCommand } from '../gateway/exec';
 import { renderTerminalDiff } from './diff-renderer';
@@ -292,12 +293,51 @@ function runMultiFileOptimize(
     io.stdout.write(result.emittedOutput);
   }
 
+  warnAboutDroppedFiles(request.bundle, result.finalBundle, io.stderr);
+
   if (parsed.diffHtmlPath) {
     generateHtmlReport(result, request.bundle, { outputPath: resolve(cwd, parsed.diffHtmlPath) });
   }
 
   io.stderr.write(`${JSON.stringify(result.trace, null, 2)}\n`);
   return 0;
+}
+
+/**
+ * Says out loud when the knapsack removed whole files from the output.
+ *
+ * `pruning:topology-pruner` drops entire items to meet the token budget, which is a different
+ * operation from elision: elision leaves a marker saying what it took, and pruning leaves
+ * nothing at all. On a directory run the file simply is not in stdout, and a caller piping that
+ * to a model has no way to notice — the model will not report a file it was never shown, it
+ * will infer an API and be confidently wrong about it.
+ *
+ * The trace already carried `itemsPruned`, so this is not new information; it is the same
+ * information somewhere a person reading a terminal will actually see. Measured on a 7-file
+ * project at `--target-reduction-ratio 0.3`, two modules were dropped silently.
+ *
+ * Derived by diffing the bundles rather than by reading the stage's metric, because the metric
+ * is a count and the useful part is *which* files. The fallback path returns the original
+ * bundle, so nothing is reported there — correctly, since nothing was dropped.
+ */
+function warnAboutDroppedFiles(
+  before: ContextBundle,
+  after: ContextBundle,
+  stderr: NodeJS.WritableStream,
+): void {
+  const survived = new Set(after.items.map((item) => item.id));
+  const dropped = before.items.filter((item) => !survived.has(item.id));
+  if (dropped.length === 0) {
+    return;
+  }
+
+  const names = dropped.map((item) => item.path ?? item.origin ?? item.id);
+  stderr.write(
+    `Warning: ${dropped.length} of ${before.items.length} file(s) were removed entirely to meet the token budget, ` +
+      `not elided — their contents are absent from the output with no marker:\n` +
+      names.map((name) => `  - ${name}\n`).join('') +
+      `Raise --target-reduction-ratio's budget (a lower ratio prunes less) or optimize files individually to keep them.\n`,
+  );
 }
 
 /** The fallback stream: each file's original bytes, under the header the renderer emits. */

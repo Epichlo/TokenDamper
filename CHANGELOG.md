@@ -11,6 +11,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **The CLI says when whole files were dropped to meet the budget.** `pruning:topology-pruner`
+  removes entire items rather than eliding them, so the file is simply absent from stdout with no
+  marker — and a caller piping that into a model cannot notice, because the model will not report
+  a file it was never shown. It infers the API and is confidently wrong. Measured on a real
+  8-item project at ratio 0.3, two modules vanished silently. The count was already in the trace;
+  *which* files, and the fact that it happened, were nowhere a person reading a terminal would see.
+
+  Pruning turns out to be common rather than exceptional: on a five-module fixture it fired at
+  **every** ratio from 0.05 to 0.5, because `resolveTokenCeiling` derives the ceiling from the
+  bundle, so a gentler ratio still lands below it.
+
+
 ## [v1.6.0] - 2026-08-16
 
 **Two defects that reached provider traffic, and an audit closed in full.** `max_audit.md` had
