@@ -23,6 +23,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   **every** ratio from 0.05 to 0.5, because `resolveTokenCeiling` derives the ceiling from the
   bundle, so a gentler ratio still lands below it.
 
+- **`--keep-docstrings` keeps a Python function's docstring when its body is elided (DECISIONS
+  §58).** The retention test found 3 of 4 lost answers lived in docstrings -- the *why* of a
+  function, not its shape. Off by default, because measured it is a trade: keeping docstrings
+  gives back **14.2%** of the saving on real pip code and **21.1%** on doc-heavy source
+  (end-to-end 33.4% -> 27.5% on the expense-analyzer project, docstrings preserved 26 -> 51). The
+  default path is 576/576 byte-identical; the flag is a runtime option that never touches the
+  frozen `OptimizationBudget`, and it is inert on TypeScript/JavaScript, whose doc comments sit
+  outside the body.
 
 ## [v1.6.0] - 2026-08-16
 

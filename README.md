@@ -172,6 +172,11 @@ TokenDamper provides detailed explainability for how your context was optimized 
 - `--diff-html <path>`: Generates a beautiful HTML report visualizing exact token elisions and metrics.
 - `--max-debt <0-100>`: Fails validation if optimization debt (information loss score) exceeds this threshold.
 - `--max-drift <0-1>`: Fails validation if semantic drift (structural deviation) exceeds this threshold.
+- `--keep-docstrings`: Keep a Python function's leading docstring outside the elided region, so
+  the *why* of a function survives when its body does not. A retention/size trade you opt into:
+  measured, keeping docstrings gives back **14.2%** of the saved tokens on real third-party code
+  and **21.1%** on doc-heavy source, so it is off by default. No effect on TypeScript/JavaScript,
+  whose doc comments sit above the function rather than inside its body.
 - `--target-reduction-ratio <0-1>`: How much to remove. Resolved against the input into a token
   ceiling that both selection and compression respect, so compression stops rather than eliding
   everything it can. **Best effort, not a guarantee:** the smallest thing elision can remove is
