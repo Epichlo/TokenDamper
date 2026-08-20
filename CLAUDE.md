@@ -214,6 +214,16 @@ function's docstring when its body is elided. The default path stays 576/576 byt
 measured the trade at 14.2%–21.1% of the saving. Not yet released — decide a version at ship time
 (§53).
 
+**Also unreleased: step 1 of widening elision to Go (DECISIONS §59).** `extractSymbols` now
+harvests `fn:Name` and `method:Recv.Name` from Go declarations. **Go is still unelidable and
+reduction is still 0.00%** — `supportsRegionElision` decides that and consults the validator, not
+the symbol extractor — so the corpus is 574/574 byte-identical. What it closes is a measurement
+hole: a Go file with every function deleted, package and import and struct standing, used to score
+`S_k = 0.0000` with `astMeasured: true`, both gates passing and no fallback. It now scores 0.6667
+and the retention gate refuses. Signature-preserving body elision still scores 0.0000, which is
+required rather than a gap. **Steps 2 (validator) and 3 (region scanner) are open, in that order** —
+`.claude/skills/widen-language` carries why the order is a safety property, and §56 measured it.
+
 **v1.6.0 shipped 2026-08-16** — §54 (M7: the Gateway forwards the caller's bytes and measures
 them), §55 (the never-scheduled LOW table), §56 (the measured Go precondition) and §57 (a file
 documenting the placeholder format is not a corrupted placeholder). **`max_audit.md` is closed in

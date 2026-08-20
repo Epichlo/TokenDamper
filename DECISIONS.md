@@ -4158,3 +4158,109 @@ languages it is simply inert rather than wrong.
 engine; the three invariants (a body with no docstring is unchanged, a whole-body docstring drops
 the region, TypeScript is untouched) pass both ways as negative controls. The default path is
 **576/576 byte-identical** on the corpus A/B, because the flag is off.
+
+---
+
+## 59. Go Symbols First, Because the Gate Could Not Tell Body Elision From Deletion
+
+**Date:** 2026-08-20 · **Status:** accepted · **Scope:** `DriftTracker.extractSymbols`, Go
+
+Step 1 of the three that widen elision to Go. §56 measured the precondition and fixed the order —
+`extractSymbols`, then the validator, then `REGION_ELISION_LANGUAGES` plus the region scanner —
+and this is that first step and nothing else. **Go is still unelidable after it, deliberately.**
+
+### What it adds
+
+Two patterns, both anchored to the start of a line, because a Go function declaration is always a
+top-level one:
+
+- `func Name(` and `func Name[T any](` → `fn:Name`
+- `func (r *Recv) Name(` → `method:Recv.Name`
+
+Methods are qualified by receiver where the class methods in block 8 are not. Go convention gives
+many types in one file the same method names — `String`, `Error`, `Read` — so a bare
+`method:String` collapses them and losing ten reads as losing one. Nothing downstream parses these
+strings (they are only ever set-compared for `R_AST`), so the resolution costs nothing.
+
+**Not harvested, deliberately.** Anonymous literals (`x := func() {}`) and func types
+(`type Handler func(int) error`) have no name to take. An interface method declaration has a name
+but no body, so harvesting it would add one more symbol that survives elision by construction —
+the exact dependency this step exists to remove.
+
+### What it changes, measured
+
+Same file, same four after-shapes, engine varied and nothing else. `S_k` and the two gates, before
+and after:
+
+| after-shape | `S_k` before | `S_k` after | gates before | gates after |
+|---|---|---|---|---|
+| whole item → marker | 1.0000 | 1.0000 | retention refuses | retention refuses |
+| bodies elided, signatures kept | 0.0000 | 0.0000 | both pass | both pass |
+| one whole declaration removed | 0.0000 | 0.1667 | both pass | both pass |
+| **every declaration removed** | **0.0000** | **0.6667** | **both pass** | **retention refuses** |
+
+`symbolsBefore` goes 2 → 6: `type:Point` and `import:strings` gain `fn:computeTotal`,
+`fn:renderReport`, `method:Point.Translate` and `method:Point.String`.
+
+**The fourth row is the defect closing.** A Go file with every function deleted, package and
+import and struct left standing, scored `S_k = 0.0000` with `astMeasured: true`, both gates
+passing and `fallbackUsed: false`. That is §56's simulation reproduced through the shipped
+tracker, and on the CLI, where elision is irreversible, it is data loss reported as a clean run.
+
+### The negative control is not quite the one the skill states, and the difference matters
+
+`widen-language` says drift on a hand-elided file should become non-zero. Measured, that holds for
+**declaration loss** and not for **signature-preserving body elision**, which still scores
+`0.0000` — row two, unchanged.
+
+That is correct and it is load-bearing. Region elision keeps signatures by construction, so the
+symbols survive and there is no semantic loss to report; if row two had moved, step 3 would ship
+as a fallback generator. TypeScript behaves identically and §40 already records why.
+
+**So the precise claim is narrower than "drift can now see Go", and it is the one worth having:
+before this step the gate could not distinguish rows two, three and four from each other — all
+three read `0.0000`. Now it scores them 0.0000, 0.1667 and 0.6667.** A region scanner that takes a
+brace span too far, or takes a declaration instead of a body, is a thing the gate can now witness.
+That is the failure mode step 3 introduces, and this is the instrument for it.
+
+### Method
+
+Corpus frozen at `7d97049`, 287 files across nine buckets, `dist` pinned at `2f3fe633`, both arms
+built with an `src`-only tsconfig so `test/` could not silently block the emit. 574 rows (287
+files × 2 routes) per arm.
+
+- **574 of 574 byte-identical.** 0 rows differ across 17 compared fields, `symbolsBefore` among
+  them — and the diff asserts its own row count and that every compared field is present, because
+  keying on a field the harness does not emit is how a previous A/B reported "differing: 0" over
+  two rows.
+- **Byte-identical is not inert, and here the reason is countable:** 0 of the 287 corpus files
+  match either pattern. There is no Go bucket, and no other bucket contains a line-anchored
+  `func`. §56's caution, arriving on the very next change.
+- Blast radius outside Go is therefore evidenced by unit cases rather than by the corpus:
+  TypeScript that uses `func` as a loop variable and calls `applyFunc`, and Python that names a
+  parameter `func`, both yield exactly their own symbols.
+- `test/unit/go-symbols.test.ts`: **9 of 14 fail against the unfixed engine.** The 5 that pass
+  both ways are named in the file header as controls; one of them — row two above — is a control
+  on purpose.
+
+Collecting the corpus also surfaced that the prose bucket is now 17 documents, not 18:
+`DECISIONS.md` crossed the recipe's 204,800-byte cap as it grew. The cap was not raised, since
+raising it would move every prose aggregate to keep one file whose growth is the reason it stopped
+fitting. Recorded in the recipe's own log; prose aggregates from here are not comparable to earlier
+18-document ones.
+
+### What this does not establish
+
+- **Go's fallback rate is still unmeasured**, so §56's 23–28% projection still borrows
+  TypeScript's conversion factor. That needs step 2, and it is the number most likely to move.
+- **Nothing about reduction.** Go reduces 0.00% after this change exactly as before it —
+  `supportsRegionElision` decides that, and it consults the validator, not the symbol extractor.
+  `trace.languageSupport` still reports Go unsupported and `language-support.test.ts` still asserts
+  it.
+- **Grouped imports are still not harvested.** `import "strings"` yields `import:strings`;
+  `import (\n\t"fmt"\n)` yields nothing, because the JS import regex wants a quote after the
+  keyword. Out of scope and immaterial to the argument — imports are on the side of the ledger that
+  cannot witness body loss anyway.
+- **A Go raw string holding source at column 0 yields a symbol.** Characterized in the test rather
+  than fixed: it errs conservatively, because such a symbol sits inside a body, so elision removes
+  it and drift becomes more likely to refuse, not less.

@@ -3,11 +3,13 @@
 Working state for the `max_audit.md` remediation. **Read this before picking up audit work**;
 it records what is done, what is measured, and what the next batch actually requires.
 
-Last updated 2026-08-16. **Unreleased on `main` since v1.6.0:** a pruned-file warning (§7.8) and
-`--keep-docstrings` (DECISIONS §58, §7.9) — both found by dogfooding, not the audit. **Shipped as
+Last updated 2026-08-20. **Unreleased on `main` since v1.6.0:** a pruned-file warning (§7.8),
+`--keep-docstrings` (DECISIONS §58, §7.9) — both found by dogfooding, not the audit — and **step 1
+of widening elision to Go** (DECISIONS §59, §7.3, §9), which adds Go function and method symbols
+to `DriftTracker.extractSymbols` and changes no output anywhere. **Shipped as
 v1.6.0** — §54 (M7), §55 (the LOW table), §56 (the measured precondition for widening elision, §9)
 and §57 (the block-hash false positive), on top of **v1.5.0** (§52, the constraint gate stops
-firing on narrative comments), v1.4.0 (§50) and v1.3.0 (§48, §49). Suite: **684 passing**,
+firing on narrative comments), v1.4.0 (§50) and v1.3.0 (§48, §49). Suite: **698 passing**,
 typecheck, lint and build clean. `npm run format` no longer exists; `lint` is the enforced style
 gate.
 
@@ -374,8 +376,11 @@ Ordered by measured value ÷ risk. Preconditions verified as holding — as dist
    (58%, 61%, 83% measured). Narrowest blast radius; `test/unit/target-reduction-ratio.test.ts`
    already pins the limit and is where the tightening would be asserted.
 3. **Widen elision beyond TypeScript/JavaScript/Python — the only open item on this list, and
-   its precondition is measured. DECISIONS §56, and §9 below.** Everything else here is done;
-   this is the next piece of work. Largest raw gain: every other bucket in §2 is 0.00%, and a
+   its precondition is measured. DECISIONS §56, and §9 below. Step 1 of 3 has landed (DECISIONS
+   §59): `extractSymbols` now harvests Go `func` and method declarations, Go is still unelidable,
+   and the corpus is 574/574 byte-identical. Steps 2 (validator) and 3 (`REGION_ELISION_LANGUAGES`
+   plus the region scanner) are open, and the order is not negotiable — see §9.** Largest raw
+   gain: every other bucket in §2 is 0.00%, and a
    real Go corpus offers **55–65%** of its bytes as elidable function body against TypeScript's
    57.78% — at least as much material as the product's best language.
 
@@ -521,6 +526,35 @@ TypeScript turns 57.78% into **24.56%** achieved at target 0.3. On that conversi
   TypeScript **21.37%** with 25 files unchanged, against **24.56%** with 12 at target 0.3.
   Pushing harder trips the constraint and drift gates. More material does not lift that ceiling.
 
+### Step 1 landed — what it did and did not move (DECISIONS §59)
+
+`extractSymbols` harvests `fn:Name` from `func Name(` (generics included) and
+`method:Recv.Name` from `func (r *Recv) Name(`, both anchored to the start of a line. Measured
+over one Go file, engine varied and nothing else:
+
+| after-shape | `S_k` before | `S_k` after | gates before | gates after |
+|---|---|---|---|---|
+| whole item → marker | 1.0000 | 1.0000 | retention refuses | retention refuses |
+| bodies elided, signatures kept | 0.0000 | 0.0000 | both pass | both pass |
+| one whole declaration removed | 0.0000 | 0.1667 | both pass | both pass |
+| **every declaration removed** | **0.0000** | **0.6667** | **both pass** | **retention refuses** |
+
+**Row four is §56 reproduced through the shipped tracker**: every function in the file deleted,
+package and import and struct standing, `astMeasured: true`, both gates green, no fallback. Row
+two must not move and did not — region elision keeps signatures, so there is nothing to report,
+and a gate that refused there would make step 3 a fallback generator. **The claim is therefore
+narrower than "drift can now see Go": before, rows two, three and four were the same number.**
+
+Corpus frozen at `7d97049`, 287 files, 574 rows, both arms built with an `src`-only tsconfig:
+**574/574 byte-identical**, 0 rows differing across 17 fields including `symbolsBefore`. That is
+*because the corpus contains no Go* — 0 of 287 files match either pattern — which is this
+section's own caution arriving on the next change. Blast radius outside Go is evidenced by unit
+cases (TypeScript using `func` as a loop variable, Python naming a parameter `func`), not by the
+corpus. `test/unit/go-symbols.test.ts`: 9 of 14 fail against the unfixed engine, and the 5 that
+pass both ways are named in the file header.
+
+**Still unmeasured after step 1:** Go’s fallback rate, which is what the 23–28% projection
+borrows from TypeScript. That needs step 2.
 ### What is not established
 
 The 23–28% projection borrows TypeScript's conversion factor, which embeds **TypeScript's**

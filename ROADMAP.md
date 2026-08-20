@@ -189,7 +189,7 @@ before scheduling any of it.** Each is a decision with a legitimate "narrow the 
 | **A** | **H5** — knapsack unreachable | Give the CLI a multi-item ingestion path (directory, manifest, conversation file) so the solver has a job — **or** move `planner/knapsack.ts`, `planner/cache-aware.ts`, `topology/git-inspector.ts`, `topology/dependency-graph.ts` and `topology/topology-scorer.ts` behind an explicitly labelled "not yet reachable" boundary. ~1,000 LOC and the whole of invariant 6 currently affect no output. **This answer decides whether v1.2.0 and Milestone 8 exist at all.** |
 | **B** | **C3 + H1** — the Gateway | Not "fix C3." The `exec` token handoff is broken end-to-end (`TOKENDAMPER_GATEWAY_TOKEN` is written at `exec.ts:58` and read **nowhere** in `src/` — *verified*) **and** the mode saves 0 bytes on realistic traffic, because Phase A correctly concluded a marker the model cannot resolve is deletion, not reference. Either find a transform that survives the gates, or label the Gateway experimental and stop leading the README with it. **Decides v2.0.0's premise** and whether C4/M7 are worth doing. |
 | **C** | **H4** — four documented knobs do nothing | **Answered 2026-08-10, DECISIONS §44: removed from the surface.** `--max-output-tokens`, `--max-latency-ms` and `--risk-tolerance` are gone, with their `TOKENDAMPER_*` variables and the MCP `riskTolerance` property; they are now a hard `Unknown argument`. The `OptimizationBudget` fields remain, because `ARCHITECTURE.md` pins that model as frozen, and each now carries a doc comment naming its consumer or stating it has none. **Two deliberately not removed:** `--target-reduction-ratio`, because it is the only budget flag every doc and example uses and making it a real proportional target is a planner change — still open, still named; and `--max-debt`, which unlike the others *is* wired to `DebtTracker` and merely arithmetically inert on the CLI. DECISIONS §30 established the principle for *which command accepts a flag*; §44 applies it to *whether the accepting command reads it*. |
-| **D** | **H2** — 3 of 19 languages work | Twelve of nineteen recognised extensions cannot produce a non-zero reduction under any flag combination, because `selectElisionRegions` returns `[]` outside TypeScript/Python and `extractSymbols` yields nothing for Go/Rust/C/shell/SQL/CSS. Three languages is a defensible v1. Nineteen in `isCodeExtension` and `DeclaredLanguage` is not, because it invites a user to declare a language and receive a mute 0%. Narrow the accepted set, or report *why* a declared language cannot be optimized. |
+| **D** | **H2** — 3 of 19 languages work | Twelve of nineteen recognised extensions cannot produce a non-zero reduction under any flag combination, because `selectElisionRegions` returns `[]` outside TypeScript/Python and `extractSymbols` yields nothing for Rust/C/shell/SQL/CSS (and, until §59, Go). Three languages is a defensible v1. Nineteen in `isCodeExtension` and `DeclaredLanguage` is not, because it invites a user to declare a language and receive a mute 0%. Narrow the accepted set, or report *why* a declared language cannot be optimized. |
 
 **Follow-on work, sequenced by those answers:**
 
@@ -302,6 +302,12 @@ elision is what closes that and is the next piece of work
    symbol that body elision cannot destroy — so the gate passes with `astMeasured: true` and
    `S_k = 0.0000` having witnessed nothing. **Scanner-first is silent unmeasured elision, not a
    visible zero.** Build `extractSymbols` first, then the validator, then the scanner.
+
+   **Step 1 of 3 is built (§59).** `extractSymbols` harvests `fn:Name` and `method:Recv.Name`
+   from Go declarations; Go remains unelidable and the corpus is 574/574 byte-identical, which is
+   the step-1 negative control. The hole it closes is measurement, not reduction: a Go file with
+   every function deleted scored `S_k = 0.0000` with both gates green, and now scores 0.6667 with
+   the retention gate refusing. **Steps 2 and 3 remain, in that order.**
 2. ~~**Sub-region elision.**~~ **Shipped — v1.4.0, §50.** Rows above 50% achieved went 34 → 18
    with zero regressions.
 3. ~~**Per-item drift.**~~ **Closed without implementing — §51.** The precondition was measured

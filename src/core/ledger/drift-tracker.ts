@@ -434,7 +434,7 @@ export class DriftTracker {
   }
 
   /**
-   * Extracts AST symbol identifiers across TypeScript, JavaScript, Python, JSON, and generic code.
+   * Extracts AST symbol identifiers across TypeScript, JavaScript, Python, Go, JSON, and generic code.
    */
   public extractSymbols(bundle: ContextBundle): Set<string> {
     const symbols = new Set<string>();
@@ -462,19 +462,71 @@ export class DriftTracker {
         }
       }
 
-      // 3. JS/TS Classes / Interfaces / Types / Enums / Structs
+      // 3. Go functions and methods.
+      //
+      // **Step 1 of widening elision to Go, and alone in its commit on purpose (DECISIONS
+      // §56).** `extractSymbols` is regex over `item.content` and never consults
+      // `selectValidator`, which makes it the one gate that can be widened while the language is
+      // still unelidable — and it is the one that has to go first. Probed on real Go before this
+      // block existed, the only symbols harvested were `type:Point` (because `struct` is an
+      // alternative in the class regex below) and `import:fmt`. Both are signature-level and
+      // **survive body elision by construction**, so a region scanner shipped first would score
+      // `R_AST = 1.0` with `astMeasured: true` on a file whose every function body had been
+      // deleted. §33 closed the case where the before-set is empty; this is its sibling — a
+      // before-set that is non-empty but structurally incapable of registering the loss — and on
+      // the CLI, where elision is irreversible, that is data loss every gate reports as green.
+      //
+      // `func` is why Go is the first language added: an unambiguous header keyword, where C's
+      // `int foo(...)` cannot be told from a prototype. Anchored to the start of a line because a
+      // Go function declaration is always a top-level one — which also stops `func` inside a
+      // string literal, or mid-sentence in a comment, from inventing a symbol.
+      //
+      // The trailing `[([]` admits the generic form (`func Map[T any](...)`) without balancing
+      // brackets: the name is what identifies the function, and the type parameter list is not
+      // needed to find it.
+      //
+      // Deliberately **not** harvested — anonymous literals (`x := func() {}`) and func types
+      // (`type Handler func(int) error`) have no name to take, and an interface method
+      // declaration has no body, so harvesting it would add one more symbol that survives elision
+      // by construction. That is the exact dependency this block exists to remove.
+      const goFnRegex = /^[ \t]*func\s+([A-Za-z_][A-Za-z0-9_]*)\s*[([]/gm;
+      while ((match = goFnRegex.exec(content)) !== null) {
+        if (match[1]) {
+          symbols.add(`fn:${match[1]}`);
+          fnNames.add(match[1]);
+        }
+      }
+
+      // Go methods are qualified by their receiver type, where the class methods in block 8 are
+      // not. Go convention gives many types in one file the same method names — `String`,
+      // `Error`, `Read` — so a bare `method:String` collapses all of them into a single symbol,
+      // and losing ten of them would read as losing one. The receiver is right there in the
+      // syntax, and nothing downstream parses these strings (they are only ever set-compared for
+      // `R_AST`), so the resolution costs nothing.
+      //
+      // `func\s+\(` rather than `func\s*\(` keeps an anonymous literal at the start of a line out
+      // of the receiver slot. gofmt writes that space, and Go corpora are gofmt'd.
+      const goMethodRegex =
+        /^[ \t]*func\s+\(\s*(?:[A-Za-z_][A-Za-z0-9_]*\s+)?\*?\s*([A-Za-z_][A-Za-z0-9_]*)[^)\n]*\)\s*([A-Za-z_][A-Za-z0-9_]*)\s*[([]/gm;
+      while ((match = goMethodRegex.exec(content)) !== null) {
+        if (match[1] && match[2]) {
+          symbols.add(`method:${match[1]}.${match[2]}`);
+        }
+      }
+
+      // 4. JS/TS Classes / Interfaces / Types / Enums / Structs
       const classRegex = /(?:export\s+)?(?:class|interface|type|enum|struct)\s+([A-Za-z_$][A-Za-z0-9_$]*)/g;
       while ((match = classRegex.exec(content)) !== null) {
         if (match[1]) symbols.add(`type:${match[1]}`);
       }
 
-      // 4. Python classes
+      // 5. Python classes
       const pyClassRegex = /class\s+([A-Za-z_][A-Za-z0-9_]*)/g;
       while ((match = pyClassRegex.exec(content)) !== null) {
         if (match[1]) symbols.add(`type:${match[1]}`);
       }
 
-      // 5. Top-level const/let/var declarations.
+      // 6. Top-level const/let/var declarations.
       //
       // **Anchored to the start of a line, which excludes function-local bindings.** This used
       // to match anywhere, so every `const i`, `const result`, `const msg` inside a function
@@ -503,7 +555,7 @@ export class DriftTracker {
         if (match[1]) symbols.add(`var:${match[1]}`);
       }
 
-      // 6. Imports (JS/TS & Python)
+      // 7. Imports (JS/TS & Python)
       const jsImportRegex = /(?:import\s+(?:[\w$*{}min\s,]+from\s+)?['"]([^'"]+)['"])/g;
       while ((match = jsImportRegex.exec(content)) !== null) {
         if (match[1]) symbols.add(`import:${match[1]}`);
@@ -515,7 +567,7 @@ export class DriftTracker {
         if (mod) symbols.add(`import:${mod}`);
       }
 
-      // 7. Methods inside classes
+      // 8. Methods inside classes
       const methodRegex = /(?:public|private|protected|async|static|get|set)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g;
       const reservedKeywords = new Set([
         'if',
@@ -542,7 +594,7 @@ export class DriftTracker {
         }
       }
 
-      // 8. JSON keys / entity identifiers if JSON
+      // 9. JSON keys / entity identifiers if JSON
       if (item.contentType === 'json') {
         const jsonKeyRegex = /"([^"\\]+)":/g;
         while ((match = jsonKeyRegex.exec(content)) !== null) {
