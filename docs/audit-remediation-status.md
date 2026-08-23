@@ -54,7 +54,7 @@ and the reasoning.
 | Lane | Scope | State |
 |---|---|---|
 | **A** | `src/cli/**`, `src/config/**`, `src/core/engine/`, `planner/`, `topology/`, `src/bench/runner.ts`, `src/gateway/exec.ts`, repo hygiene | partially closed — see below |
-| **B** | `src/gateway/{proxy,server,session-store,types}.ts`, `stages/cleanup/session-dedup.ts`, `stages/compression/token-hashing.ts`, `adapters/mcp/server.ts`, `bench/fixtures/loader.ts` | **entirely open** (H2, H4, M1, M5, M8, M9, L6, L7, L9, L10, L13) |
+| **B** | `src/gateway/{proxy,server,session-store,types}.ts`, `stages/cleanup/session-dedup.ts`, `stages/compression/token-hashing.ts`, `adapters/mcp/server.ts`, `bench/fixtures/loader.ts` | **entirely open** (H2, H4, M1, M5, M8, M9, L6, L7, L9, L10, L13) — M8 and M9 decided, none implemented |
 
 **Closed (Lane A):** H1, H3, **H5**, M2, M3, M4, M10, M11, M12, M14, M16.
 
@@ -65,10 +65,28 @@ untouched — it rewrites the command, which is a live effect. Note the flag's o
 repo, `tools/corpus-harness/measure.js`, was passing `--trace-output stderr` while reading stderr
 correctly all along; it was updated in the same change and re-verified.
 
-**Open (Lane A):** **M15 is awaiting a decision, not implementation** — whether plain `bench`
-should shell out to `python` by default. M6 and M7 change engine output and need the
-freeze → pin → vary-only-`dist/` loop (§4), not just tests. M13 and nine lows
-(L1, L2, L3, L5, L8, L11, L12, L17–L19) are unstarted.
+**Open (Lane A):** M15 is decided (below) and awaits implementation. M6 and M7 change engine
+output and need the freeze → pin → vary-only-`dist/` loop (§4), not just tests. M13 and six lows
+(L1, L8, L12, L17, L18, L19) are unstarted; L2, L3, L5 and L11 sit on the **unmerged**
+`audit/float-pool` branch (fixed or recorded there, DECISIONS §63 on that branch).
+
+**Three decisions were taken 2026-08-23 — none implemented yet:**
+
+- **OX-M15 — default off.** Plain `tokendamper bench` stops executing dataset code through
+  `python`; quality evaluation becomes opt-in, and the regression suites that want it ask for it
+  by name. This aligns the CLI surface with ARCHITECTURE.md's offline-and-deterministic claim.
+  The accepted cost: what plain `bench` reports out of the box changes.
+- **OX-M8 — refuse to start.** Binding a non-loopback host with no `gatewayToken` becomes a
+  startup error naming the exposure, with an explicit opt-in for a caller who truly wants an open
+  relay. Loopback trust (audit C3) and the constant-time compare stay untouched. An existing
+  exposed-bind config breaks loudly instead of relaying silently — that is the point of the
+  decision.
+- **OX-M9 — Origin/Host validation, not token-on-loopback.** POSTs whose `Host` does not name the
+  bind address, or whose `Origin` is present and foreign, are rejected; OPTIONS is answered
+  without permissive CORS headers. Non-browser clients send neither header, so the local client
+  contract is unchanged, while browsers can no longer fire useful simple requests at the gateway.
+  Requiring `x-tokendamper-token` even on loopback was considered and declined: it splits browsers
+  more cleanly, but taxes every existing local client to close a browser-only hole.
 
 **Recorded rather than fixed:** **L4** (a symlink is skipped inside a directory walk but followed
 when named directly). The fix is small, but creating a symlink on the machine it was written on
