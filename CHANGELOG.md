@@ -107,6 +107,34 @@ Minor rather than major on this project's standing rule: nothing removed, but th
 over the same input emits different bytes. Minor rather than patch for the same reason.
 
 ### Fixed
+- **`npm test` no longer collects suites belonging to other checkouts (audit OX-H3).** The
+  repository had no vitest config, so collection used vitest's default `include` and walked the
+  whole tree from the root. Agent worktrees live under `.claude/worktrees/<name>/` and each is a
+  *full* checkout, `test/` included — so every stale worktree silently contributed a second, older
+  copy of the entire suite. Measured: the canonical suite is **78 files / 723 tests**; the audit's
+  run in a tree holding one stale worktree reported **155 / 1410**, almost exactly double, with the
+  extra half two commits behind `main`.
+
+  The cost is not wall-clock. A stale copy passes against its own frozen source, so a green run
+  says nothing about the tree being edited — invariant 10 (a check that never looked reads exactly
+  like a check that passed) arriving through the test runner itself. CI was never affected, because
+  a fresh checkout has no `.claude/`, so "the suite" meant two different things locally and
+  remotely.
+
+  `vitest.config.ts` now anchors `include` to `test/**/*.test.ts` and restates `node_modules`,
+  `dist` and `.claude` in `exclude` — restated because specifying `exclude` *replaces* vitest's
+  default rather than extending it, and `dist` is not hypothetical: `tsc -p tsconfig.json` compiles
+  `test/` as well as `src/`, so any build leaves a second copy of every suite in `dist/test/`.
+  `globals: true` is set to make `tsconfig.json`'s existing `types: ["node", "vitest/globals"]`
+  declaration true rather than decorative — no test relies on it today, all 78 import from
+  `'vitest'` explicitly.
+
+  `test/unit/test-collection-scope.test.ts` pins it, and pins the half that an anchored `include`
+  puts at risk: that every suite in the repo really does live under `test/`, so the anchor is not
+  hiding one. The guard was mutation-checked rather than assumed — widening the include, dropping
+  `.claude` from exclude, deleting the config, and planting a suite outside `test/` each fail it.
+  `npm run lint` needed no equivalent guard; it is already path-scoped as `eslint src test`.
+
 - **A file that documents the block-hash placeholder format is no longer mistaken for a corrupted
   one — DECISIONS §57.** `detectCorruptedPlaceholders` scanned for `<BLOCK_HASH:([^>]+)>`, matching
   any text up to the next `>`. This repository's own `src/core/elision/regions.ts` contains the
