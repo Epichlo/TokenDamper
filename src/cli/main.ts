@@ -21,6 +21,13 @@ import type { ConfigOverrides } from '../config';
 
 /**
  * Runs the TokenDamper CLI with the provided arguments and IO streams.
+ *
+ * Returns `number` for every command except `exec`, which returns `Promise<number>` because its
+ * exit code belongs to a child process that has not finished yet (audit OX-H1). The union is
+ * deliberate: making the whole function `async` would turn a synchronous `number` into a promise
+ * for `optimize`, `bench` and `mcp`, none of which need one, and every existing caller reads the
+ * result directly. `await` handles both, so a caller that does not care which it got is correct
+ * either way.
  */
 export function runCli(
   argv: readonly string[],
@@ -29,7 +36,7 @@ export function runCli(
     stderr: process.stderr,
   },
   cwd: string = process.cwd(),
-): number {
+): number | Promise<number> {
   try {
     const parsed = parseArguments(argv, cwd);
 
@@ -60,11 +67,17 @@ export function runCli(
     }
 
     if (parsed.command === 'exec') {
-      // Async exec command runner handled synchronously or spawned
-      runExecCommand(parsed.execArgs, { io }).catch((err) => {
+      // Returned, not fired and forgotten. `runExecCommand` always resolved the child's real exit
+      // code; this branch used to drop it on the floor and hand back a synchronous `0`, which
+      // `main()` had assigned to `process.exitCode` long before the child finished (audit OX-H1).
+      // `tokendamper exec -- some-tool && next-step` therefore ran `next-step` after a failure.
+      return runExecCommand(parsed.execArgs, { io }).catch((err: Error) => {
         io.stderr.write(`Exec process error: ${err.message}\n`);
+        // Reached only when the child could not be spawned at all. A command that simply does not
+        // exist does not land here — `shell: true` means the shell starts, diagnoses it, and
+        // exits with its own code (127 on sh, 1 on cmd.exe), which arrives through `close`.
+        return 1;
       });
-      return 0;
     }
 
     if (parsed.command === 'bench') {
@@ -362,7 +375,19 @@ function renderFallbackBytes(files: ReadonlyArray<IngestedFile>): Buffer {
  */
 export function main(): void {
   const exitCode = runCli(process.argv.slice(2));
-  process.exitCode = exitCode;
+
+  if (typeof exitCode === 'number') {
+    process.exitCode = exitCode;
+    return;
+  }
+
+  // `exec` is the one command whose code is not known yet (audit OX-H1). Assigning it on
+  // settlement is sufficient and does not need an explicit `process.exit`: the spawned child
+  // inherits this process's stdio, so the event loop cannot drain while it is still running, and
+  // forcing an exit here would risk truncating whatever the child last wrote.
+  void exitCode.then((code) => {
+    process.exitCode = code;
+  });
 }
 
 export interface ParsedArguments {
@@ -823,9 +848,13 @@ function parseBudgetRatio(value: string | undefined): number {
 }
 
 
+// Delegates rather than repeating `main()`'s body. This block *is* the shipped entry point —
+// `package.json`'s `bin` points at `dist/src/cli/main.js`, so this is what runs, and `main()` is
+// what tests and the wrapper call. They had drifted into two copies of the same logic, and the
+// copy here carried a `typeof exitCode === 'number'` guard that was dead while `runCli` always
+// returned a number. Once `exec` started returning a promise (audit OX-H1) that guard would have
+// silently dropped it on the floor, leaving the shipped binary exiting 0 with a full green suite
+// behind it — the fix tested through `main()`, the product running this.
 if (require.main === module) {
-  const exitCode = runCli(process.argv.slice(2));
-  if (typeof exitCode === 'number') {
-    process.exitCode = exitCode;
-  }
+  main();
 }

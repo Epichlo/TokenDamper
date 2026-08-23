@@ -107,6 +107,31 @@ Minor rather than major on this project's standing rule: nothing removed, but th
 over the same input emits different bytes. Minor rather than patch for the same reason.
 
 ### Fixed
+- **`tokendamper exec` exits with the code its child exited with (audit OX-H1).** `runExecCommand`
+  always resolved the real code. `runCli` threw it away: the `exec` branch fired the promise,
+  attached a `.catch`, and returned a synchronous `0` that had already been assigned to
+  `process.exitCode` before the child finished. The process stayed alive only because the spawned
+  child holds the inherited stdio, so the code did arrive — into nothing. `tokendamper exec --
+  aider … && next-step` therefore ran `next-step` after a failed tool, and any CI step wrapping a
+  build in `exec` reported green regardless. Invariant 10 at the process boundary.
+
+  `runCli` now returns `number | Promise<number>` — a union rather than a blanket `async`, because
+  `optimize`, `bench` and `mcp` have their code immediately and every existing caller reads the
+  result directly. `await` handles both.
+
+  **The larger half of this fix was not in `exec` at all.** `package.json`'s `bin` points at
+  `dist/src/cli/main.js`, so the shipped command runs the `require.main === module` block at the
+  foot of the file — not the exported `main()` that tests and the wrapper call. The two had drifted
+  into separate copies of the same assignment, and the copy at the foot carried a
+  `typeof exitCode === 'number'` guard that was harmless dead code while `runCli` always returned a
+  number. The moment `exec` returned a promise it became a silent drop: **the installed binary
+  would have gone on exiting 0 with the entire suite green behind it.** The block now delegates to
+  `main()`, and `test/integration/cli-exec-exit-code.test.ts` pins the delegation as well as the
+  codes, because the defect was duplication rather than any particular line.
+
+  Verified end to end on the built binary, not only through `runCli`: requested 0/3/42 give exit
+  0/3/42, an unresolvable command gives 1, and `optimize` still exits 0.
+
 - **`npm test` no longer collects suites belonging to other checkouts (audit OX-H3).** The
   repository had no vitest config, so collection used vitest's default `include` and walked the
   whole tree from the root. Agent worktrees live under `.claude/worktrees/<name>/` and each is a
