@@ -100,6 +100,21 @@ export function validate(
   // This is now **reporting only**. Until Phase A it also scoped the unwitnessed-item rule,
   // so the rule could not fire on anything no validator covered — which is precisely the
   // population that was being deleted unwitnessed. `calculateDrift` no longer takes it.
+  //
+  // **`symbolBearingItems` counts validator-covered items, not items bearing symbols, and the
+  // name is wrong rather than loose (DECISIONS §60).** It is `astChecked` computed a second
+  // way. Nothing had ever made the difference visible, because until §59 every language with
+  // symbols also had a validator and every language without one had neither — so the two
+  // counts agreed by coincidence of coverage, not by construction.
+  //
+  // Go between §59 and §60 was the first case where they came apart, and the pair is
+  // self-contradicting: measured over 80 frozen Go files on the file route, **all 80** report
+  // `symbolsBefore = 3` or more next to `symbolBearingItems = 0`. `symbolsBefore` is the field
+  // that actually counts symbols; read that one.
+  //
+  // Left as it is here on purpose. It is a trace field consumers parse, so renaming it (or,
+  // worse, making it count what its name says and moving the number for every language) is a
+  // decision with its own blast radius, not a ride-along in the commit that exposed it.
   const symbolBearingItemIds = new Set(after.items.filter((item) => !unchecked.has(item.id)).map((item) => item.id));
 
   // Computed over `before`, not `after`: the question is what this build could have done to the

@@ -213,6 +213,7 @@ headline property:
 | **TypeScript / JavaScript** | Bracket, quote and comment balance, by a lexer that tracks strings, template interpolation and regex literals | Everything else. `const x = ;`, `import from "x";`, `let 123abc = 5;` and plain English prose all **pass** |
 | **Python** | The above, plus missing colons, malformed `def`, bad dedent and stray leading indentation | Plain English prose still passes |
 | **JSON** | Fully parsed — this one is a real check | — |
+| **Go** | Bracket, quote and comment balance, by a lexer that knows raw strings (no escapes, spans lines), rune literals and that Go has no regex literals | Everything else, exactly as for TypeScript. Measured over 9,181 real Go files it flags **1**, and that file is the Go compiler's own deliberately-malformed testdata |
 | **Everything else** | Nothing. No validator covers it | Reported on `trace.astCoverage`, never silently counted as a pass |
 
 So the guarantee this product offers on TypeScript — the language family where compression

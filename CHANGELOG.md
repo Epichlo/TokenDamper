@@ -32,6 +32,43 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   frozen `OptimizationBudget`, and it is inert on TypeScript/JavaScript, whose doc comments sit
   outside the body.
 
+- **`DriftTracker.extractSymbols` sees Go function and method declarations (DECISIONS §59).**
+  Step 1 of the three that widen elision to Go, and **Go is still unelidable after it** — reduction
+  stays 0.00%, `trace.languageSupport` still reports Go unsupported, and 574 of 574 corpus rows are
+  byte-identical. What it closes is a measurement hole, not a reduction one: a Go file with every
+  function deleted but package, import and struct left standing used to score `S_k = 0.0000` with
+  `astMeasured: true`, both gates passing and `fallbackUsed: false`, because the only symbols Go
+  yielded were `type:` and `import:` ones that survive elision by construction. It now scores
+  **0.6667** and the retention gate refuses.
+
+  Signature-preserving body elision still scores 0.0000, which is required rather than a gap — that
+  is what region elision does, and if it moved, step 3 would ship as a fallback generator. The
+  change is that the gate can now tell those two apart; before, they were the same number.
+
+- **Go has an AST-lite validator, so `.go` items are checked instead of skipped (DECISIONS
+  §60).** Step 2 of the three that widen elision to Go, and **Go is still unelidable after it**
+  — `regionElisionLanguage` needs the language in `REGION_ELISION_LANGUAGES` as well as a
+  validator, and that is step 3. Measured on 80 frozen Go files: on the file route items no
+  validator looked at go **80 → 0**, reduction stays **0.00%** in both arms, no new fallbacks,
+  and output is **160/160 byte-identical**. Coverage moves; output does not.
+
+  It is a Go lexer rather than a reuse of the TypeScript one, and the difference is measured
+  over 9,181 real Go files (100.8 MB): the TypeScript lexer flags **73 (0.80%)**, this one
+  flags **1 (0.01%)**, and that one file is the Go compiler's own deliberately-malformed
+  testdata. The 72 it disagrees on are raw strings — `` strings.Contains(v, `\`) `` and a
+  200-line shell template — because Go's backtick string has no escapes, spans lines, and is
+  full of quotes and braces. Same finding as DECISIONS §17, measured for Go.
+
+  A piped `.go` with no `--language` is still uncovered: there is no Go content probe, by the
+  same rule as §31. Declare it, or pass `--input-name`.
+
+  **It also exposed a reporting defect, recorded rather than fixed.**
+  `DriftCoverage.symbolBearingItems` counts validator-*covered* items, not items bearing symbols.
+  Go between §59 and §60 was the first language ever to have symbols without a validator, and that
+  made the pair self-contradict: all 80 frozen Go rows reported `symbolsBefore = 3`+ next to
+  `symbolBearingItems = 0`. `symbolsBefore` is the honest field. It is a trace field consumers
+  parse, so changing it is its own decision — see DECISIONS §60.
+
 ## [v1.6.0] - 2026-08-16
 
 **Two defects that reached provider traffic, and an audit closed in full.** `max_audit.md` had

@@ -72,9 +72,13 @@ describe('which languages elision can reduce (H2)', () => {
 
   it('does not mistake an incidental symbol match for support', () => {
     // The first version of this predicate asked "does the item yield symbols or markers?" and
-    // called Go supported, because a trivial Go file yields exactly one symbol: `import:fmt`,
+    // called Go supported, because a trivial Go file yielded exactly one symbol: `import:fmt`,
     // matched by the TypeScript import regex. It witnesses nothing about the function bodies,
     // and Go still cannot reduce. The gate to ask about is the one that actually decides.
+    //
+    // Since DECISIONS §59 this file yields `fn:compute` as well, which makes the case stronger
+    // rather than weaker: the symbols are real now, and support is still no, because
+    // `supportsRegionElision` is what decides and the region scanner is step 3.
     const go = 'package main\n\nimport "fmt"\n\nfunc compute(items []int) int {\n\ttotal := 0\n\treturn total\n}\n';
     expect(describeLanguageSupport(bundleFor(go, 'a.go', 'go')).noneSupported).toBe(true);
   });
