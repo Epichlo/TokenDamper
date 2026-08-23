@@ -554,6 +554,26 @@ export function classifyContent(
 }
 
 /**
+ * The extension of a path: the text after the last dot of the **basename**, lowercased, or
+ * `''` when the basename has no extension (dotfiles included).
+ *
+ * `classifyContentShape` used to take `path.split('.').pop()` — the segment after the last dot
+ * of the *whole path*, so a dotted directory (`my.dir/file`, `v2.json/notes`) leaked directory
+ * text into the extension test. Every such leak lands on an unrecognized string and falls
+ * through to the content probes, exactly as an absent extension would, so no observable
+ * behaviour changes today — which is why this helper is pinned rather than feared: its tests
+ * assert the dotted-directory cases classify by probe, so a future edit that makes a leak
+ * reachable (a directory segment that *is* a known extension) fails loudly here. Same
+ * algorithm as `cli/ingest.ts`'s `extensionOf`; duplicated rather than imported because
+ * `core` may not import `cli`, and eight lines do not justify a shared util module. (audit L11)
+ */
+function extensionOfPath(path: string): string {
+  const base = path.slice(path.lastIndexOf('/') + 1).slice(path.lastIndexOf('\\') + 1);
+  const dot = base.lastIndexOf('.');
+  return dot <= 0 ? '' : base.slice(dot + 1).toLowerCase();
+}
+
+/**
  * Classification, including a language when a probe identified one. See `ContentShape`.
  */
 export function classifyContentShape(
@@ -562,7 +582,7 @@ export function classifyContentShape(
   sourcePath?: string,
 ): ContentShape {
   const text = rawInput.trim();
-  const extension = sourcePath ? sourcePath.split('.').pop()?.toLowerCase() ?? '' : '';
+  const extension = sourcePath ? extensionOfPath(sourcePath) : '';
 
   if (extension === 'json') {
     return { contentType: 'json' };
@@ -676,6 +696,13 @@ const LANGUAGE_ALIASES: Readonly<Record<string, DeclaredLanguage>> = {
   rust: 'rust',
   java: 'java',
   c: 'c',
+  // Extension spellings are accepted on purpose — declaration parity with the filename route
+  // is this table's own rule (`py`, `cc`, `hpp` below). `h` maps to `c` for the same reason a
+  // `.h` path classifies `code` with no validator behind it: both routes describe the same
+  // content the same way, and neither invents a validator C does not have. Recorded rather
+  // than removed (audit L3): dropping the alias would make `--language h` an error while
+  // `foo.h` stayed accepted, which is exactly the two-routes drift this table exists to
+  // prevent. Pinned by `declared-language.test.ts`.
   h: 'c',
   cpp: 'cpp',
   'c++': 'cpp',
@@ -801,7 +828,14 @@ function stableSerialize(value: unknown): string {
     return `{${keys.map((key) => `${JSON.stringify(key)}:${stableSerialize(value[key])}`).join(',')}}`;
   }
 
-  return JSON.stringify(value) ?? 'null';
+  // `JSON.stringify` returns `undefined` for `undefined` (and for functions and symbols, which
+  // cannot reach a domain hash). The previous `?? 'null'` collapsed that into `null`'s
+  // serialization, so `{ a: undefined }` and `{ a: null }` hashed identically — and a hash is
+  // a statement about the value it was given, so two different values must not share one.
+  // Serialized as the bare token `undefined` instead: this string only ever feeds
+  // `createHash`, so it does not have to be valid JSON, it has to be injective. (audit L2)
+  const json = JSON.stringify(value);
+  return json === undefined ? 'undefined' : json;
 }
 
 function looksLikeJson(text: string): boolean {

@@ -4590,3 +4590,55 @@ which resolves the ratio into an absolute token ceiling that both `pruning:topol
 `compression:token-hashing` respect, and §50 narrowed the adherence gap further. A comment that
 records a decision is load-bearing in this codebase; one that records a *superseded* decision
 argues for undoing the fix.
+
+## 63. The Float Pool: Two Small Hashes and Two Recorded Limits
+
+**Date:** 2026-08-23 · **Status:** accepted · **Scope:** `core/model/constructors.ts`, `core/topology/`
+
+Four LOW findings from `oxaudit.md` (the ox-alpha audit of tree `79aedef`), claimed from the
+split document's float pool because they are file-disjoint from both lanes' active sets. Two are
+code, two are recorded rather than fixed — the same disposition DECISIONS §55 gave its LOW table,
+for the same reason: a fix that changes more than the defect is worse than a documented limit.
+
+### L2 — `stableSerialize` no longer collapses `undefined` onto `null`
+
+`JSON.stringify(undefined)` returns `undefined`, and the old `?? 'null'` turned that into
+`null`'s serialization, so `{ a: undefined }` and `{ a: null }` hashed identically. A hash is a
+statement about the value it was given; two different values must not share one. The fallback now
+emits the bare token `undefined`. The output only ever feeds `createHash`, so it does not have to
+be valid JSON — it has to be injective. No live path reaches the branch (constructors build
+objects by conditional spread specifically so no key is ever `undefined`), which is exactly why
+it sat unnoticed: the defensive branch was itself the collision.
+
+### L11 — the extension test reads the basename, not the whole path
+
+`classifyContentShape` took the segment after the last dot of the whole path, so a dotted
+directory (`my.dir/file`) leaked directory text into the extension test. Measured before
+changing anything: every possible leak lands on an unrecognized string and falls through to the
+content probes, byte-identical to an absent extension — **no observable behaviour changes
+today**, and the tests pin that rather than assert a behavioural delta that does not exist. What
+the pin buys is a tripwire: a future edit that makes a leak reachable (a directory segment that
+*is* a known extension) fails loudly instead of silently reclassifying. Same algorithm as
+`cli/ingest.ts`'s `extensionOf`; duplicated rather than imported because `core` may not import
+`cli`.
+
+### L3 — `h → c` stays, recorded
+
+Removing the alias would make `--language h` an error while `foo.h` stayed accepted on the
+filename route. That is the two-routes drift the alias table exists to prevent (`py`, `cc`,
+`hpp` are all extension spellings by design). Characterization test added; if anyone removes the
+alias, the test tells them to take `.h` off the filename route in the same change or restore it.
+
+### L5 — case-sensitive git path matching stays, recorded
+
+Git porcelain uses the index's casing; a directory walk uses the filesystem's; they agree in
+practice. The open case is caller-supplied casing (`optimize SRC/foo.ts` against a repo storing
+`src/`), and its effect is a lower topology score — selection quality, never output bytes.
+Case-folding one side would make scores depend on the platform's filesystem semantics, and
+determinism is invariant 1. Documented at `normalizeGitPath` and the scorer's call site.
+
+### Verification
+
+`npm run typecheck`, `npm run lint` and `npm test` clean; the suite pins each disposition
+(`model.test.ts` for L2, `content-classification.test.ts` for L11, `declared-language.test.ts`
+for L3). L5 changes no code path, so no corpus run applies; nothing here touches engine output.

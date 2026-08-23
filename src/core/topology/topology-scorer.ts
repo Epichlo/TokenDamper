@@ -104,6 +104,7 @@ export function scoreBundleTopology(
   const distanceMap = computeAllDistances(graph, sourcePaths);
 
   for (const item of bundle.items) {
+    // Case-sensitive by design — see `normalizeGitPath` for the tradeoff (audit L5).
     const pathNorm = item.path ? normalizeGitPath(item.path, gitStatus.repoRoot || undefined) : undefined;
 
     let distance = Infinity;

@@ -114,6 +114,34 @@ describe('the declared extension outranks any content probe', () => {
   });
 });
 
+describe('the extension test reads the basename, not the whole path (audit L11)', () => {
+  // `classifyContentShape` used to take the segment after the last dot of the *whole path*,
+  // so a dotted directory leaked directory text into the extension test. Every leak lands on
+  // an unrecognized string and falls through to the probes — the same outcome as no
+  // extension at all — so these pin today's outcomes: a future edit that makes a leak
+  // reachable (a directory segment that *is* a known extension) fails here loudly.
+  const prose = 'Just a plain sentence with no special markup.\n';
+
+  it('ignores a dotted directory when the file has no extension', () => {
+    expect(classifyContent(prose, 'file', 'my.dir/file')).toBe('text');
+    expect(classifyContent(prose, 'file', 'v2.json/notes')).toBe('text');
+  });
+
+  it('still takes the file extension through a dotted directory', () => {
+    expect(classifyContent('{\n  "a": 1\n}\n', 'file', 'my.dir/data.json')).toBe('json');
+    expect(classifyContent('# Title\n', 'file', 'backup.docs/README.md')).toBe('markdown');
+  });
+
+  it('treats dotfiles as extensionless', () => {
+    expect(classifyContent(prose, 'file', '.gitignore')).toBe('text');
+  });
+
+  it('handles backslash paths the same way', () => {
+    expect(classifyContent(prose, 'file', 'C:\\my.dir\\file')).toBe('text');
+    expect(classifyContent('{\n  "a": 1\n}\n', 'file', 'C:\\my.dir\\data.json')).toBe('json');
+  });
+});
+
 describe('looksLikeLogs recognizes ISO-8601 timestamps', () => {
   // Two independent misses. The level-before-date alternative could not match a line whose
   // date comes first, which is the ordering every ISO-8601 logger emits; and

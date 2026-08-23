@@ -84,6 +84,15 @@ describe('normalizeLanguage', () => {
     expect(normalizeLanguage(undefined)).toBeUndefined();
   });
 
+  it('maps the h extension spelling to c, in parity with the .h filename route', () => {
+    // Audit L3 recorded this alias rather than removing it: the table accepts extension
+    // spellings on purpose, so `--language h` must keep behaving like a `.h` file does —
+    // `code`, no validator — and removing one side while keeping the other is the drift the
+    // table exists to prevent. If this test ever fails because someone removed the alias,
+    // remove the `.h` extension from the filename route in the same change or restore both.
+    expect(normalizeLanguage('h')).toBe('c');
+  });
+
   it('accepts every spelling it advertises, and every canonical name is a spelling', () => {
     // Invariant 10: without this the two assertions below could pass over an empty list.
     expect(declarableLanguages().length).toBeGreaterThan(20);
