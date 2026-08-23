@@ -152,4 +152,94 @@ describe('optimize over more than one file', () => {
 
     expect(trace.tokenAfter).toBeLessThanOrEqual(trace.tokenBefore);
   });
+
+  /**
+   * Flags the multi-file route accepted and then dropped — audit OX-M2 and OX-M3.
+   *
+   * `SUPPORTED_FLAGS` exists so that a flag which does not apply is a parse error naming where it
+   * *does* apply (DECISIONS §30). Both of these got past it by being genuinely valid on
+   * `optimize` — just not on the branch a directory or a second path takes.
+   *
+   * The audit also reported `--input-name` as silently no-oping here. It does not: `parseArguments`
+   * already throws `--input-name applies to stdin input only` for any non-`-` input path, so that
+   * half was closed before this. Verified rather than assumed, and left pinned below.
+   */
+  describe('flags that only made sense on the single-file route', () => {
+    it('renders the visual diff on a multi-file run instead of ignoring --diff', () => {
+      // `--diff` was honored on the single-file path and silently dropped here, so a caller
+      // asking for a diff over a directory paid for the flag and got nothing back.
+      const a = write('a.ts', FILE_A);
+      const b = write('b.ts', FILE_B);
+
+      const { out, io } = capture();
+      const code = runCli(['optimize', a, b, '--diff', '--target-reduction-ratio', '0.3'], io, dir);
+      const stdout = Buffer.concat(out).toString('utf8');
+
+      expect(code).toBe(0);
+      expect(stdout).toContain('TokenDamper Optimization Visual Diff');
+    });
+
+    it('refuses --language when more than one path is ingested', () => {
+      const a = write('a.ts', FILE_A);
+      const b = write('b.py', 'def beta(value):\n    return value * 2\n');
+
+      const { err, io } = capture();
+      const code = runCli(['optimize', a, b, '--language', 'python'], io, dir);
+
+      expect(code).toBe(1);
+      expect(err.join('')).toContain('--language');
+    });
+
+    it('refuses --language when the path is a directory', () => {
+      mkdirSync(join(dir, 'nested'));
+      writeFileSync(join(dir, 'nested', 'a.ts'), FILE_A, 'utf8');
+      writeFileSync(join(dir, 'nested', 'c.json'), '{"a": 1, "b": 2}\n', 'utf8');
+
+      const { err, io } = capture();
+      const code = runCli(['optimize', join(dir, 'nested'), '--language', 'python'], io, dir);
+
+      expect(code).toBe(1);
+      expect(err.join('')).toContain('--language');
+    });
+
+    it('still accepts --language on a single named file', () => {
+      // The rejection is about *blanket* declaration, not about the flag. One file has one
+      // language, and declaring it is the documented way to classify input an extension cannot.
+      const a = write('a.ts', FILE_A);
+
+      const { io } = capture();
+      expect(runCli(['optimize', a, '--language', 'typescript', '--target-reduction-ratio', '0.3'], io, dir)).toBe(0);
+    });
+
+    it('already refused --input-name outside stdin, and still does', () => {
+      const a = write('a.ts', FILE_A);
+      const b = write('b.ts', FILE_B);
+
+      const { err, io } = capture();
+      expect(runCli(['optimize', a, b, '--input-name', 'foo.py'], io, dir)).toBe(1);
+      expect(err.join('')).toContain('--input-name');
+    });
+
+    it('does not let a blanket --language claim an unelidable file is elidable', () => {
+      // The measured harm, and the reason this is a rejection rather than a doc note. Declaration
+      // outranks extension by design, so `--language python` over a mixed tree relabels the JSON
+      // as Python: `languageSupport` flipped from "1 unsupported (json)" to "3 supported, 0
+      // unsupported", `astCoverage` still reported `unchecked: 0` because the Python validator did
+      // look at it — and the run fell back entirely. A coverage report that lies, with a
+      // guaranteed 0% behind it.
+      const a = write('a.ts', FILE_A);
+      const c = write('c.json', '{"name": "widget", "nested": {"a": 1, "b": 2}}\n');
+
+      const { err, io } = capture();
+      runCli(['optimize', a, c, '--target-reduction-ratio', '0.3'], io, dir);
+      const trace = JSON.parse(err.join('')) as {
+        languageSupport?: { unsupported: number; unsupportedLanguages: readonly string[] };
+      };
+
+      // Without the flag, JSON is correctly reported as unelidable. That honest report is what a
+      // blanket declaration used to overwrite.
+      expect(trace.languageSupport?.unsupported).toBe(1);
+      expect(trace.languageSupport?.unsupportedLanguages).toContain('json');
+    });
+  });
 });

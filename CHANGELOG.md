@@ -107,6 +107,31 @@ Minor rather than major on this project's standing rule: nothing removed, but th
 over the same input emits different bytes. Minor rather than patch for the same reason.
 
 ### Fixed
+- **The multi-file route stops accepting flags it then drops (audit OX-M2, OX-M3, OX-M14).**
+  `SUPPORTED_FLAGS` exists so an inapplicable flag is a parse error naming where it *does* apply
+  (DECISIONS §30). These got past it by being genuinely valid on `optimize` — just not on the
+  branch a directory or a second path takes.
+
+  - `--diff` is now rendered on a multi-file run. It was honored on the single-file path and
+    silently ignored here, so asking for a terminal diff over a directory produced nothing.
+    `renderTerminalDiff` already accepts a whole `ContextBundle`, so there was no missing capability
+    — only a missing call.
+  - `--language` is now **refused** when a directory or more than one path is ingested, rather than
+    stamped onto every file. It exists for input with no filename to classify by; a walk has one
+    filename per file, so a blanket declaration can only overwrite a correct answer with a single
+    wrong one, and declaration outranks extension by design. The harm is bigger than a mislabel:
+    measured on a three-file tree, `--language python` moved `languageSupport` from "1 unsupported
+    (json)" to **"3 supported, 0 unsupported"**, left `astCoverage` reading `unchecked: 0` because
+    the Python validator genuinely did look at the JSON, and **fell the whole run back** — a
+    coverage report that lies with a guaranteed 0% behind it. Single-file and stdin are unchanged.
+  - The dropped-files warning no longer advises in both directions at once. It read *"Raise
+    `--target-reduction-ratio`'s budget (a lower ratio prunes less)"* — the verb and the
+    parenthesis disagreed, and a reader following the verb did the opposite of what was meant.
+
+  **`--input-name` was reported alongside these and is not a defect.** `parseArguments` already
+  throws `--input-name applies to stdin input only` for any non-`-` input path, so it never silently
+  no-oped on a directory. Verified rather than assumed, and pinned so it stays that way.
+
 - **`tokendamper exec` exits with the code its child exited with (audit OX-H1).** `runExecCommand`
   always resolved the real code. `runCli` threw it away: the `exec` branch fired the promise,
   attached a `.catch`, and returned a synchronous `0` that had already been assigned to

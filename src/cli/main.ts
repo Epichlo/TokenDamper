@@ -150,6 +150,23 @@ export function runCli(
       !isStdin && existsSync(resolve(cwd, parsed.inputPath)) && statSync(resolve(cwd, parsed.inputPath)).isDirectory();
 
     if (!isStdin && (extraPaths.length > 0 || namesDirectory)) {
+      if (parsed.language !== undefined) {
+        // Refused rather than applied to every file (audit OX-M3). `--language` exists for input
+        // with no filename to classify by; a directory walk and a list of paths both have one per
+        // file, so a blanket declaration can only *overwrite* a correct answer with a single
+        // wrong one — declaration outranks extension by design (`constructors.ts`).
+        //
+        // Measured on a three-file tree at `--language python`: `languageSupport` went from
+        // "1 unsupported (json)" to "3 supported, 0 unsupported", `astCoverage` still read
+        // `unchecked: 0` because the Python validator genuinely did look at the JSON, and the run
+        // fell back entirely. So the cost is not merely a mislabel — it is a coverage report that
+        // lies and a guaranteed 0% behind it.
+        throw new Error(
+          '--language applies to stdin or a single file; a directory or multiple paths are classified per file by extension. ' +
+            'Declaring one language for all of them would override every file’s own type. Optimize the files individually to declare a language.',
+        );
+      }
+
       return runMultiFileOptimize(parsed, [parsed.inputPath, ...extraPaths], io, cwd);
     }
 
@@ -310,6 +327,14 @@ function runMultiFileOptimize(
 
   warnAboutDroppedFiles(request.bundle, result.finalBundle, io.stderr);
 
+  if (parsed.diff) {
+    // Rendered here too (audit OX-M2). This branch handled `--diff-html` and dropped `--diff`,
+    // so a caller asking for a terminal diff over a directory paid for the flag and got nothing
+    // — the accepted-then-ignored shape `SUPPORTED_FLAGS` exists to prevent. `renderTerminalDiff`
+    // already takes a whole `ContextBundle`, so no per-file variant is needed.
+    io.stdout.write(`\n${renderTerminalDiff(request.bundle, result.finalBundle)}\n`);
+  }
+
   if (parsed.diffHtmlPath) {
     generateHtmlReport(result, request.bundle, { outputPath: resolve(cwd, parsed.diffHtmlPath) });
   }
@@ -351,7 +376,7 @@ function warnAboutDroppedFiles(
     `Warning: ${dropped.length} of ${before.items.length} file(s) were removed entirely to meet the token budget, ` +
       `not elided — their contents are absent from the output with no marker:\n` +
       names.map((name) => `  - ${name}\n`).join('') +
-      `Raise --target-reduction-ratio's budget (a lower ratio prunes less) or optimize files individually to keep them.\n`,
+      `Lower --target-reduction-ratio (e.g. 0.3 -> 0.1), raise --max-input-tokens, or optimize files individually to keep them.\n`,
   );
 }
 
