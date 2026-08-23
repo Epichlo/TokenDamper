@@ -50,7 +50,6 @@ export function isConfigFileShape(value: unknown): value is ConfigFileShape {
         (file.app.name === undefined || typeof file.app.name === 'string') &&
         (file.app.version === undefined || typeof file.app.version === 'string') &&
         (file.app.mode === undefined || isAppMode(file.app.mode)))) &&
-    (file.traceOutput === undefined || isTraceOutput(file.traceOutput)) &&
     (file.planner === undefined ||
       (isPlainObject(file.planner) &&
         (file.planner.defaultMode === undefined || isOptimizationMode(file.planner.defaultMode)))) &&
@@ -90,15 +89,11 @@ function isBudgetShape(value: unknown): boolean {
 }
 
 function isAppMode(value: unknown): value is TokenDamperConfig['appMode'] {
-  return value === 'optimize' || value === 'explain' || value === 'bench';
+  return value === 'optimize' || value === 'bench';
 }
 
 function isOptimizationMode(value: unknown): boolean {
   return value === 'pass_through';
-}
-
-function isTraceOutput(value: unknown): boolean {
-  return value === 'stderr' || value === 'stdout';
 }
 
 function isLogLevel(value: unknown): boolean {

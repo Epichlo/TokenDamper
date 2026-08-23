@@ -56,12 +56,18 @@ and the reasoning.
 | **A** | `src/cli/**`, `src/config/**`, `src/core/engine/`, `planner/`, `topology/`, `src/bench/runner.ts`, `src/gateway/exec.ts`, repo hygiene | partially closed — see below |
 | **B** | `src/gateway/{proxy,server,session-store,types}.ts`, `stages/cleanup/session-dedup.ts`, `stages/compression/token-hashing.ts`, `adapters/mcp/server.ts`, `bench/fixtures/loader.ts` | **entirely open** (H2, H4, M1, M5, M8, M9, L6, L7, L9, L10, L13) |
 
-**Closed (Lane A):** H1, H3, M2, M3, M4, M10, M11, M12, M14, M16.
+**Closed (Lane A):** H1, H3, **H5**, M2, M3, M4, M10, M11, M12, M14, M16.
 
-**Open (Lane A):** H5 and M15 are **awaiting a decision, not implementation** — H5 is
-implement-vs-withdraw for `--trace-output` and `--mode explain`, on the precedent of audit H4;
-M15 is whether plain `bench` should shell out to `python` by default. M6 and M7 change engine
-output and need the freeze → pin → vary-only-`dist/` loop (§4), not just tests. M13 and nine lows
+**H5 was decided as *withdraw*** — DECISIONS §62. `--trace-output`, `TOKENDAMPER_TRACE_OUTPUT` and
+the `explain` value of `--mode` / `TOKENDAMPER_APP_MODE` are gone from every input surface; the
+`ResolvedConfig` fields remain, documented as unconsumed, on audit H4's terms. `--mode bench` is
+untouched — it rewrites the command, which is a live effect. Note the flag's only caller in this
+repo, `tools/corpus-harness/measure.js`, was passing `--trace-output stderr` while reading stderr
+correctly all along; it was updated in the same change and re-verified.
+
+**Open (Lane A):** **M15 is awaiting a decision, not implementation** — whether plain `bench`
+should shell out to `python` by default. M6 and M7 change engine output and need the
+freeze → pin → vary-only-`dist/` loop (§4), not just tests. M13 and nine lows
 (L1, L2, L3, L5, L8, L11, L12, L17–L19) are unstarted.
 
 **Recorded rather than fixed:** **L4** (a symlink is skipped inside a directory walk but followed
@@ -84,8 +90,9 @@ Skipping omits a file; it never corrupts one. The note lives at the site in `src
 That is the same lesson §1 already carries one level up: enumerate the document's own list, not the
 list of things that were worked on.
 
-**One trap for whoever takes H5:** `tools/corpus-harness/measure.js` passes `--trace-output stderr`.
-Withdrawing that flag makes the measurement harness a parse error.
+**The H5 trap, now closed:** `tools/corpus-harness/measure.js` was passing `--trace-output stderr`.
+Withdrawing the flag would have made the measurement harness a parse error; it was updated in the
+same change (DECISIONS §62) and re-verified end to end.
 
 **This document has claimed "every audit item is now closed" twice, and been wrong twice.**
 

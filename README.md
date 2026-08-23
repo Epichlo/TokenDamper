@@ -153,9 +153,11 @@ TokenDamper behavior can be configured dynamically using environment variables:
 |----------|-------------|
 | `TOKENDAMPER_GATEWAY_TOKEN` | Auth token for gateway requests, enforced only on a **non-loopback** bind. Auto-generated and injected by `exec`; loopback peers are trusted and need not present it. |
 | `TOKENDAMPER_MAX_INPUT_TOKENS` | Hard budget cap on the number of context tokens sent to the LLM. Any value above 0 also engages the optimizing planner. |
-| `TOKENDAMPER_TARGET_REDUCTION_RATIO` | Fraction of tokens to try to remove, 0–1. Currently an on/off switch rather than a proportional target — any value above 0 engages the planner. |
+| `TOKENDAMPER_TARGET_REDUCTION_RATIO` | Fraction of tokens to try to remove, 0–1. A real target since 1.3.0 — it resolves against the input into an absolute token ceiling that both selection and compression respect. Best effort, not a guarantee; see `--target-reduction-ratio` below. |
 | `TOKENDAMPER_PRESERVE_KINDS` | Comma-separated list of items to never prune (e.g. `prompt,file`). |
+| `TOKENDAMPER_MINIMUM_CONFIDENCE` | Validation confidence floor, 0–1 inclusive. Out-of-range and unparseable values are rejected. |
 | `TOKENDAMPER_LOG_LEVEL` | Logging verbosity (`debug`, `info`, `warn`, `error`, `silent`). |
+| `TOKENDAMPER_APP_MODE` | `optimize` or `bench`. |
 
 `TOKENDAMPER_RISK_TOLERANCE`, `TOKENDAMPER_MAX_OUTPUT_TOKENS` and `TOKENDAMPER_MAX_LATENCY_MS`
 were **removed in 1.2.0**, along with the `--risk-tolerance`, `--max-output-tokens` and
@@ -163,6 +165,18 @@ were **removed in 1.2.0**, along with the `--risk-tolerance`, `--max-output-toke
 reached the benchmark table's display column and nothing else — so setting one reported
 success and changed nothing (audit H4). The corresponding `OptimizationBudget` fields remain
 in the model; only the user-facing controls are gone.
+
+**`TOKENDAMPER_TRACE_OUTPUT` and `--trace-output` are withdrawn on the same grounds**, along with
+the `explain` value of `--mode` / `TOKENDAMPER_APP_MODE` (audit OX-H5, DECISIONS §62). They were
+parsed, validated against an enum, threaded through the whole precedence chain and frozen onto the
+config — where nothing read them. The trace is written to stderr by a literal, so
+`--trace-output stdout` reported success and changed nothing; nothing branched on `explain` at
+all. `--trace-output` is now an unknown argument, and `explain` is rejected rather than ignored,
+matching how 1.6.0 treats every other unrecognized `TOKENDAMPER_*` value. **The trace itself has
+not moved** — it goes to stderr, as it always did.
+
+`--mode bench` still works: it routes to the `bench` command, which is a real effect and the
+reason `--mode` was narrowed by value rather than removed.
 
 ## Visual Diff & Trace Flags
 

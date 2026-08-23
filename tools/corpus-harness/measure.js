@@ -67,17 +67,14 @@ function parseTrace(stderr) {
 
 function runOnce({ route, absPath, bytes, ratio }) {
   return new Promise((resolve) => {
+    // No `--trace-output stderr` here any more. The flag was withdrawn in audit OX-H5, so passing
+    // it is now a parse error — and it never did anything anyway: the trace has always gone to
+    // stderr through a literal write, which is why this harness parses stderr and kept working
+    // the whole time it was passing a flag that changed nothing.
     const args =
       route === 'file'
-        ? [
-            'optimize',
-            absPath,
-            '--target-reduction-ratio',
-            String(ratio),
-            '--trace-output',
-            'stderr',
-          ]
-        : ['optimize', '-', '--target-reduction-ratio', String(ratio), '--trace-output', 'stderr'];
+        ? ['optimize', absPath, '--target-reduction-ratio', String(ratio)]
+        : ['optimize', '-', '--target-reduction-ratio', String(ratio)];
 
     const child = spawn(process.execPath, [CLI, ...args], { cwd: REPO_ROOT });
 
