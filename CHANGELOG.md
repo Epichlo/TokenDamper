@@ -107,6 +107,32 @@ Minor rather than major on this project's standing rule: nothing removed, but th
 over the same input emits different bytes. Minor rather than patch for the same reason.
 
 ### Fixed
+- **A directory walk no longer descends into agent worktrees, and orders the same on every OS
+  (audit OX-M4, OX-M16).** Both are selection defects, and selection is load-bearing: the
+  cache-aware prefix lock pins the first ~1,024 tokens and pinned items bypass the knapsack
+  entirely, so which files appear — and in what order — decides which survive (invariants 6, 7).
+
+  - `SKIP_DIRECTORIES` enumerated `.git`, `.next` and `.venv` by name, so `.claude` was missing —
+    and `.claude/worktrees/<name>/` holds entire duplicate checkouts. Observed: `tokendamper
+    optimize .` ingested this repository's own source twice, once from `src/` and once from a
+    stale worktree. Skipping is now by *shape* — any dot-directory — because enumerating names
+    never kept up: `.agents`, `.cursor`, `.idea`, `.cache` each arrive as a silent duplicate
+    rather than an error. Explicitly naming a file inside one still takes it; the rule governs
+    walking only.
+  - Paths were built with `path.join` (native separators) and then sorted as native strings, so
+    `\` (0x5C) was compared on Windows where `/` (0x2F) was compared elsewhere. Every sibling
+    whose name sorts between them — every digit and every capital letter — ordered differently
+    per platform: `src/a.ts` precedes `srcZ/a.ts` on POSIX because `/` < `Z`, and follows it on
+    Windows because `Z` < `\`. The same directory produced two different bundles. Sorting now
+    runs on separator-normalized keys; the emitted paths stay native, since they are what the
+    envelope prints and what the caller has to be able to open.
+
+  **OX-L4 (symlinks skipped in a walk, followed when named) is recorded at its site, not fixed.**
+  The fix is small, but it could not be exercised where it was written — creating a symlink needs
+  elevation or Developer Mode on Windows and returned `EPERM` — and shipping an unverified change
+  to the code that decides which files reach the pipeline is the trade this project keeps
+  declining. Skipping is the safe direction: a file is omitted, never corrupted.
+
 - **The multi-file route stops accepting flags it then drops (audit OX-M2, OX-M3, OX-M14).**
   `SUPPORTED_FLAGS` exists so an inapplicable flag is a parse error naming where it *does* apply
   (DECISIONS §30). These got past it by being genuinely valid on `optimize` — just not on the
