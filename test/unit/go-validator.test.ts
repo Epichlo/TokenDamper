@@ -288,7 +288,7 @@ describe('dispatch reaches the Go validator by language and by path', () => {
   });
 });
 
-describe('step 2 does not make Go elidable', () => {
+describe('what step 2 settled, and what step 3 then changed', () => {
   const GO_SOURCE = [
     'package report',
     '',
@@ -322,28 +322,37 @@ describe('step 2 does not make Go elidable', () => {
     language: 'go',
   });
 
-  it('has a validator and still no region selector', () => {
-    // The two gates `supportsRegionElision` combines. Step 2 moves the first and not the
-    // second: `'go'` joins `REGION_ELISION_LANGUAGES` in step 3, not here.
+  it('has a validator, and since §61 a region selector too', () => {
+    // The two gates `supportsRegionElision` combines. Step 2 moved the first; the second
+    // (`'go'` in `REGION_ELISION_LANGUAGES`) was step 3, and this assertion was `false` until
+    // then. Both are needed, which is why `selectValidator` alone never made Go elidable.
     expect(selectValidator(item)?.language).toBe('go');
-    expect(supportsRegionElision(item)).toBe(false);
+    expect(supportsRegionElision(item)).toBe(true);
   });
 
-  it('still reports the language as unsupported', () => {
+  it('reports the language as supported', () => {
     const report = describeLanguageSupport({ items: [item] } as never);
 
-    expect(report.noneSupported).toBe(true);
-    expect(report.unsupportedLanguages).toContain('go');
+    expect(report.noneSupported).toBe(false);
+    expect(report.supported).toBe(1);
   });
 
-  it('returns Go byte-identical through the engine, now with the check recorded as run', () => {
+  it('reduces Go through the engine, and the output still passes the Go validator', () => {
+    // Step 2 pinned this as byte-identical, which was that step's negative control. §61 is
+    // the step that changes output, so the assertion changes with it — and what replaces it
+    // is the property that matters once bytes do move: the elided text is still balanced Go.
     const config = loadConfig();
     const request = parse(GO_SOURCE, config, { sourceKind: 'stdin', language: 'go' });
     const result = optimize({ ...request, budget: { ...request.budget, targetReductionRatio: 0.3 } });
 
-    // The step-2 negative control: coverage moves, output does not.
     expect(result.trace.astCoverage).toEqual({ checked: 1, unchecked: 0, uncheckedContentTypes: [] });
-    expect(result.emittedOutput).toBe(GO_SOURCE);
-    expect(result.trace.tokenAfter).toBe(result.trace.tokenBefore);
+    expect(result.fallbackUsed).toBe(false);
+    expect(result.trace.tokenAfter).toBeLessThan(result.trace.tokenBefore);
+    expect(result.emittedOutput).not.toBe(GO_SOURCE);
+
+    // Signatures survive by construction, and the result is still bracket-balanced.
+    expect(result.emittedOutput).toContain('func render(items []string) string {');
+    expect(result.emittedOutput).toContain('func count(items []string) int {');
+    expect(new GoValidator().validate(result.emittedOutput).valid).toBe(true);
   });
 });

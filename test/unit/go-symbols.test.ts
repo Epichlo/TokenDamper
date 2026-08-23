@@ -388,16 +388,42 @@ describe('what the drift gate can now witness on Go', () => {
   });
 });
 
-describe('step 1 does not make Go elidable', () => {
-  it('leaves the language-support verdict alone', () => {
-    // The negative control that matters most: symbols are not the gate that decides whether
-    // elision can run. `supportsRegionElision` still answers no for Go, so reduction stays
-    // 0.00% until the validator and the region scanner land — and the corpus A/B agrees at
-    // 574/574 byte-identical.
+describe('symbols are not the gate that decides whether elision can run', () => {
+  // **This assertion was inverted by DECISIONS §61, on purpose, and that is the point of
+  // keeping it.** It read `noneSupported === true` for Go while step 1 was the whole story:
+  // symbols existed, elision could not run, and the corpus A/B was 574/574 byte-identical.
+  // The region scanner landed in §61 and Go reduces now, so the Go half says the opposite.
+  //
+  // The claim underneath is unchanged and still worth a guard, so it moved to a language that
+  // is in the same position Go used to be: `supportsRegionElision` consults
+  // `selectValidator().language` against `REGION_ELISION_LANGUAGES`, and never consults
+  // `extractSymbols` at all.
+  it('says yes for Go, which has both a validator and a scanner (§61)', () => {
     const bundle = goBundle(
       'package main\n\nimport "fmt"\n\nfunc compute(items []int) int {\n\ttotal := 0\n\treturn total\n}\n',
     );
 
+    expect(describeLanguageSupport(bundle).noneSupported).toBe(false);
+  });
+
+  it('says no for Rust, which has a symbol and neither of the other two', () => {
+    // `struct Point` yields `type:Point` through the TypeScript class regex — the same
+    // incidental match Go used to be the example of. A symbol is not support.
+    const bundle = createBundleFromItems(
+      [
+        createContextItem({
+          id: 'r1',
+          kind: 'file',
+          contentType: 'code',
+          content: 'struct Point { x: i32 }\n\nfn compute(a: i32) -> i32 { a + 1 }\n',
+          path: 'a.rs',
+          language: 'rust',
+        }),
+      ],
+      'file',
+    );
+
+    expect(tracker.extractSymbols(bundle).size).toBeGreaterThan(0);
     expect(describeLanguageSupport(bundle).noneSupported).toBe(true);
   });
 });

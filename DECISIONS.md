@@ -4381,3 +4381,124 @@ two LOW items that got fixed were the two that happened to sit inside someone el
 - **`code` still maps to no validator.** Go reaches `GoValidator` through the `language` and
   `path` branches, by its own grammar — which is the distinction that `null` exists to preserve,
   not one this contradicts. Rust, C, Java, shell and the rest are unchanged and still uncovered.
+
+---
+
+## 61. Go Elides, and the Ordering Discipline Paid for Itself Twice
+
+**Date:** 2026-08-21 · **Status:** accepted · **Scope:** `REGION_ELISION_LANGUAGES`, the Go region
+scanner and statement splitter
+
+Step 3 of three, and the one that changes output. §56 fixed the order and measured the
+precondition; §59 gave the drift gate Go symbols; §60 gave Go a validator. This adds the scanner,
+and Go reduces.
+
+### What it adds
+
+- **`scanGoBraceSpans`**, a Go brace scanner — separate from `scanBraceSpans` for exactly §60's
+  reason: Go's `` ` `` raw string spans lines, takes **no escapes**, and holds `{`, `}` and `\`.
+  A TypeScript scanner reads `` `C:\path\` `` as an unterminated template literal and every brace
+  after it as string content, and a region boundary computed from that is not a function body.
+  No regex-literal state, because Go has none.
+- **`GO_FUNCTION_HEADER = /^func\b/`**, a keyword test where TypeScript needs a shape test. This
+  is most of why Go was the first language added (§56). `FUNCTION_HEADER` matches anything ending
+  in `)`, so `CONTROL_FLOW_HEADER` has to subtract `if`/`for`/`while` back out; `^func` needs no
+  subtraction, and it excludes `type Point struct {`, `Config{`, `switch v := x.(type) {` and
+  every closure form (`go func() {`, `defer func() {`, `handler := func() {`) by construction.
+- **`splitGoStatements`**, because **Go ends statements at a newline, not at a `;`**. Semicolon
+  insertion means gofmt-ed source has almost none written down, so `splitTypeScriptStatements`
+  finds only the `}` boundaries and calls most bodies indivisible — §50's overshoot, one language
+  along. The boundary is a newline at depth 0, so a multi-line call, a composite literal and a
+  nested block are each one span.
+- `'go'` in `REGION_ELISION_LANGUAGES`, plus a Go arm on `isSubstantiveRegion` (`stripGo`).
+
+### Measured
+
+Frozen 80-file Go corpus, target 0.3, engine varied and nothing else:
+
+| bucket | files | reduce | fallback | aggregate |
+|---|---|---|---|---|
+| application Go (`cli/cli`, `gin`, `cobra`) | 40 | 32 | 8 | **27.46%** |
+| stdlib (`golang/go` `src/`) | 40 | 25 | 12 | **19.42%** |
+
+§56 projected **23–28%** from the ceiling, borrowing TypeScript's conversion factor. Application
+Go landed at **27.46%**, at the top of that range and **above this repo's TypeScript at 21.22%**
+on the same engine. The stdlib's 19.42% tracks its 10pp lower ceiling, which §56 traced to
+generated tables rather than averaging away.
+
+**The 287-file main corpus is 574/574 byte-identical, 0 rows differing across 17 fields.**
+TypeScript and Python are untouched, because every Go path is gated on `language === 'go'`.
+
+Adherence at target 0.3 over the 57 reducing files: median **35.8%**, with 20 in the 25–35% band,
+17 in 35–50% and 14 above 50% — the same profile TypeScript has after §50.
+
+### §56's hazard, measured live rather than simulated
+
+Neutering §59's Go symbol patterns and re-running step 3 reproduces the configuration §56 warned
+about — the region scanner without the drift gate that can witness it:
+
+| | scanner-first (no §59) | shipped |
+|---|---|---|
+| file-route fallbacks | 43/80 | **20/80** |
+| rows where drift measured anything | 55/80 | **80/80** |
+| median `symbolsBefore` | 2 | **8** |
+| application Go aggregate | 14.45% | **27.46%** |
+
+**32 files elide with `S_k = 0.0000`, `astMeasured: true`, both gates passing and no fallback, on
+1–5 symbols that are all `type:` and `import:`.** `accessibility.go` loses **78.4%** of its tokens
+that way. That is §56's table, on real input, at scale — the gate reporting perfect retention
+having witnessed nothing. With §59 in place the same 32 files still pass, and that is correct
+(signature-preserving elision genuinely loses no symbols), but the verdict now rests on a median
+of 8 real symbols instead of on an import.
+
+**§59 is not a tax on reduction; it is a precondition for it.** Fallbacks more than halve and
+application Go goes 14.45% → 27.46%, because without Go symbols many files have *no* symbols and
+§33's measurement gate refuses them outright. The safety step and the reduction step turned out
+to be the same step.
+
+### Go's fallback rate, and an expectation of §56's that measurement contradicts
+
+§56 could not measure this and said so. Now: **20 of 80 files fall back (25%)**, and the causes are
+
+- **18 `CONSTRAINT_DIRECTIVE_LOST`**
+- **2 `SEMANTIC_DRIFT_EXCEEDED`** (both `fuzz_test.go`, `S_k = 0.50`)
+
+**§56 expected Go's lower comment density to make the constraint gate fire *less*. It does not.**
+The gate dominates Go's fallbacks exactly as it dominates TypeScript's, and the rate is the same
+within noise — 25% for Go against 24% for this repo's TypeScript (15 of 62). Density was the wrong
+variable: what trips the gate is Go's *defensive comment style*, and it is §7.5's still-open axis
+verbatim — `// This never happens in practice`, `// Should never happen, but we`,
+`// The user data should always`, `// does not always result in`, `// Must read more data.`
+Every one is descriptive present tense, which §52 deliberately did not attempt.
+
+So the largest remaining gain on Go is not in the scanner. It is in that gate.
+
+### Test files are the larger prize, confirmed end to end
+
+§56 measured `_test.go` at a 92.22% ceiling and flagged that nothing here had been counting them.
+Through the shipped pipeline:
+
+| | files | reduce | fallback | aggregate |
+|---|---|---|---|---|
+| `_test.go` | 40 | 32 | 7 | **26.88%** |
+| source | 40 | 25 | 13 | **14.42%** |
+
+Nearly double the saving *and* half the fallbacks. Go's table-driven test convention puts large
+literal slices inside function bodies, which is exactly what body elision is for.
+
+### What this does not establish
+
+- **The Go corpus is alphabetically-first selection** — deterministic, and not representative
+  (the harness README's own caveat). It is 80 files against the main corpus's 287, and it is
+  frozen through a scratch recipe rather than the shipped one, because its roots are a temp-dir
+  clone.
+- **A signature broken across lines is silently skipped**, and the corpus does not say how often.
+  `scanBraceSpans` takes the header from the line carrying the `{`, so a gofmt-wrapped signature
+  presents as `) error`. Under-selection costs reduction, never content, which is why it ships
+  characterized rather than fixed.
+- **Reversibility was not measured separately for Go.** `token-hashing`'s rehydration path is
+  language-agnostic and covered by `token-hashing-reversibility.test.ts`; nothing here tested that
+  a Go elision round-trips through a real MCP session.
+- **Nothing about Rust, C or Java.** Each needs its own three steps, and the header discriminator
+  is the hard part for the C family (§56) — `int foo(...)` cannot be told from a prototype, where
+  `func` is unambiguous.

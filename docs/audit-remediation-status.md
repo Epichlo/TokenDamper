@@ -4,13 +4,13 @@ Working state for the `max_audit.md` remediation. **Read this before picking up 
 it records what is done, what is measured, and what the next batch actually requires.
 
 Last updated 2026-08-20. **Unreleased on `main` since v1.6.0:** a pruned-file warning (§7.8),
-`--keep-docstrings` (DECISIONS §58, §7.9) — both found by dogfooding, not the audit — and **steps 1 and 2
-of widening elision to Go** (DECISIONS §59 and §60, §7.3, §9) — Go function and method symbols
-in `DriftTracker.extractSymbols`, and a Go validator so `.go` items are checked rather than
-skipped. Neither changes output anywhere; Go is still unelidable until step 3. **Shipped as
+`--keep-docstrings` (DECISIONS §58, §7.9) — both found by dogfooding, not the audit — and **widening elision
+to Go, all three steps** (DECISIONS §59, §60 and §61, §7.3, §9). **Go reduces** — application Go
+27.46% and stdlib 19.42% at target 0.3, against this repo's TypeScript at 21.22%. The main
+287-file corpus is 574/574 byte-identical, because every Go path is gated on the language. **Shipped as
 v1.6.0** — §54 (M7), §55 (the LOW table), §56 (the measured precondition for widening elision, §9)
 and §57 (the block-hash false positive), on top of **v1.5.0** (§52, the constraint gate stops
-firing on narrative comments), v1.4.0 (§50) and v1.3.0 (§48, §49). Suite: **723 passing**,
+firing on narrative comments), v1.4.0 (§50) and v1.3.0 (§48, §49). Suite: **737 passing**,
 typecheck, lint and build clean. `npm run format` no longer exists; `lint` is the enforced style
 gate.
 
@@ -288,7 +288,8 @@ Learned the hard way during Waves 0–3.
   the input: `trace.languageSupport` carries `supported`/`unsupported`/`noneSupported` and a
   `reason` string, and `validate()` raises an **info** issue, `LANGUAGE_NOT_ELIDIBLE`.
 
-  Measured, elision reduces **3 of 17** probed languages — TypeScript, JavaScript, Python —
+  Measured, elision reduces **4 of 17** probed languages — TypeScript, JavaScript, Python and,
+  since §61, Go —
   which matches both the audit headline and the corpus. The predicate is `supportsRegionElision`
   and nothing looser: a first attempt asked "does the item yield symbols?" and called Go
   supported, because a trivial Go file yields exactly one — `import:fmt`, an incidental match by
@@ -376,12 +377,19 @@ Ordered by measured value ÷ risk. Preconditions verified as holding — as dist
    50%**, because elision's smallest unit is one region and files have one dominant region
    (58%, 61%, 83% measured). Narrowest blast radius; `test/unit/target-reduction-ratio.test.ts`
    already pins the limit and is where the tightening would be asserted.
-3. **Widen elision beyond TypeScript/JavaScript/Python — the only open item on this list, and
-   its precondition is measured. DECISIONS §56, and §9 below. Steps 1 and 2 of 3 have landed
-   (DECISIONS §59, §60): `extractSymbols` harvests Go `func` and method declarations, and
-   `GoValidator` checks `.go` items instead of skipping them. Go is still unelidable and both
-   corpora are byte-identical. Step 3 (`REGION_ELISION_LANGUAGES` plus the region scanner) is
-   the only one left, and it is the one that changes output — see §9.** Largest raw
+3. ~~**Widen elision beyond TypeScript/JavaScript/Python.**~~ **Done — all three steps,
+   DECISIONS §59, §60 and §61.** Go reduces: **27.46%** on application Go and **19.42%** on the
+   stdlib at target 0.3, against this repo's TypeScript at 21.22% — the newest language is the
+   strongest, and §56 projected 23–28%. The main 287-file corpus is 574/574 byte-identical.
+
+   **The ordering paid for itself twice, and §9 carries the measurement.** Re-running step 3
+   with §59 neutered reproduces §56's hazard on real input — 32 files elide at `S_k = 0.0000`
+   with both gates green, one of them losing 78.4% of its tokens. And §59 turned out to be a
+   *precondition for reduction*, not a tax on it: without it fallbacks more than double and
+   application Go reads 14.45% instead of 27.46%.
+
+   **What is next on Go is not the scanner.** 18 of its 20 fallbacks are
+   `CONSTRAINT_DIRECTIVE_LOST` on descriptive present-tense comments — §5 above, still open. Largest raw
    gain: every other bucket in §2 is 0.00%, and a
    real Go corpus offers **55–65%** of its bytes as elidable function body against TypeScript's
    57.78% — at least as much material as the product's best language.
@@ -441,7 +449,7 @@ Ordered by measured value ÷ risk. Preconditions verified as holding — as dist
 carries its measured precondition and the sequencing the `widen-language` skill encodes.
 
 **With that, the audit is closed in full and nothing here blocks feature work.** §3 of this
-section is the largest measured gain still available: elision reduces **3 of 17** languages, and
+section is the largest measured gain still available: elision reduces **4 of 17** languages, and
 every other bucket in §2 is 0.00%.
 
 ---
@@ -590,6 +598,41 @@ validator-*covered* items rather than items bearing symbols. Go with §59 but wi
 the first language ever to have symbols and no validator, and all 80 frozen Go rows reported
 `symbolsBefore = 3`+ next to `symbolBearingItems = 0`. Recorded at the site and not fixed here
 — it is a parsed trace field, so changing it is its own decision.
+
+### Step 3 landed — Go reduces (DECISIONS §61)
+
+| bucket | files | reduce | fallback | aggregate |
+|---|---|---|---|---|
+| application Go (`cli/cli`, `gin`, `cobra`) | 40 | 32 | 8 | **27.46%** |
+| stdlib (`golang/go` `src/`) | 40 | 25 | 12 | **19.42%** |
+| `_test.go` (across both) | 40 | 32 | 7 | **26.88%** |
+| source (across both) | 40 | 25 | 13 | **14.42%** |
+
+§56 projected 23–28%; application Go landed at the top of it, above this repo's TypeScript
+(21.22%). Adherence over the 57 reducing files: median **35.8%**, 20 in the 25–35% band, 17 in
+35–50%, 14 above 50% — the profile TypeScript has after §50. **Main corpus 574/574
+byte-identical.**
+
+**§56's hazard, reproduced on real input rather than simulated.** Neutering §59 and re-running
+step 3:
+
+| | scanner-first (no §59) | shipped |
+|---|---|---|
+| file-route fallbacks | 43/80 | **20/80** |
+| rows where drift measured anything | 55/80 | **80/80** |
+| median `symbolsBefore` | 2 | **8** |
+| application Go aggregate | 14.45% | **27.46%** |
+
+**32 files elide at `S_k = 0.0000` with `astMeasured: true`, both gates passing and no
+fallback, on 1–5 symbols that are all `type:` and `import:`** — `accessibility.go` loses 78.4%
+of its tokens that way. And the safety step turned out to be the reduction step: without §59
+many files have *no* symbols, so §33 refuses them outright.
+
+**Go's fallback rate, and an expectation §56 got wrong.** 20 of 80 (25%), of which **18 are
+`CONSTRAINT_DIRECTIVE_LOST`** and 2 are drift. §56 expected Go's lower comment density to make
+that gate fire *less*; it dominates exactly as it does for TypeScript, at the same rate (24%,
+15 of 62). Density was the wrong variable — Go's defensive comment style (`// Should never
+happen, but we`) is §5's still-open axis verbatim.
 
 ### What is not established
 

@@ -69,6 +69,29 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `symbolBearingItems = 0`. `symbolsBefore` is the honest field. It is a trace field consumers
   parse, so changing it is its own decision — see DECISIONS §60.
 
+- **Go elides. Elision now reduces four languages instead of three (DECISIONS §61).** Step 3 of
+  three, and the one that changes output: a Go brace scanner, a `^func` keyword header test, and
+  a statement splitter that boundaries on newlines because Go ends statements by semicolon
+  insertion rather than by a written `;`.
+
+  Measured on a frozen 80-file Go corpus at target 0.3: **application Go 27.46%** (32 of 40
+  reducing) and **stdlib 19.42%** (25 of 40) — against this repo's TypeScript at 21.22% on the
+  same engine, so the newest language is also the strongest. §56 projected 23–28% and
+  application Go landed at the top of it. **The 287-file main corpus is 574/574
+  byte-identical**: every Go path is gated on the language, so TypeScript and Python do not move.
+
+  **`_test.go` is where most of the saving is** — 26.88% against 14.42% for source, with half
+  the fallbacks, because Go's table-driven tests put large literal slices inside function bodies.
+
+  Go now reports as supported on `trace.languageSupport`, and the "elision reduces
+  TypeScript/JavaScript and Python only" explanation has been corrected wherever it is emitted.
+
+  **Go falls back on 25% of files, and 18 of the 20 are `CONSTRAINT_DIRECTIVE_LOST`** — the
+  descriptive-present-tense axis §52 deliberately left open (`// This never happens in practice`,
+  `// Should never happen, but we`). §56 expected Go's lower comment density to make that gate
+  fire less; measured, it dominates exactly as it does for TypeScript, at the same rate. The
+  largest remaining gain on Go is in that gate, not in the scanner.
+
 ## [v1.6.0] - 2026-08-16
 
 **Two defects that reached provider traffic, and an audit closed in full.** `max_audit.md` had

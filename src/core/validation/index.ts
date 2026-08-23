@@ -189,7 +189,7 @@ export function validate(
     issues.push({
       code: 'LANGUAGE_NOT_ELIDIBLE',
       message: languageSupport.noneSupported
-        ? `No elision transform in this build can reduce ${languages}: there is no sub-item region selector for it, and whole-item elision cannot survive the drift gate. Elision reduces TypeScript/JavaScript and Python only. A 0% result here is structural, not a property of this input.`
+        ? `No elision transform in this build can reduce ${languages}: there is no sub-item region selector for it, and whole-item elision cannot survive the drift gate. Elision reduces TypeScript/JavaScript, Python and Go only. A 0% result here is structural, not a property of this input.`
         : `${languageSupport.unsupported} of ${before.items.length} item(s) are in a language elision cannot reduce (${languages}); only whole-item pruning can affect them.`,
       severity: 'info',
     });

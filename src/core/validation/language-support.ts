@@ -15,8 +15,9 @@ import { supportsRegionElision } from '../elision/regions';
  * The answer is exactly `supportsRegionElision`, and the derivation matters because a looser
  * predicate is tempting and wrong:
  *
- *  - **Sub-item region elision** exists only for TypeScript/JavaScript and Python
- *    (`selectElisionRegions` returns `[]` for everything else).
+ *  - **Sub-item region elision** exists only for TypeScript/JavaScript, Python and Go
+ *    (`selectElisionRegions` returns `[]` for everything else). Go joined in DECISIONS §61,
+ *    which is the third and last step of the sequence §56 fixed.
  *  - **Whole-item elision of a symbol-bearing item** is refused outright by
  *    `compression:token-hashing` — since §40 a code item scores `S_k = 1 - R_AST`, and
  *    destroying every symbol makes that 1.0 against a gate that fires above 0.40. There is no
@@ -26,14 +27,16 @@ import { supportsRegionElision } from '../elision/regions';
  *    eliding the whole item destroys every content marker, giving `R_struct = 0`. An item with
  *    neither symbols nor markers is refused by the measurement gate instead (§33).
  *
- * So for anything outside the two region-selectable languages, every elision route terminates in
- * a refusal. That prediction matches the measured corpus exactly: python and typescript reduce;
- * shell, perl, tcl, c, rust, css and prose are 0.00% on both routes.
+ * So for anything outside the region-selectable languages, every elision route terminates in a
+ * refusal. That prediction matches the measured corpus exactly: python, typescript and (since
+ * §61) go reduce; shell, perl, tcl, c, rust, css and prose are 0.00% on both routes.
  *
  * **A first attempt at this used "does the item yield symbols or markers?" and was wrong.**
- * A trivial Go file yields exactly one symbol — `import:fmt`, an incidental match by the
- * TypeScript import regex — which made Go read as supported while it still cannot reduce. The
- * gate to ask about is the one that actually decides.
+ * A trivial Go file yielded exactly one symbol — `import:fmt`, an incidental match by the
+ * TypeScript import regex — which made Go read as supported while it still could not reduce.
+ * The gate to ask about is the one that actually decides. **Go reduces now (§61), so the
+ * example has moved on; the reasoning has not.** Rust is the same shape today: a `struct`
+ * yields `type:Point` by the same incidental match, and Rust has no region scanner.
  *
  * Note this is scoped to elision. `pruning:topology-pruner` drops whole items and is
  * language-agnostic, but it is selection rather than elision and needs a multi-item bundle;
@@ -75,7 +78,7 @@ export function describeLanguageSupport(bundle: ContextBundle): LanguageSupportR
       ? {}
       : {
           reason: noneSupported
-            ? `Elision cannot reduce ${languages.join(', ')} in this build: there is no sub-item region selector for it, and whole-item elision cannot survive the drift gate. Elision reduces TypeScript/JavaScript and Python only, so 0% here is structural rather than a property of this input. Whole-item pruning is language-agnostic but needs a multi-item bundle.`
+            ? `Elision cannot reduce ${languages.join(', ')} in this build: there is no sub-item region selector for it, and whole-item elision cannot survive the drift gate. Elision reduces TypeScript/JavaScript, Python and Go only, so 0% here is structural rather than a property of this input. Whole-item pruning is language-agnostic but needs a multi-item bundle.`
             : `${unsupported} of ${bundle.items.length} item(s) are in a language elision cannot reduce (${languages.join(', ')}); only whole-item pruning can affect them.`,
         }),
   };
