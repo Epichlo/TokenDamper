@@ -26,6 +26,14 @@ export function clearGitWorkspaceCache(): void {
 
 /**
  * Normalizes file paths to POSIX style (forward slashes) relative to repository root.
+ *
+ * Comparison downstream is **case-sensitive**, on every platform. Git's porcelain output uses
+ * the index's casing and a directory walk uses the filesystem's, so the two agree in practice;
+ * the mismatch this leaves open is a caller-supplied path whose casing differs from the repo's
+ * (`optimize SRC/foo.ts` against a repo storing `src/`). Such an item scores as if it were not
+ * dirty and not recently committed — a lower topology score, never a wrong output byte.
+ * Recorded rather than fixed (audit L5): case-folding one side would make scores depend on the
+ * platform's filesystem semantics, and determinism is invariant 1.
  */
 export function normalizeGitPath(filePath: string, repoRoot?: string): string {
   let normalized = filePath.replace(/\\/g, '/');
