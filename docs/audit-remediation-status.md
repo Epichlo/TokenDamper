@@ -3,7 +3,7 @@
 Working state for the `max_audit.md` remediation. **Read this before picking up audit work**;
 it records what is done, what is measured, and what the next batch actually requires.
 
-Last updated 2026-08-20. **Unreleased on `main` since v1.6.0:** a pruned-file warning (§7.8),
+Last updated 2026-08-23. **Unreleased on `main` since v1.6.0:** a pruned-file warning (§7.8),
 `--keep-docstrings` (DECISIONS §58, §7.9) — both found by dogfooding, not the audit — and **widening elision
 to Go, all three steps** (DECISIONS §59, §60 and §61, §7.3, §9). **Go reduces** — application Go
 27.46% and stdlib 19.42% at target 0.3, against this repo's TypeScript at 21.22%. The main
@@ -38,6 +38,54 @@ re-measure before quoting a current figure — §4 explains why a remembered one
 
 **Phase 1c is closed** (DECISIONS §47), which was the binding constraint on multi-file value,
 and §48 closed H4's deferred half. §5 records what is left on the architectural axis.
+
+### `oxaudit.md` is a second audit, and it is **open** — do not read the table above as covering it
+
+`oxaudit.md` (ox-alpha, 2026-08-23, against `79aedef`) is an independent review, unrelated to
+`max_audit.md`'s wave structure. It is committed at the repository root for the same reason
+`max_audit.md` is — the changelog cites its `OX-*` IDs — and, like `max_audit.md`, **it records
+what was true when it was written and has not been edited since.** A finding described there in the
+present tense may already be closed. This section is the disposition; the audit file is not.
+
+The findings were split by **file ownership** rather than severity, so two agents could work without
+colliding on `src/cli/main.ts` and `src/gateway/proxy.ts`. `oxaudit-split.md` carries the partition
+and the reasoning.
+
+| Lane | Scope | State |
+|---|---|---|
+| **A** | `src/cli/**`, `src/config/**`, `src/core/engine/`, `planner/`, `topology/`, `src/bench/runner.ts`, `src/gateway/exec.ts`, repo hygiene | partially closed — see below |
+| **B** | `src/gateway/{proxy,server,session-store,types}.ts`, `stages/cleanup/session-dedup.ts`, `stages/compression/token-hashing.ts`, `adapters/mcp/server.ts`, `bench/fixtures/loader.ts` | **entirely open** (H2, H4, M1, M5, M8, M9, L6, L7, L9, L10, L13) |
+
+**Closed (Lane A):** H1, H3, M2, M3, M4, M10, M11, M12, M14, M16.
+
+**Open (Lane A):** H5 and M15 are **awaiting a decision, not implementation** — H5 is
+implement-vs-withdraw for `--trace-output` and `--mode explain`, on the precedent of audit H4;
+M15 is whether plain `bench` should shell out to `python` by default. M6 and M7 change engine
+output and need the freeze → pin → vary-only-`dist/` loop (§4), not just tests. M13 and nine lows
+(L1, L2, L3, L5, L8, L11, L12, L17–L19) are unstarted.
+
+**Recorded rather than fixed:** **L4** (a symlink is skipped inside a directory walk but followed
+when named directly). The fix is small, but creating a symlink on the machine it was written on
+returns `EPERM` without elevation, so it could not be exercised — and an unverified change to the
+code that decides which files reach the pipeline is the trade this project keeps declining.
+Skipping omits a file; it never corrupts one. The note lives at the site in `src/cli/ingest.ts`.
+
+**Two findings did not survive checking, and both are the reason this section exists:**
+
+- **OX-M3(a) is not a defect.** `--input-name` does not silently no-op on a directory —
+  `parseArguments` already throws for any non-`-` input path. Now pinned by a test so it stays true.
+  Its sibling M3(b) was real and *worse* than described: a blanket `--language` over a mixed tree
+  moved `languageSupport` from "1 unsupported (json)" to "3 supported, 0 unsupported", left
+  `astCoverage` reading `unchecked: 0`, and fell the whole run back.
+- **OX-M10 was scoped to one door and had three.** The audit named
+  `TOKENDAMPER_MINIMUM_CONFIDENCE`; the CLI flag carried the identical `Number.isFinite`-only check
+  and the config file was type-checked as bare `number`. All three validate now.
+
+That is the same lesson §1 already carries one level up: enumerate the document's own list, not the
+list of things that were worked on.
+
+**One trap for whoever takes H5:** `tools/corpus-harness/measure.js` passes `--trace-output stderr`.
+Withdrawing that flag makes the measurement harness a parse error.
 
 **This document has claimed "every audit item is now closed" twice, and been wrong twice.**
 

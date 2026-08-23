@@ -112,6 +112,21 @@ describe('warning when whole files are pruned', () => {
     expect(stdout).not.toContain(named as string);
   });
 
+  it('gives advice that points in one direction', () => {
+    // Audit OX-M14. The line read "Raise --target-reduction-ratio's budget (a lower ratio prunes
+    // less)" — it names the flag, tells the reader to raise it, then parenthesises the opposite.
+    // A user following the verb does the reverse of what the parenthesis intends.
+    //
+    // Asserted as a property rather than as exact prose: whichever verb the sentence uses about
+    // `--target-reduction-ratio`, it must not also be the other one.
+    const { stderr } = run(['optimize', './mixed', '--target-reduction-ratio', '0.5']);
+    const advice = /^(?:Lower|Raise).*target-reduction-ratio.*$/m.exec(stderr)?.[0];
+
+    expect(advice).toBeTruthy();
+    expect(advice).toMatch(/Lower --target-reduction-ratio/);
+    expect(advice).not.toMatch(/Raise --target-reduction-ratio/);
+  });
+
   it('stays silent when nothing was dropped', () => {
     // A ceiling the bundle already fits under, so the knapsack has nothing to drop. The
     // warning must not appear — one that fires on every run is one users learn to ignore.

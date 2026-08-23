@@ -48,9 +48,18 @@ export class BenchmarkRunner {
           // immediately on `if (!hasher && !ledger)`, so calling `optimize(request)` bare —
           // as this line did — measured the engine with its recovery machinery switched
           // off, and reported the resulting fallbacks as if they were the engine's real
-          // behavior. It must be the *same* instance the stage used: `token-hashing` falls
-          // back to `new TokenHasher()` internally when none is supplied, and those blocks
-          // are then unreachable, so the placeholders it wrote could never be reversed.
+          // behavior. It must be the *same* instance the stage used, which is why the runner
+          // constructs it here and hands it down.
+          //
+          // Supplying it is not optional (audit OX-M12). This comment used to say
+          // `token-hashing` "falls back to `new TokenHasher()` internally when none is
+          // supplied". It did once, and that default was removed deliberately: a store
+          // constructed inside the stage is garbage-collected when the stage returns, so the
+          // markers it wrote referred to content held by nothing, anywhere. With no hasher
+          // the stage now elides *irreversibly* and records that (`metadata.reversible`,
+          // `irreversibleElisions`) — so a runner that omitted it would not be measuring the
+          // same engine with a private store, it would be measuring a different one. See the
+          // header comment on `runTokenHashingStage`.
           //
           // Per run rather than shared, because a hasher carried across fixtures would let
           // one fixture's blocks resolve another's placeholders. Benchmark runs must stay

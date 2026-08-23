@@ -30,8 +30,31 @@ const INGESTIBLE_EXTENSIONS: ReadonlySet<string> = new Set([
 
 /** Directories never descended into. Cheap, and the alternative is measuring `node_modules`. */
 const SKIP_DIRECTORIES: ReadonlySet<string> = new Set([
-  'node_modules', '.git', 'dist', 'build', 'coverage', '.next', '.venv', '__pycache__',
+  'node_modules', 'dist', 'build', 'coverage', '__pycache__',
 ]);
+
+/**
+ * Whether a directory is walked at all.
+ *
+ * Dot-directories are skipped by *shape* rather than by name (audit OX-M4). The set above used to
+ * enumerate `.git`, `.next` and `.venv` individually, which is why `.claude` was missing — and
+ * `.claude/worktrees/<name>/` holds entire duplicate checkouts. Observed: `tokendamper optimize .`
+ * ingested this repository's own source twice, once from `src/` and once from a stale worktree.
+ * A duplicated half is not merely wasteful — it skews the token estimate, the cache-aware prefix
+ * lock and the knapsack's selection, so it changes which files survive (invariants 6 and 7).
+ *
+ * Enumerating names could not keep up. Every agent, editor and cache convention adds another
+ * (`.agents`, `.cursor`, `.idea`, `.cache`, `.pytest_cache`), and each arrives as a silent
+ * duplicate rather than as an error. The shape rule covers all of them, the three former entries
+ * included.
+ *
+ * This governs *walking* only. A file named directly on the command line is still taken, dot-path
+ * or not: `expandPath` returns a non-directory argument untouched, because naming a path is a
+ * statement that you want it.
+ */
+function isSkippedDirectory(name: string): boolean {
+  return name.startsWith('.') || SKIP_DIRECTORIES.has(name);
+}
 
 function extensionOf(path: string): string {
   const base = path.slice(path.lastIndexOf('/') + 1).slice(path.lastIndexOf('\\') + 1);
@@ -59,19 +82,47 @@ export function expandPath(argPath: string, cwd: string): string[] {
   const walk = (dir: string): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       if (entry.isDirectory()) {
-        if (SKIP_DIRECTORIES.has(entry.name)) continue;
+        if (isSkippedDirectory(entry.name)) continue;
         walk(join(dir, entry.name));
       } else if (entry.isFile() && INGESTIBLE_EXTENSIONS.has(extensionOf(entry.name))) {
+        // `Dirent.isFile()` is false for a symlink, so a symlinked file inside a walked directory
+        // is dropped here without a word — while the same symlink named directly on the command
+        // line is followed, because `statSync` above resolves it. The two routes disagree (audit
+        // OX-L4).
+        //
+        // Recorded rather than fixed, and the reason is the reason, not the size: the fix is
+        // small (stat the link, take it if it resolves to an ingestible file, push the realpath so
+        // `ingestPaths`'s dedup still sees one entry for a link and its target) but it could not
+        // be *exercised* where it was written — creating a symlink needs elevation or Developer
+        // Mode on Windows and returned EPERM. Shipping an unverified change to the path that
+        // decides which files reach the pipeline is the trade this project keeps declining.
+        // Skipping is the safe direction: a file is omitted, never corrupted.
         found.push(join(dir, entry.name));
       }
     }
   };
   walk(abs);
 
-  // Sorted so a directory produces the same bundle on every run and on every filesystem.
-  // Order is not cosmetic here: `applyCacheAwarePrefixLocking` pins the first ~1,024 tokens, so
-  // it decides which files are exempt from the knapsack (invariant 6, 7).
-  found.sort();
+  // Sorted so a directory produces the same bundle on every run, on every filesystem, and on
+  // every operating system. Order is not cosmetic here: `applyCacheAwarePrefixLocking` pins the
+  // first ~1,024 tokens, so it decides which files are exempt from the knapsack (invariants 6
+  // and 7).
+  //
+  // The comparison runs on separator-normalized keys (audit OX-M16). `path.join` builds native
+  // separators, and a bare `found.sort()` then compares `\` (0x5C) on Windows against `/` (0x2F)
+  // everywhere else — so any sibling whose name sorts between them, which is every digit and
+  // every capital letter, orders differently per platform. `src/a.ts` precedes `srcZ/a.ts` on
+  // POSIX because `/` < `Z`, and follows it on Windows because `Z` < `\`. Same directory, two
+  // different bundles, two different sets of pinned files.
+  //
+  // Only the sort *key* is normalized. The paths themselves stay native, because they are what
+  // the output envelope prints and what the caller has to be able to open.
+  const key = new Map(found.map((p) => [p, p.replace(/\\/g, '/')]));
+  found.sort((a, b) => {
+    const ka = key.get(a) as string;
+    const kb = key.get(b) as string;
+    return ka < kb ? -1 : ka > kb ? 1 : 0;
+  });
   return found;
 }
 
