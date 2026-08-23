@@ -285,8 +285,10 @@ elision is what closes that and is the next piece of work
 
 ### What to do instead — preconditions verified as holding
 
-1. **Widen elision beyond TypeScript/JavaScript and Python — precondition measured, DECISIONS
-   §56.** H2 measured **3 of 17** languages reducible. The largest real-world gain available, the
+1. ~~**Widen elision beyond TypeScript/JavaScript and Python.**~~ **Shipped — §59, §60, §61.**
+   Elision reduces **4 of 17** languages now. Application Go measures **27.46%** at target 0.3
+   and the stdlib 19.42%, against this repo's TypeScript at 21.22%. The original entry read:
+   precondition measured, DECISIONS §56; H2 measured **3 of 17** languages reducible. The largest real-world gain available, the
    only one on this list still open, and now the only one with a number: a real Go corpus offers
    **55–65%** of its bytes as elidable function body against TypeScript's **57.78%**, projecting
    to **23–28%** achieved — at or above the product's best language. **Go first**, because `func`
@@ -303,11 +305,16 @@ elision is what closes that and is the next piece of work
    `S_k = 0.0000` having witnessed nothing. **Scanner-first is silent unmeasured elision, not a
    visible zero.** Build `extractSymbols` first, then the validator, then the scanner.
 
-   **Steps 1 and 2 of 3 are built (§59, §60).** Step 2 is `GoValidator`, a Go lexer rather than
+   **All three steps are built (§59, §60, §61).** Step 2 is `GoValidator`, a Go lexer rather than
    a reuse of the TypeScript one: measured over 9,181 real Go files the TS lexer flags 73 and
    this one flags 1, and that file is the compiler's own malformed testdata. On a frozen 80-file
    Go corpus, items no validator looked at go 80 → 0 while reduction stays 0.00% and output is
-   160/160 byte-identical. **Only step 3 is left, and it is the one that changes output.**
+   160/160 byte-identical. Step 3 added the scanner and is the step that changed output.
+
+   **The ordering paid for itself: re-running step 3 with §59 neutered reproduces §56's hazard
+   on real input** — 32 files elide at `S_k = 0.0000` with both gates green, one losing 78.4%
+   of its tokens. §59 also turned out to be a precondition for reduction rather than a tax:
+   without it, fallbacks more than double and application Go reads 14.45%.
 
    **Step 1 (§59).** `extractSymbols` harvests `fn:Name` and `method:Recv.Name`
    from Go declarations; Go remains unelidable and the corpus is 574/574 byte-identical, which is

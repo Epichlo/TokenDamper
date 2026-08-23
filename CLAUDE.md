@@ -214,10 +214,12 @@ function's docstring when its body is elided. The default path stays 576/576 byt
 measured the trade at 14.2%–21.1% of the saving. Not yet released — decide a version at ship time
 (§53).
 
-**Also unreleased: steps 1 and 2 of widening elision to Go (DECISIONS §59, §60).** `extractSymbols` now
-harvests `fn:Name` and `method:Recv.Name` from Go declarations. **Go is still unelidable and
-reduction is still 0.00%** — `supportsRegionElision` decides that and consults the validator, not
-the symbol extractor — so the corpus is 574/574 byte-identical. What it closes is a measurement
+**Also unreleased: widening elision to Go, all three steps (DECISIONS §59, §60, §61).**
+**Go reduces: 27.46% on application Go and 19.42% on the stdlib at target 0.3, against this
+repo's TypeScript at 21.22%.** The main 287-file corpus is 574/574 byte-identical, because every Go
+path is gated on the language.
+
+Step 1 gave `extractSymbols` `fn:Name` and `method:Recv.Name`. What it closes is a measurement
 hole: a Go file with every function deleted, package and import and struct standing, used to score
 `S_k = 0.0000` with `astMeasured: true`, both gates passing and no fallback. It now scores 0.6667
 and the retention gate refuses. Signature-preserving body elision still scores 0.0000, which is
@@ -231,9 +233,20 @@ malformed testdata). The disagreements are raw strings — Go's backtick string 
 no escapes, and is full of quotes and braces. On a frozen 80-file Go corpus, unchecked items go
 80 → 0 on the file route while reduction stays 0.00% and output is 160/160 byte-identical.
 
-**Step 3 (`REGION_ELISION_LANGUAGES` plus the region scanner) is the only one left, and it is
-the one that changes output.** `.claude/skills/widen-language` carries why the order is a safety
-property, and §56 measured it.
+Step 3 added `scanGoBraceSpans`, a `^func` keyword header test and a newline-boundaried statement
+splitter (Go ends statements by semicolon insertion, so the TypeScript `;` rule finds nothing).
+
+**The ordering paid for itself twice, and this is the evidence for the skill's rule.** Neutering
+§59 and re-running step 3 reproduces §56's hazard on real Go: **32 files elide at `S_k = 0.0000`
+with `astMeasured: true`, both gates passing and no fallback**, one of them losing 78.4% of its
+tokens. And §59 is a *precondition for reduction*, not a tax — without it fallbacks more than
+double (20 → 43 of 80) and application Go reads 14.45% instead of 27.46%.
+
+**What is next on Go is not the scanner.** 18 of its 20 fallbacks are `CONSTRAINT_DIRECTIVE_LOST`
+on descriptive present-tense comments (`// Should never happen, but we`) — §52's still-open axis.
+§56 expected Go's lower comment density to make that gate fire less; measured, it dominates just
+as it does for TypeScript, at the same rate. And **`_test.go` is where the saving is**: 26.88%
+against 14.42% for source, with half the fallbacks.
 
 **v1.6.0 shipped 2026-08-16** — §54 (M7: the Gateway forwards the caller's bytes and measures
 them), §55 (the never-scheduled LOW table), §56 (the measured Go precondition) and §57 (a file
@@ -311,7 +324,8 @@ results), which is Gateway traffic; the Gateway plans only `session-dedup`, and 
 are already handled there.
 
 **Candidates with preconditions that do hold today:** widen elision beyond TS/JS/Python (H2
-measured 3 of 17 languages reducible — the largest real-world gain available); per-item drift, to
+measured 3 of 17 languages reducible, now 4 with Go — the largest real-world gain available, and
+taken); per-item drift, to
 finish what Phase 1c started; sub-region elision, which is what would make
 `--target-reduction-ratio` adhere tightly rather than partially.
 

@@ -59,6 +59,30 @@ const FUNCTION_HEADER = /\)\s*(?::\s*[^{;=]+)?$|=>$/;
 const CONTROL_FLOW_HEADER = /\b(?:if|for|while|switch|catch|do|else)\s*\(/;
 
 /**
+ * A header that introduces a Go function body.
+ *
+ * **Keyword-based, where TypeScript has to be shape-based, and that is most of why Go was the
+ * first language added.** `FUNCTION_HEADER` above tests for a trailing `)` because JavaScript
+ * declares functions half a dozen ways; the price is that every control-flow header also ends
+ * in `)`, which is what `CONTROL_FLOW_HEADER` then has to subtract. Go has one spelling and it
+ * is at the front, so the test is exact and needs no subtraction:
+ *
+ *  - `func computeTotal(items []int) int {` and `func (p *Point) Translate(dx int) {` match.
+ *  - `if err := run(); err != nil {`, `for i := range xs {`, `switch v := x.(type) {`,
+ *    `type Point struct {` and a composite literal `Config{` do not — no subtraction needed,
+ *    because none of them begins with the keyword.
+ *  - A closure does not match either, deliberately. `handler := func() {`, `go func() {`,
+ *    `defer func() {` and `wg.Go(func() {` all carry the keyword mid-header, and their bodies
+ *    sit inside an enclosing function body that is already a candidate.
+ *
+ * **Known under-selection: a signature broken across lines.** `scanBraceSpans` takes the header
+ * from the start of the line carrying the `{`, so a gofmt-wrapped signature presents as
+ * `) error` and is skipped. Missing a region costs reduction; matching the wrong one costs
+ * content, so this errs in the direction it should. Measured on the frozen Go corpus, see §61.
+ */
+const GO_FUNCTION_HEADER = /^func\b/;
+
+/**
  * Scans TypeScript/JavaScript for brace spans, tracking the lexical states in which a brace
  * does not mean a brace.
  *
@@ -154,6 +178,96 @@ function scanBraceSpans(content: string): ReadonlyArray<BraceSpan> {
 
     if (!/\s/.test(char)) {
       prevSignificant = char;
+    }
+  }
+
+  return spans;
+}
+
+/**
+ * Scans Go for brace spans.
+ *
+ * **A separate scanner rather than `scanBraceSpans` with a flag, for the reason §60 gave for
+ * the validator: the two grammars disagree about exactly the characters a brace scanner keys
+ * on.** Go's `` ` `` raw string spans lines, takes **no escapes**, and routinely holds `{`, `}`
+ * and `\` — struct tags, SQL, templates, and (in the stdlib) generated Go source. The
+ * TypeScript scanner reads `` ` `` as a template literal and honours `\` inside it, so
+ * `` `C:\path\` `` leaves it believing the literal never ended and every brace after it is
+ * inside a string. A region boundary computed from that is not a function body.
+ *
+ * There is no regex-literal state, because Go has no regex literals: a `/` outside a comment is
+ * division. That removes the one heuristic in the TypeScript scanner that can guess wrong.
+ *
+ * Rune literals are tracked as their own quote so that `'"'` and `'`'` — legal Go, and both
+ * present in the stdlib — do not open a string that never closes.
+ *
+ * The span shape is identical to `scanBraceSpans`: `start` is just after the `{`, `end` is at
+ * the `}`, so the signature and both braces survive an elision by construction.
+ */
+function scanGoBraceSpans(content: string): ReadonlyArray<BraceSpan> {
+  const spans: BraceSpan[] = [];
+  const stack: number[] = [];
+  let quote: string | null = null;
+  let comment: '//' | '/*' | null = null;
+
+  for (let i = 0; i < content.length; i++) {
+    const char = content[i]!;
+
+    if (comment === '//') {
+      if (char === '\n') comment = null;
+      continue;
+    }
+    if (comment === '/*') {
+      if (char === '*' && content[i + 1] === '/') {
+        comment = null;
+        i++;
+      }
+      continue;
+    }
+    if (quote === '`') {
+      // No escapes at all. Only a closing backtick ends a raw string.
+      if (char === '`') quote = null;
+      continue;
+    }
+    if (quote !== null) {
+      if (char === '\\') {
+        i++;
+      } else if (char === quote) {
+        quote = null;
+      } else if (char === '\n') {
+        // Neither an interpreted string nor a rune literal may span a line in Go. Dropping
+        // the state rather than carrying it keeps one stray quote from swallowing the file.
+        quote = null;
+      }
+      continue;
+    }
+
+    if (char === '/' && content[i + 1] === '/') {
+      comment = '//';
+      i++;
+      continue;
+    }
+    if (char === '/' && content[i + 1] === '*') {
+      comment = '/*';
+      i++;
+      continue;
+    }
+    if (char === '"' || char === "'" || char === '`') {
+      quote = char;
+      continue;
+    }
+    if (char === '{') {
+      stack.push(i);
+      continue;
+    }
+    if (char === '}') {
+      const open = stack.pop();
+      if (open === undefined) {
+        continue;
+      }
+      const headerStart = content.lastIndexOf('\n', open) + 1;
+      spans.push({ start: open + 1, end: i, header: content.slice(headerStart, open).trim() });
+      continue;
     }
   }
 
@@ -322,8 +436,9 @@ function dropOverlapping(regions: ReadonlyArray<ElisionRegion>): ElisionRegion[]
  * example — is still invisible to the drift metric. The real fix is making `R_struct` do
  * work for code; this is the guard that makes shipping possible before that lands.
  */
-export function isSubstantiveRegion(text: string, language: 'typescript' | 'python'): boolean {
-  const stripped = language === 'python' ? stripPython(text) : stripTypeScript(text);
+export function isSubstantiveRegion(text: string, language: RegionElisionLanguage): boolean {
+  const stripped =
+    language === 'python' ? stripPython(text) : language === 'go' ? stripGo(text) : stripTypeScript(text);
   return /\S/.test(stripped);
 }
 
@@ -421,7 +536,12 @@ export function splitRegionIntoStatements(
 
   const minBytes = options?.minRegionBytes ?? MIN_REGION_BYTES;
   const text = item.content.slice(region.start, region.end);
-  const spans = language === 'python' ? splitPythonStatements(text) : splitTypeScriptStatements(text);
+  const spans =
+    language === 'python'
+      ? splitPythonStatements(text)
+      : language === 'go'
+        ? splitGoStatements(text)
+        : splitTypeScriptStatements(text);
   if (spans.length <= 1) {
     return [];
   }
@@ -573,6 +693,100 @@ function splitTypeScriptStatements(text: string): ReadonlyArray<ElisionRegion> {
 }
 
 /**
+ * Statement boundaries in a Go body, as offsets into `text`.
+ *
+ * **Go ends statements at a newline, not at a `;`, and that is the whole difference from
+ * `splitTypeScriptStatements`.** Go inserts semicolons at line ends, so gofmt-ed source has
+ * almost none written down — running the TypeScript splitter over a Go body finds only the `}`
+ * boundaries and reports most bodies as one indivisible span, which is `--target-reduction-ratio`
+ * overshooting again (§50).
+ *
+ * So the boundary is a newline at depth 0, with the same balance requirement every splitter
+ * here obeys: a span opens no bracket it does not close and starts no literal it does not
+ * finish. A multi-line call, a composite literal and a nested `if` block are each **one** span,
+ * because their inner newlines are at depth 1 or more.
+ *
+ * A trailing `,` or `;` is absorbed with the rest of its line, so spans are whole lines — the
+ * same rule `throughLineEnd` implements for TypeScript, and it is what keeps a spliced marker
+ * from landing mid-line.
+ */
+function splitGoStatements(text: string): ReadonlyArray<ElisionRegion> {
+  const spans: ElisionRegion[] = [];
+  let depth = 0;
+  let quote: string | null = null;
+  let comment: '//' | '/*' | null = null;
+  let start = 0;
+
+  const push = (end: number): void => {
+    if (text.slice(start, end).trim().length > 0) {
+      spans.push({ start, end });
+    }
+    start = end;
+  };
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i]!;
+
+    if (comment === '//') {
+      if (char === '\n') {
+        comment = null;
+        if (depth === 0) push(i + 1);
+      }
+      continue;
+    }
+    if (comment === '/*') {
+      if (char === '*' && text[i + 1] === '/') {
+        comment = null;
+        i++;
+      }
+      continue;
+    }
+    if (quote === '`') {
+      // A raw string spans lines, so a newline inside one is not a statement boundary.
+      if (char === '`') quote = null;
+      continue;
+    }
+    if (quote !== null) {
+      if (char === '\\') i++;
+      else if (char === quote) quote = null;
+      else if (char === '\n') quote = null;
+      continue;
+    }
+
+    if (char === '/' && text[i + 1] === '/') {
+      comment = '//';
+      i++;
+      continue;
+    }
+    if (char === '/' && text[i + 1] === '*') {
+      comment = '/*';
+      i++;
+      continue;
+    }
+    if (char === '"' || char === "'" || char === '`') {
+      quote = char;
+      continue;
+    }
+
+    if (char === '{' || char === '(' || char === '[') {
+      depth++;
+      continue;
+    }
+    if (char === '}' || char === ')' || char === ']') {
+      depth--;
+      continue;
+    }
+    if (char === '\n' && depth === 0) {
+      push(i + 1);
+      continue;
+    }
+  }
+
+  push(text.length);
+  return spans;
+}
+
+/**
  * Statement boundaries in a Python body, as offsets into `text`.
  *
  * Spans begin after the line's indentation and end at the last non-blank line's end, excluding
@@ -695,6 +909,64 @@ function stripTypeScript(text: string): string {
   return out;
 }
 
+/**
+ * Removes Go comments and string literals, so `isSubstantiveRegion` can ask whether anything
+ * else is left. Same lexical rules as `scanGoBraceSpans`: raw strings take no escapes, rune
+ * literals are their own quote, and there are no regex literals.
+ */
+function stripGo(text: string): string {
+  let out = '';
+  let quote: string | null = null;
+  let comment: '//' | '/*' | null = null;
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i]!;
+    if (comment === '//') {
+      if (char === '\n') {
+        comment = null;
+        out += char;
+      }
+      continue;
+    }
+    if (comment === '/*') {
+      if (char === '*' && text[i + 1] === '/') {
+        comment = null;
+        i++;
+      }
+      continue;
+    }
+    if (quote === '`') {
+      if (char === '`') quote = null;
+      else if (char === '\n') out += char;
+      continue;
+    }
+    if (quote !== null) {
+      if (char === '\\') i++;
+      else if (char === quote) quote = null;
+      else if (char === '\n') {
+        quote = null;
+        out += char;
+      }
+      continue;
+    }
+    if (char === '/' && text[i + 1] === '/') {
+      comment = '//';
+      i++;
+      continue;
+    }
+    if (char === '/' && text[i + 1] === '*') {
+      comment = '/*';
+      i++;
+      continue;
+    }
+    if (char === '"' || char === "'" || char === '`') {
+      quote = char;
+      continue;
+    }
+    out += char;
+  }
+  return out;
+}
+
 function stripPython(text: string): string {
   let out = '';
   let quote: string | null = null;
@@ -759,11 +1031,16 @@ export interface SelectRegionsOptions {
  * The two used to be the same fact written twice in different files, which is how audit M5b's
  * marker formats drifted apart; this list and the check below must not repeat that.
  */
-export type RegionElisionLanguage = 'typescript' | 'python';
+export type RegionElisionLanguage = 'typescript' | 'python' | 'go';
 
 export const REGION_ELISION_LANGUAGES: ReadonlyArray<RegionElisionLanguage> = Object.freeze([
   'typescript',
   'python',
+  // Go is step 3 of three, and the last one — it is the step that changes output. The order
+  // (`extractSymbols` §59, then the validator §60, then this) is a safety property rather than
+  // tidiness: §56 measured that adding this list entry first passes every gate while measuring
+  // nothing, because a `struct` or `import` manufactures a symbol body elision cannot destroy.
+  'go',
 ]);
 
 /**
@@ -815,9 +1092,13 @@ export function selectElisionRegions(
   const candidates: ElisionRegion[] =
     language === 'python'
       ? [...scanPythonDefBodies(content, options?.keepDocstrings ?? false)]
-      : scanBraceSpans(content)
-          .filter((span) => FUNCTION_HEADER.test(span.header) && !CONTROL_FLOW_HEADER.test(span.header))
-          .map((span) => ({ start: span.start, end: span.end }));
+      : language === 'go'
+        ? scanGoBraceSpans(content)
+            .filter((span) => GO_FUNCTION_HEADER.test(span.header))
+            .map((span) => ({ start: span.start, end: span.end }))
+        : scanBraceSpans(content)
+            .filter((span) => FUNCTION_HEADER.test(span.header) && !CONTROL_FLOW_HEADER.test(span.header))
+            .map((span) => ({ start: span.start, end: span.end }));
 
   return Object.freeze(
     dropOverlapping(candidates).filter((region) => {
