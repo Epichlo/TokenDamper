@@ -106,7 +106,47 @@ to the default now fails at startup. See the L1 entry below.
 Minor rather than major on this project's standing rule: nothing removed, but the same command
 over the same input emits different bytes. Minor rather than patch for the same reason.
 
+### Removed
+- **`--trace-output` / `TOKENDAMPER_TRACE_OUTPUT`, and the `explain` value of `--mode` /
+  `TOKENDAMPER_APP_MODE` (audit OX-H5, DECISIONS §62).** Both were parsed, validated against an
+  enum, threaded through the file → env → CLI precedence chain, frozen onto `ResolvedConfig` — and
+  read by nothing. `traceOutput` appears at ten sites in `src/`; every one is a write or a type
+  declaration. The trace is emitted by a literal `io.stderr.write(...)`, so `--trace-output stdout`
+  reported success and changed nothing, and a caller redirecting it to capture a trace in a pipe
+  concluded the tool had ignored them. It had. Nothing branched on `explain` at all.
+
+  This is the defect audit H4 already removed three flags for; these two survived that sweep only
+  because they sit on `ResolvedConfig` rather than `OptimizationBudget`. Withdrawn on H4's terms:
+  **the surfaces go, the model fields stay**, documented as unconsumed, because `ARCHITECTURE.md`
+  pins the model as frozen and a field awaiting an implementation is not the same defect as a dial
+  that reports success.
+
+  Implementing `--trace-output` would have been two lines. The evidence against it is that the only
+  caller in this repository which passed it — `tools/corpus-harness/measure.js`, with
+  `--trace-output stderr` — has been reading stderr correctly the whole time *while passing a flag
+  that did nothing*. The sole user asked for the default.
+
+  **`--mode` is narrowed by value, not removed.** `--mode bench` rewrites the command, which is a
+  live effect; it lives in the parser rather than in anything that reads `appMode`, and that
+  distinction is why the flag survives.
+
+  What changes for existing setups: `--trace-output` is now `Unknown argument`, and `explain` is
+  rejected rather than ignored from all three surfaces — the rule 1.6.0 set for the
+  `TOKENDAMPER_*` enums. Nothing that took effect stops taking effect, because none of it ever did.
+  A config file still carrying a `traceOutput` key keeps loading: the key is no longer validated or
+  read, and withdrawing a knob must not turn a file that loaded yesterday into a hard error.
+  `tools/corpus-harness/measure.js` was updated in the same change, since leaving it would have
+  turned the measurement harness into a parse error. **The trace itself has not moved** — stderr,
+  as always.
+
 ### Fixed
+- **A comment claimed `--target-reduction-ratio` is "nearly as inert — the planner reads it only as
+  `> 0`".** False since DECISIONS §48 resolved the ratio into an absolute token ceiling that both
+  `pruning:topology-pruner` and `compression:token-hashing` respect, with §50 narrowing the
+  adherence gap further via sub-region elision. The README's environment-variable table carried the
+  same stale claim. Comments record decisions in this codebase; one recording a *superseded*
+  decision argues for undoing the fix.
+
 - **`minimumConfidence` is validated as the probability it is (audit OX-M10).** It reached
   `TokenDamperConfig` through a bare finite-number check, so `TOKENDAMPER_MINIMUM_CONFIDENCE=1.5`
   forced a fallback on **every** run — full output, 0% reduction, permanently, with no diagnostic

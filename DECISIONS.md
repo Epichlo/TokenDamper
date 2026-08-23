@@ -4502,3 +4502,91 @@ literal slices inside function bodies, which is exactly what body elision is for
 - **Nothing about Rust, C or Java.** Each needs its own three steps, and the header discriminator
   is the hard part for the C family (§56) — `int foo(...)` cannot be told from a prototype, where
   `func` is unambiguous.
+
+---
+
+## 62. Two Dials That Reported Success and Did Nothing, Withdrawn on H4's Terms
+
+**Audit OX-H5.** `--trace-output` / `TOKENDAMPER_TRACE_OUTPUT` and `--mode explain` were parsed,
+validated, stored on `ResolvedConfig` — and read by nothing. They are withdrawn from every input
+surface. The model fields stay.
+
+### What made these High rather than tidy-up
+
+This project already removed three flags for exactly this defect. Audit H4 took
+`--max-output-tokens`, `--max-latency-ms` and `--risk-tolerance` because they were "wired end to
+end … while no stage read them", and `README.md` records them as removed in 1.2.0. These two
+survived that sweep because they are not `OptimizationBudget` fields — they sit on
+`ResolvedConfig`, which nobody thought to audit.
+
+The trace is emitted by a literal:
+
+```ts
+io.stderr.write(JSON.stringify(result.trace, null, 2));
+```
+
+So `--trace-output stdout` accepted the value, validated it against an enum, threaded it through
+the file → env → CLI precedence chain, froze it onto the config, and then the trace went to
+stderr. A user setting it to capture a trace in a pipe got stderr anyway and concluded the tool
+had ignored them. It had. `appMode === 'explain'` is the same shape with nothing at the end of it
+at all.
+
+**Measured before deciding:** `traceOutput` appears at ten sites across `cli/main.ts`,
+`config/{load,schema,types}.ts` and `core/model/types.ts`. Every one is a write or a type
+declaration. There is no read.
+
+### Withdraw, not implement
+
+Implementing `--trace-output` is two lines. It was still the wrong call, because the flag has no
+demand behind it — it was added speculatively, and the one caller in this repository that passes
+it (`tools/corpus-harness/measure.js`, `--trace-output stderr`) has been parsing stderr correctly
+the whole time *while passing a flag that did nothing*. That is the clearest possible evidence
+that nobody needs the other value: the only user asked for the default.
+
+`explain` is worse — implementing it means designing a mode, not honoring a setting.
+
+So: the surfaces go, on H4's terms. `ResolvedConfig.appMode` and `ResolvedConfig.traceOutput`
+remain, documented as unconsumed, because `ARCHITECTURE.md` pins the model as frozen and **a field
+awaiting an implementation is not the same defect as a dial that reports success.** If
+`traceOutput` is ever implemented, `cli/main.ts` reads the field and the surfaces come back — in
+that order, never the reverse.
+
+### What is *not* withdrawn, and why the distinction matters
+
+`--mode` stays. It is withdrawn by **value**, not removed, because `--mode bench` has a live
+effect — it rewrites the command:
+
+```ts
+if (value === 'bench') { command = 'bench'; }
+```
+
+That effect is in the *parser*, not in anything that reads `appMode`, which is exactly the
+distinction that made this worth checking rather than assuming. An earlier pass through this
+finding concluded "`appMode` has no consumers, so remove `--mode` entirely" — true about the
+field, false about the flag, and it would have deleted a working route to `bench`.
+
+### Consequences
+
+- **`--trace-output` is now `Unknown argument`.** `TOKENDAMPER_TRACE_OUTPUT` is simply not read,
+  matching how the H4 variables were retired; nothing that worked stops working, because it never
+  worked.
+- **`--mode explain`, `TOKENDAMPER_APP_MODE=explain` and `app.mode: "explain"` are hard errors.**
+  That follows the rule v1.6.0 set for the `TOKENDAMPER_*` enums (§55, L1): an unrecognized value
+  is reported rather than ignored. Nothing that took effect stops taking effect, because it never
+  took effect.
+- **A config file still carrying `traceOutput` keeps loading.** The key is no longer validated or
+  read, and unknown keys were always ignored. Withdrawing a knob must not turn a file that loaded
+  yesterday into a hard error — that would be a real regression in exchange for a cosmetic one.
+- **`tools/corpus-harness/measure.js` was updated in the same change.** It passed
+  `--trace-output stderr`, which is now a parse error; leaving it would have broken the
+  measurement harness this project depends on to check its own numbers. Verified after the
+  change: the file route exits 0 and its trace still parses out of stderr.
+
+### One thing this corrected on the way past
+
+The comment above `COMMON_FLAGS` claimed `--target-reduction-ratio` "deliberately stays despite
+being nearly as inert — the planner reads it only as `> 0`". **That has been false since §48**,
+which resolves the ratio into an absolute token ceiling that both `pruning:topology-pruner` and
+`compression:token-hashing` respect, and §50 narrowed the adherence gap further. A comment that
+records a decision is load-bearing in this codebase; one that records a *superseded* decision
+argues for undoing the fix.

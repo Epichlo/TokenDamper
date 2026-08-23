@@ -466,16 +466,23 @@ export interface ParsedArguments {
  * pins as a frozen model. A field awaiting an implementation is a different thing from a
  * command-line dial that reports success and does nothing (audit H4).
  *
- * `--target-reduction-ratio` deliberately stays despite being nearly as inert — the planner
- * reads it only as `> 0`, so it is an on/off switch wearing the name of a dial. Making it a
- * real proportional target is a planner change, and removing it would take the only budget
- * flag every doc and example uses. It is called out as its own decision in
- * `docs/audit-remediation-status.md`.
+ * **`--trace-output` was withdrawn later, on the same grounds — audit OX-H5, DECISIONS §62.** It
+ * survived the H4 sweep because it is not a budget field: it was parsed, validated and stored on
+ * `ResolvedConfig`, where nothing read it. The trace goes out through a literal
+ * `io.stderr.write(...)`, so `--trace-output stdout` reported success and changed nothing, and a
+ * caller redirecting it to capture a trace in a pipe concluded the tool had ignored them. It had.
+ * `--mode` lost its `explain` value in the same change, for the same reason; `bench` and
+ * `optimize` stay because `bench` routes to the bench command.
+ *
+ * `--target-reduction-ratio` was called out here as "nearly as inert — the planner reads it only
+ * as `> 0`". **That has not been true since DECISIONS §48**, which resolved it against the input
+ * into an absolute token ceiling that both `pruning:topology-pruner` and
+ * `compression:token-hashing` respect. It is a real target now, adhered to partially rather than
+ * exactly, and §50 narrowed the gap further with sub-region elision. It stays because it works.
  */
 const COMMON_FLAGS = [
   '--config',
   '--mode',
-  '--trace-output',
   '--planner-mode',
   '--minimum-confidence',
   '--log-level',
@@ -602,14 +609,16 @@ export function parseArguments(argv: readonly string[], cwd: string): ParsedArgu
 
     if (flag === '--mode') {
       const value = args.shift();
-      if (value === 'optimize' || value === 'explain' || value === 'bench') {
+      // `explain` was accepted here and nothing anywhere branched on it — audit OX-H5. Only
+      // `bench` has an effect at all (it routes to the bench command); `optimize` is the identity.
+      if (value === 'optimize' || value === 'bench') {
         configOverrides.appMode = value;
         if (value === 'bench') {
           command = 'bench';
         }
         continue;
       }
-      throw new Error('Invalid value for --mode.');
+      throw new Error('Invalid value for --mode. Accepted values: optimize, bench.');
     }
 
     if (flag === '--report-json') {
@@ -624,15 +633,6 @@ export function parseArguments(argv: readonly string[], cwd: string): ParsedArgu
     if (flag === '--quiet') {
       quiet = true;
       continue;
-    }
-
-    if (flag === '--trace-output') {
-      const value = args.shift();
-      if (value === 'stderr' || value === 'stdout') {
-        configOverrides.traceOutput = value;
-        continue;
-      }
-      throw new Error('Invalid value for --trace-output.');
     }
 
     if (flag === '--planner-mode') {

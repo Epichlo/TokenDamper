@@ -128,7 +128,25 @@ export interface OptimizationBudget {
 export interface ResolvedConfig {
   readonly appName: string;
   readonly appVersion: string;
+  /**
+   * Unconsumed by the pipeline. Nothing in `src/core/` branches on it.
+   *
+   * `--mode bench` does have an effect, but it is in the *parser* — it rewrites the command —
+   * not in anything that reads this field. The `explain` value was withdrawn from every input
+   * surface in audit OX-H5 (DECISIONS §62); the union keeps it for the same reason
+   * `OptimizationBudget` keeps its unconsumed fields, since `ARCHITECTURE.md` pins this model as
+   * frozen.
+   */
   readonly appMode: AppMode;
+  /**
+   * Unconsumed. The trace is written with a literal `io.stderr.write(...)` in `cli/main.ts`.
+   *
+   * `--trace-output` and `TOKENDAMPER_TRACE_OUTPUT` were withdrawn in audit OX-H5 (DECISIONS §62)
+   * because they set this and nothing read it, so they reported success and changed nothing. The
+   * field stays, defaulted to `'stderr'` — which is where the trace really goes. Implementing it
+   * means making this the value `cli/main.ts` consults; the surfaces can come back after that,
+   * not before.
+   */
   readonly traceOutput: TraceOutput;
   readonly planner: {
     readonly defaultMode: OptimizationMode;

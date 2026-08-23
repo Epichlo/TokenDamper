@@ -4,7 +4,6 @@ import type {
   OptimizationBudget,
   OptimizationMode,
   ResolvedConfig,
-  TraceOutput,
 } from '../core/model';
 
 /**
@@ -17,7 +16,6 @@ export interface ConfigFileShape {
     readonly version?: string;
     readonly mode?: AppMode;
   };
-  readonly traceOutput?: TraceOutput;
   readonly planner?: {
     readonly defaultMode?: OptimizationMode;
   };
@@ -35,7 +33,6 @@ export interface ConfigFileShape {
  */
 export interface ConfigOverrides {
   appMode?: AppMode;
-  traceOutput?: TraceOutput;
   plannerMode?: OptimizationMode;
   minimumConfidence?: number;
   logLevel?: LogLevel;

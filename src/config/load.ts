@@ -75,7 +75,6 @@ function applyFileConfig(base: TokenDamperConfig, fileConfig: ConfigFileShape | 
     appName: fileConfig.app?.name ?? base.appName,
     appVersion: fileConfig.app?.version ?? base.appVersion,
     appMode: fileConfig.app?.mode ?? base.appMode,
-    traceOutput: fileConfig.traceOutput ?? base.traceOutput,
     planner: {
       defaultMode: fileConfig.planner?.defaultMode ?? base.planner.defaultMode,
     },
@@ -95,7 +94,6 @@ function applyEnvOverrides(base: TokenDamperConfig, env: NodeJS.ProcessEnv): Tok
   return freeze({
     ...base,
     appMode: parseAppMode(env.TOKENDAMPER_APP_MODE) ?? base.appMode,
-    traceOutput: parseTraceOutput(env.TOKENDAMPER_TRACE_OUTPUT) ?? base.traceOutput,
     planner: {
       defaultMode: parsePlannerMode(env.TOKENDAMPER_PLANNER_MODE) ?? base.planner.defaultMode,
     },
@@ -122,7 +120,6 @@ function applyCliOverrides(
   return freeze({
     ...base,
     appMode: cliOverrides.appMode ?? base.appMode,
-    traceOutput: cliOverrides.traceOutput ?? base.traceOutput,
     planner: {
       defaultMode: cliOverrides.plannerMode ?? base.planner.defaultMode,
     },
@@ -221,15 +218,14 @@ function parseEnvEnum<T extends string>(
 }
 
 function parseAppMode(value: string | undefined): TokenDamperConfig['appMode'] | undefined {
-  return parseEnvEnum('TOKENDAMPER_APP_MODE', value, ['optimize', 'explain', 'bench'] as const);
+  // `explain` withdrawn — audit OX-H5. Nothing branched on it, so an unrecognised value here
+  // is a hard error by the rule v1.6.0 set for the `TOKENDAMPER_*` enums, and nothing that
+  // worked stops working because the setting never took effect.
+  return parseEnvEnum('TOKENDAMPER_APP_MODE', value, ['optimize', 'bench'] as const);
 }
 
 function parsePlannerMode(value: string | undefined): TokenDamperConfig['planner']['defaultMode'] | undefined {
   return parseEnvEnum('TOKENDAMPER_PLANNER_MODE', value, ['pass_through'] as const);
-}
-
-function parseTraceOutput(value: string | undefined): TokenDamperConfig['traceOutput'] | undefined {
-  return parseEnvEnum('TOKENDAMPER_TRACE_OUTPUT', value, ['stderr', 'stdout'] as const);
 }
 
 function parseLogLevel(value: string | undefined): TokenDamperConfig['logging']['level'] | undefined {
