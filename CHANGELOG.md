@@ -107,6 +107,38 @@ Minor rather than major on this project's standing rule: nothing removed, but th
 over the same input emits different bytes. Minor rather than patch for the same reason.
 
 ### Fixed
+- **`minimumConfidence` is validated as the probability it is (audit OX-M10).** It reached
+  `TokenDamperConfig` through a bare finite-number check, so `TOKENDAMPER_MINIMUM_CONFIDENCE=1.5`
+  forced a fallback on **every** run — full output, 0% reduction, permanently, with no diagnostic
+  naming the cause, because no confidence the pipeline computes can reach 1.5. Negative values were
+  simply meaningless. Out-of-range and unparseable values are now rejected in the message style
+  v1.6.0 gave the `TOKENDAMPER_*` enums.
+
+  The audit named only the environment variable. The CLI flag carried the identical
+  `Number.isFinite`-and-nothing-else check and the config file was type-checked as `number`, so
+  **all three doors** are validated — enumerate the doors, not the one that got reported.
+
+- **`ARCHITECTURE.md`'s pipeline diagram described a pipeline that does not exist (audit OX-M11).**
+  It listed execution as "Session Deduplication (TokenHasher) → Delta Compression (Myers Diff) →
+  Workspace Topology Pruning". Every clause was wrong: that is not the knapsack order,
+  `cleanup:constraint-preservation` was missing from the front of it, `cleanup:session-dedup` is
+  not in that plan at all, and it uses the session store rather than `TokenHasher`. The file
+  declares itself the canonical frozen reference, so contributors and agents were validating new
+  stages against a fiction.
+
+  It now documents all three real plan shapes — `topology_knapsack`, `session_dedup` and
+  `pass_through` (which runs zero stages, the case users repeatedly mistake for a bug).
+  `test/unit/architecture-doc-accuracy.test.ts` checks the documented stage lists against the
+  planner that emits them, so the lists are derived rather than hand-maintained; all four of its
+  cases fail against the previous text.
+
+- **`bench/runner.ts` no longer documents a default that was deliberately removed (audit OX-M12).**
+  The comment said `token-hashing` "falls back to `new TokenHasher()` internally when none is
+  supplied". It did once; that default was removed because a store constructed inside the stage is
+  garbage-collected when the stage returns, leaving markers referring to content held by nothing.
+  A comment asserting removed behavior is an invitation to "simplify" the runner back into relying
+  on it and silently recreate the defect.
+
 - **A directory walk no longer descends into agent worktrees, and orders the same on every OS
   (audit OX-M4, OX-M16).** Both are selection defects, and selection is load-bearing: the
   cache-aware prefix lock pins the first ~1,024 tokens and pinned items bypass the knapsack

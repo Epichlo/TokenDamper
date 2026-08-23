@@ -165,4 +165,62 @@ describe('config loading', () => {
 
     expect(() => loadConfig({ cwd, configPath })).toThrow(/Invalid TokenDamper config file/);
   });
+
+  /**
+   * `minimumConfidence` is a probability, and nothing said so — audit OX-M10.
+   *
+   * It was fed straight through a finite-number check from all three doors. A value above 1 can
+   * never be reached by any confidence the pipeline computes, so it forces a fallback on **every**
+   * run, permanently and silently: full output, 0% reduction, no diagnostic naming the cause.
+   * Negative values are simply meaningless.
+   *
+   * The audit named only the environment variable. The CLI flag had the identical check
+   * (`Number.isFinite` and nothing else) and the config file was type-checked as `number`, so all
+   * three are covered here — the standing lesson being to enumerate the doors rather than the one
+   * that got reported.
+   */
+  describe('minimumConfidence range', () => {
+    const cwd = () => mkdtempSync(join(tmpdir(), 'tokendamper-config-'));
+
+    it('rejects an environment value above 1', () => {
+      expect(() => loadConfig({ cwd: cwd(), env: { TOKENDAMPER_MINIMUM_CONFIDENCE: '1.5' } })).toThrow(
+        /TOKENDAMPER_MINIMUM_CONFIDENCE/,
+      );
+    });
+
+    it('rejects a negative environment value', () => {
+      expect(() => loadConfig({ cwd: cwd(), env: { TOKENDAMPER_MINIMUM_CONFIDENCE: '-0.2' } })).toThrow(
+        /TOKENDAMPER_MINIMUM_CONFIDENCE/,
+      );
+    });
+
+    it('rejects a non-numeric environment value instead of ignoring it', () => {
+      // `parseNumber` returned `undefined` for unparseable input, which silently fell back to the
+      // default — the same shape as the enum values v1.6.0 turned into hard errors.
+      expect(() => loadConfig({ cwd: cwd(), env: { TOKENDAMPER_MINIMUM_CONFIDENCE: 'high' } })).toThrow(
+        /TOKENDAMPER_MINIMUM_CONFIDENCE/,
+      );
+    });
+
+    it('rejects an out-of-range value in the config file', () => {
+      const dir = cwd();
+      const configPath = join(dir, 'tokendamper.config.json');
+      writeFileSync(configPath, JSON.stringify({ validation: { minimumConfidence: 2 } }), 'utf8');
+
+      expect(() => loadConfig({ cwd: dir, configPath })).toThrow(/minimumConfidence/);
+    });
+
+    it('rejects an out-of-range CLI override', () => {
+      expect(() => loadConfig({ cwd: cwd(), cliOverrides: { minimumConfidence: 1.5 } })).toThrow(
+        /minimum-confidence|minimumConfidence/,
+      );
+    });
+
+    it('accepts the boundaries and the values between them', () => {
+      for (const value of ['0', '0.5', '1']) {
+        const config = loadConfig({ cwd: cwd(), env: { TOKENDAMPER_MINIMUM_CONFIDENCE: value } });
+        expect(config.validation.minimumConfidence).toBe(Number(value));
+      }
+    });
+  });
 });

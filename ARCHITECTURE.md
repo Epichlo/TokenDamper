@@ -17,23 +17,47 @@ Raw Input
   -> Adapter (CLI / Gateway Proxy / MCP)
   -> OptimizationRequest
   -> ContextBundle + OptimizationBudget
-  -> Stateless 0/1 Knapsack Planner
-  -> Linear Engine
-      -> Session Deduplication (TokenHasher)
-      -> Delta Compression (Myers Diff)
-      -> Workspace Topology Pruning
+  -> Stateless Planner  ->  one of three plans (see below)
+  -> Linear Engine      ->  executes plan.stageIds, in order
   -> Validators (ConfidenceLedger, DebtTracker, DriftTracker)
   -> Fallback if needed
   -> Final Output
   -> Explainability Trace
 ```
 
+The planner emits exactly one plan per request, and the engine runs **only** that plan's
+`stageIds`. There are three shapes, and they are not variations of one list:
+
+```text
+topology_knapsack   (a budget flag is set: --max-input-tokens or --target-reduction-ratio)
+  1. cleanup:constraint-preservation
+  2. pruning:topology-pruner
+  3. compression:token-hashing
+  4. compression:delta-compression
+
+session_dedup       (config.planner.defaultMode; the Gateway pins this)
+  1. cleanup:session-dedup
+
+pass_through        (no budget flag)
+  (empty — zero stages run, and reduction is guaranteed 0%)
+```
+
+Three things this diagram is drawn to stop asserting (audit OX-M11):
+
+- **`cleanup:session-dedup` does not use `TokenHasher`.** It works off the session store and
+  `renderSessionElisionMarker`. The two are unrelated mechanisms.
+- **It is not in the knapsack list, and never runs on the CLI or MCP paths.** It is reachable only
+  through `session_dedup` mode, which takes precedence over budget-derived selection.
+- **`cleanup:constraint-preservation` runs first, and pruning precedes compression.** The previous
+  order here — dedup, then delta compression, then pruning — matched no plan the planner produces.
+
 ## Execution Flow
 
 1. The adapter (CLI, Gateway Proxy, or MCP) parses raw input into an `OptimizationRequest`.
 2. The engine validates the request and resolves the active config.
-3. The planner produces a single `OptimizationPlan` (e.g. 0/1 Knapsack packing).
-4. The engine executes the selected built-in stages in order (e.g., Session Deduplication, Delta Compression, Topology Pruning).
+3. The planner produces a single `OptimizationPlan` — one of the three shapes above.
+4. The engine executes that plan's `stageIds` in order, and nothing else. A stage in the registry
+   catalog but absent from the plan does not run.
 5. Validators check the intermediate and final results using `ConfidenceLedger`, `DebtTracker`, and `DriftTracker`.
 6. If validation fails or confidence is too low, the engine falls back to the original input.
 7. The adapter formats the final output (or returns standard MCP JSON-RPC).

@@ -81,7 +81,9 @@ function applyFileConfig(base: TokenDamperConfig, fileConfig: ConfigFileShape | 
     },
     budget: mergeBudget(base.budget, fileConfig.budget),
     validation: {
-      minimumConfidence: fileConfig.validation?.minimumConfidence ?? base.validation.minimumConfidence,
+      minimumConfidence:
+        assertConfidence('minimumConfidence in the config file', fileConfig.validation?.minimumConfidence) ??
+        base.validation.minimumConfidence,
     },
     logging: {
       level: fileConfig.logging?.level ?? base.logging.level,
@@ -100,7 +102,8 @@ function applyEnvOverrides(base: TokenDamperConfig, env: NodeJS.ProcessEnv): Tok
     budget: mergeBudget(base.budget, buildBudgetOverridesFromEnv(env)),
     validation: {
       minimumConfidence:
-        parseNumber(env.TOKENDAMPER_MINIMUM_CONFIDENCE) ?? base.validation.minimumConfidence,
+        parseConfidence('TOKENDAMPER_MINIMUM_CONFIDENCE', env.TOKENDAMPER_MINIMUM_CONFIDENCE) ??
+        base.validation.minimumConfidence,
     },
     logging: {
       level: parseLogLevel(env.TOKENDAMPER_LOG_LEVEL) ?? base.logging.level,
@@ -125,7 +128,8 @@ function applyCliOverrides(
     },
     budget: mergeBudget(base.budget, cliOverrides.budget),
     validation: {
-      minimumConfidence: cliOverrides.minimumConfidence ?? base.validation.minimumConfidence,
+      minimumConfidence:
+        assertConfidence('--minimum-confidence', cliOverrides.minimumConfidence) ?? base.validation.minimumConfidence,
     },
     logging: {
       level: cliOverrides.logLevel ?? base.logging.level,
@@ -236,6 +240,48 @@ function parseLogLevel(value: string | undefined): TokenDamperConfig['logging'][
     'info',
     'debug',
   ] as const);
+}
+
+/**
+ * `minimumConfidence` is a probability, so it lives in [0, 1] — audit OX-M10.
+ *
+ * It reached `TokenDamperConfig` through a bare finite-number check from all three doors. A value
+ * above 1 is unreachable by any confidence the pipeline computes, so it forces a fallback on
+ * **every** run — full output, 0% reduction, permanently, and with no diagnostic naming the
+ * cause. Negative values are simply meaningless.
+ *
+ * The audit named only the environment variable. The CLI flag carried the identical check and the
+ * config file was type-checked as `number`, so all three validate here — enumerate the doors, not
+ * the one that got reported.
+ *
+ * Rejecting rather than clamping, in the message style v1.6.0 gave the `TOKENDAMPER_*` enums: a
+ * setting that cannot do what it says is a mistake to report, not one to quietly reinterpret.
+ */
+function assertConfidence(source: string, value: number | undefined): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Number.isFinite(value) || value < 0 || value > 1) {
+    throw new Error(
+      `Invalid value for ${source}: ${JSON.stringify(value)}. Expected a confidence between 0 and 1 inclusive.`,
+    );
+  }
+  return value;
+}
+
+function parseConfidence(variable: string, value: string | undefined): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    // Unparseable input used to yield `undefined` and fall silently back to the default, which is
+    // the shape v1.6.0 turned into a hard error for the enums.
+    throw new Error(
+      `Invalid value for ${variable}: ${JSON.stringify(value)}. Expected a confidence between 0 and 1 inclusive.`,
+    );
+  }
+  return assertConfidence(variable, parsed);
 }
 
 function parseNumber(value: string | undefined): number | undefined {
