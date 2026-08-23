@@ -92,6 +92,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   fire less; measured, it dominates exactly as it does for TypeScript, at the same rate. The
   largest remaining gain on Go is in that gate, not in the scanner.
 
+### Fixed
+- **Content hashing no longer collapses `undefined` onto `null`** (DECISIONS §63). The
+  serialization fallback in `stableSerialize` turned an explicit `undefined` into `null`'s
+  bytes, so two different values shared one hash. No live constructor reaches the branch —
+  which is why it sat unnoticed — and no hash of any real object changes.
+- **The content-classifier's extension test reads the basename, not the whole path**
+  (DECISIONS §63). A dotted directory (`my.dir/file`) used to leak directory text into the
+  extension match. Measured before changing anything: every possible leak already fell through
+  to the content probes exactly as an absent extension would, so **no classification changes**;
+  the new tests pin the dotted-directory cases so a future edit cannot make the leak reachable
+  silently.
+
+### Documentation
+- **Two LOW findings recorded at their sites rather than fixed** (DECISIONS §63). The `h → c`
+  language alias stays: removing it would make `--language h` an error while `foo.h` stayed
+  accepted, which is the two-routes drift the alias table exists to prevent. Git path matching
+  stays case-sensitive: case-folding one side would make topology scores depend on the
+  platform's filesystem semantics, and determinism is invariant 1; the effect of the open case
+  is a lower score, never a wrong output byte.
+
 ## [v1.6.0] - 2026-08-16
 
 **Two defects that reached provider traffic, and an audit closed in full.** `max_audit.md` had

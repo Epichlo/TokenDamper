@@ -172,6 +172,18 @@ describe('core model', () => {
       expect(typeof hash1).toBe('string');
       expect(hash1.length).toBe(64);
     });
+
+    it('does not collapse undefined onto null (audit L2)', () => {
+      // A hash is a statement about the value it was given. The old
+      // `JSON.stringify(value) ?? 'null'` serialized an explicit `undefined` as `null`,
+      // so these two different values shared one hash.
+      expect(hashContent({ a: undefined })).not.toBe(hashContent({ a: null }));
+      // Omitting the key is a third, distinct shape.
+      expect(hashContent({})).not.toBe(hashContent({ a: undefined }));
+      expect(hashContent({ a: undefined })).not.toBe(hashContent({}));
+      // And the fix did not disturb the values that were already distinct.
+      expect(hashContent(null)).not.toBe(hashContent(''));
+    });
   });
 
   describe('budget validation & resolution', () => {
