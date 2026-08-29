@@ -4730,3 +4730,89 @@ rather than the bug.
 - **`--max-debt` still gates nothing on the CLI.** Debt is now a real number, but the default
   threshold of 75 remains unreachable without a ledger, so no CLI run can trip it. Whether the
   threshold or the weights should change is a separate question and was not touched.
+
+---
+
+## 65. One `content: null` Turn Zeroed the Whole Request, So Egress Anchors on Positions Now
+
+**Audit OX-H4**, the highest-value finding in `oxaudit.md` and the first Lane B item taken.
+
+### The mechanism
+
+Egress splices replacements into the caller's raw bytes rather than re-serializing the payload
+(invariant 9, §54). It located each message by searching the raw body for `JSON.stringify(text)`,
+where `text` came from `flattenMessageContent` — which sends every **non-string** content through
+`JSON.stringify`. For `content: null` that yields the four-character string `null`, so the search
+string became `"null"` *with quotes*, which does not occur where the body holds a bare `null`.
+
+`spliceIntoRawBody` returns `undefined` on the **first** miss, and `forwardableBody` maps that back
+to the untouched `rawBody`. So the failure was all-or-nothing: one unmatchable message discarded
+the replacements for every other message in the payload.
+
+`content: null` is the standard OpenAI shape for an assistant turn that calls a tool. Essentially
+every agentic OpenAI conversation carries one.
+
+### Measured, on a payload the Gateway does save on
+
+A three-times-repeated block with a turn 1 to seed the session store:
+
+| payload | bytes sent | bytes forwarded |
+|---|---|---|
+| all-string content (control) | 8,685 | **less than sent** — the saving lands |
+| one `content: null` tool-call turn | 8,685 | **8,685** — entire saving gone |
+| one array (multimodal) content part | 8,530 | **8,530** — entire saving gone |
+
+**The array row is why this is a span scan and not the `null` special-case the audit proposed as
+an alternative.** That would have fixed one shape and left the other, and the two share a cause:
+`JSON.stringify` of a *parsed* value is not the caller's bytes. It is not even reliably so for
+strings — a pretty-printed body defeats the search for the same reason.
+
+### The fix
+
+`scanContentSpans` walks the raw body structurally and returns the `[start, end)` span of each
+spliceable slot, in the order entries are built (`system` first for Anthropic, then messages).
+`spliceBySpans` overwrites those ranges directly.
+
+A span is *where the value is*, so it is correct for every content shape, and repeated blocks — the
+case `session-dedup` exists for — need no forward cursor to disambiguate. The cursor requirement
+the audit said "must survive any rewrite" survives by becoming unnecessary, not by being dropped.
+
+**Kept: the old value search, as a fallback.** `forwardableBody` tries spans first and falls back to
+`spliceIntoRawBody`. A payload the scanner declines behaves exactly as it did before, so this change
+can only add savings.
+
+**Kept: declining as the failure direction.** The scanner returns `undefined` on anything it does
+not fully understand — a non-object root, absent or non-array `messages`, a message with no
+`content` key, a truncated body, an expected `system` that is missing. `spliceBySpans` additionally
+refuses when spans do not ascend across the entries it is replacing, which is the case where a
+backwards splice would corrupt.
+
+### Why the tests are shaped the way they are
+
+This is the code that decides which bytes of a caller's request get overwritten. A wrong span does
+not lose a saving, it corrupts a field being sent to a provider — the one direction invariant 3
+forbids. So `test/unit/gateway-content-span-scan.test.ts` is mostly about refusal, every span it
+accepts is checked by slicing the input and parsing the result, and the adversarial cases are the
+ones a naive scan gets wrong: `"content"` appearing inside a string value, a `meta: { content: … }`
+decoy preceding the real key, escaped quotes and backslashes, braces and brackets inside strings,
+and a pretty-printed body.
+
+`test/integration/gateway-null-content-splice.test.ts` adds the property that matters more than the
+saving: the forwarded body still parses, message count and roles are unchanged, and the tool-call
+turn comes back exactly as sent, `null` included. That assertion would have passed before the fix
+too — declining is safe — and it is here to stay true afterwards, which is the harder half.
+
+### What this does not establish
+
+- **Nothing about the corpus.** The harness measures CLI routes; the Gateway is not in it. The
+  instrument for this change is the Gateway integration suite, and the numbers above come from it.
+- **Nothing about cross-turn saving.** Invariant 8 is untouched: the Gateway still plans only
+  `cleanup:session-dedup`, and a sole cross-turn copy is still refused (§41). What was recovered is
+  the *within-payload* saving, on payloads that happen to contain a non-string content.
+- **The `system`-after-`messages` ordering is still a partial decline.** Entries list `system`
+  first, so such a payload yields non-ascending spans; the splice proceeds when `system` itself has
+  no replacement and declines when it does. Ordering entries by span position would close that and
+  was not attempted.
+- **`flattenMessageContent` is unchanged.** Structured content is still tagged `'structured'` and
+  `core/elision` still refuses to elide it. This change lets other messages be elided *despite* one,
+  not that one be elided.
