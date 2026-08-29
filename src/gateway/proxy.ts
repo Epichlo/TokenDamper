@@ -644,6 +644,212 @@ function replacementFor(item: ContextItem | undefined, originalText: string): st
  * That direction is deliberate and follows invariant 3. Losing a saving costs tokens; corrupting
  * a request field costs correctness, and only one of them is recoverable by the caller.
  */
+/** A half-open `[start, end)` range of `rawBody`, holding one JSON value exactly as sent. */
+export interface RawSpan {
+  readonly start: number;
+  readonly end: number;
+}
+
+const isWs = (c: string): boolean => c === ' ' || c === '\t' || c === '\n' || c === '\r';
+
+function skipWs(source: string, index: number): number {
+  let i = index;
+  while (i < source.length && isWs(source[i] as string)) i += 1;
+  return i;
+}
+
+/** Index just past the closing quote of the JSON string starting at `index`, or -1. */
+function scanString(source: string, index: number): number {
+  let i = index + 1;
+  while (i < source.length) {
+    const c = source[i];
+    if (c === '\\') {
+      i += 2;
+      continue;
+    }
+    if (c === '"') return i + 1;
+    i += 1;
+  }
+  return -1;
+}
+
+/** Index just past the JSON value starting at `index` (leading whitespace skipped), or -1. */
+function scanValue(source: string, index: number): number {
+  const start = skipWs(source, index);
+  const first = source[start];
+  if (first === undefined) return -1;
+  if (first === '"') return scanString(source, start);
+
+  if (first === '{' || first === '[') {
+    // Only the outer bracket type is counted. Inner brackets of the *other* type are balanced
+    // within, so they cannot affect this depth, and strings are stepped over whole so a bracket
+    // inside one is never seen.
+    const close = first === '{' ? '}' : ']';
+    let depth = 0;
+    let i = start;
+    while (i < source.length) {
+      const c = source[i] as string;
+      if (c === '"') {
+        const after = scanString(source, i);
+        if (after === -1) return -1;
+        i = after;
+        continue;
+      }
+      if (c === first) depth += 1;
+      else if (c === close) {
+        depth -= 1;
+        if (depth === 0) return i + 1;
+      }
+      i += 1;
+    }
+    return -1;
+  }
+
+  // A primitive: number, `true`, `false`, `null`. Ends at the first structural character.
+  let i = start;
+  while (i < source.length) {
+    const c = source[i] as string;
+    if (c === ',' || c === '}' || c === ']' || isWs(c)) break;
+    i += 1;
+  }
+  return i === start ? -1 : i;
+}
+
+/** The span of `key`'s value inside the JSON object beginning at `objectStart`, or undefined. */
+function findMemberValue(source: string, objectStart: number, key: string): RawSpan | undefined {
+  let i = skipWs(source, objectStart);
+  if (source[i] !== '{') return undefined;
+  i += 1;
+
+  for (;;) {
+    i = skipWs(source, i);
+    if (source[i] === '}') return undefined;
+    if (source[i] !== '"') return undefined;
+
+    const keyEnd = scanString(source, i);
+    if (keyEnd === -1) return undefined;
+    const name = source.slice(i + 1, keyEnd - 1);
+
+    i = skipWs(source, keyEnd);
+    if (source[i] !== ':') return undefined;
+
+    const valueStart = skipWs(source, i + 1);
+    const valueEnd = scanValue(source, valueStart);
+    if (valueEnd === -1) return undefined;
+
+    if (name === key) return { start: valueStart, end: valueEnd };
+
+    i = skipWs(source, valueEnd);
+    if (source[i] === ',') {
+      i += 1;
+      continue;
+    }
+    if (source[i] === '}') return undefined;
+    return undefined;
+  }
+}
+
+/**
+ * Where each spliceable slot's value actually sits in the caller's bytes — audit OX-H4.
+ *
+ * The splice used to locate every message by searching for `JSON.stringify(text)`, where `text`
+ * came from `flattenMessageContent` — which sends every **non-string** content through
+ * `JSON.stringify`. For `content: null` that produces the four-character string `null`, so the
+ * search string is `"null"` *with quotes*, which does not occur where the body holds a bare
+ * `null`. `spliceIntoRawBody` returns `undefined` on the first miss, so **one unmatchable message
+ * discarded the replacements for every other message in the payload.**
+ *
+ * `content: null` is the standard OpenAI shape for an assistant turn that calls a tool, so
+ * essentially every agentic OpenAI conversation carries one. Measured on a payload with a
+ * three-times-repeated block that the Gateway does save on: with one such message present, bytes
+ * forwarded equalled bytes received exactly — the entire saving, gone. Array content (multimodal
+ * parts) failed the same way, which is why this is a span scan rather than the `null` special-case
+ * the audit suggested: that would have fixed one shape and left the other.
+ *
+ * Returning spans instead of search strings removes the question. A span is where the value *is*,
+ * so it is correct for every content shape, and duplicate blocks need no cursor to disambiguate.
+ *
+ * Declines — returns `undefined` — on anything it does not fully understand, and the caller then
+ * falls back to the value search. Losing a saving costs tokens; corrupting a request field costs
+ * correctness, and only one of those is recoverable by the caller (invariant 3).
+ */
+export function scanContentSpans(
+  rawBody: string,
+  options: { readonly includeSystem: boolean },
+): ReadonlyArray<RawSpan> | undefined {
+  const rootStart = skipWs(rawBody, 0);
+  if (rawBody[rootStart] !== '{') return undefined;
+
+  const spans: RawSpan[] = [];
+
+  if (options.includeSystem) {
+    const system = findMemberValue(rawBody, rootStart, 'system');
+    if (!system) return undefined;
+    spans.push(system);
+  }
+
+  const messages = findMemberValue(rawBody, rootStart, 'messages');
+  if (!messages || rawBody[messages.start] !== '[') return undefined;
+
+  let i = skipWs(rawBody, messages.start + 1);
+  if (rawBody[i] === ']') return spans;
+
+  for (;;) {
+    const elementStart = skipWs(rawBody, i);
+    const elementEnd = scanValue(rawBody, elementStart);
+    if (elementEnd === -1) return undefined;
+
+    // A message that is not an object, or carries no `content` key, has no span to splice. The
+    // entry list still holds a slot for it, so alignment would break — decline instead.
+    const content = findMemberValue(rawBody, elementStart, 'content');
+    if (!content) return undefined;
+    spans.push(content);
+
+    i = skipWs(rawBody, elementEnd);
+    if (rawBody[i] === ',') {
+      i += 1;
+      continue;
+    }
+    if (rawBody[i] === ']') return spans;
+    return undefined;
+  }
+}
+
+/**
+ * Replaces each entry's value in place, using the span where that value actually sits.
+ *
+ * No cursor and no searching: a span is a position, so repeated blocks — the case
+ * `session-dedup` exists for — need nothing to disambiguate them.
+ */
+function spliceBySpans(
+  rawBody: string,
+  entries: ReadonlyArray<{ readonly from: string; readonly to?: string }>,
+  spans: ReadonlyArray<RawSpan>,
+): string | undefined {
+  // Alignment is the whole safety argument: span *k* must be the value that entry *k* describes.
+  // Both are built in payload order, but a mismatch would splice a replacement over an unrelated
+  // field, so it is checked rather than assumed.
+  if (spans.length !== entries.length) return undefined;
+
+  let out = '';
+  let cursor = 0;
+
+  for (let k = 0; k < entries.length; k += 1) {
+    const entry = entries[k] as { readonly from: string; readonly to?: string };
+    const span = spans[k] as RawSpan;
+    if (entry.to === undefined) continue;
+
+    // Spans are ascending by construction; a violation means the scan and the entry list
+    // disagree about order, and splicing on that would corrupt the payload.
+    if (span.start < cursor) return undefined;
+
+    out += rawBody.slice(cursor, span.start) + JSON.stringify(entry.to);
+    cursor = span.end;
+  }
+
+  return out + rawBody.slice(cursor);
+}
+
 function spliceIntoRawBody(
   rawBody: string,
   entries: ReadonlyArray<{ readonly from: string; readonly to?: string }>,
@@ -705,12 +911,20 @@ function wireTokenMetrics(
 function forwardableBody(
   rawBody: string,
   entries: ReadonlyArray<{ readonly from: string; readonly to?: string }>,
+  options: { readonly includeSystem: boolean },
 ): string {
   if (!entries.some((entry) => entry.to !== undefined)) {
     return rawBody;
   }
 
-  const spliced = spliceIntoRawBody(rawBody, entries);
+  // Spans first, value search second (audit OX-H4). The span scan is correct for every content
+  // shape; the value search only works when the content is a string whose canonical encoding
+  // happens to be the caller's own bytes. Keeping the search as a fallback means this change can
+  // only add savings — a payload the scan declines behaves exactly as it did before.
+  const spans = scanContentSpans(rawBody, options);
+  const spliced =
+    (spans ? spliceBySpans(rawBody, entries, spans) : undefined) ?? spliceIntoRawBody(rawBody, entries);
+
   if (spliced === undefined || Buffer.byteLength(spliced, 'utf8') >= Buffer.byteLength(rawBody, 'utf8')) {
     return rawBody;
   }
@@ -811,7 +1025,7 @@ function processOpenAiRequest(
   });
 
   // Spliced into the caller's bytes rather than re-serialized around them (audit M7).
-  const finalBody = forwardableBody(rawBody, entries);
+  const finalBody = forwardableBody(rawBody, entries, { includeSystem: false });
 
   options.sessionStore.recordTurn(
     session.sessionId,
@@ -951,7 +1165,7 @@ function processAnthropicRequest(
   });
 
   // Spliced into the caller's bytes rather than re-serialized around them (audit M7).
-  const finalBody = forwardableBody(rawBody, entries);
+  const finalBody = forwardableBody(rawBody, entries, { includeSystem: Boolean(parsedPayload.system) });
 
   options.sessionStore.recordTurn(
     session.sessionId,

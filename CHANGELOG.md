@@ -93,6 +93,39 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   largest remaining gain on Go is in that gate, not in the scanner.
 
 ### Fixed
+- **One `content: null` message no longer zeroes the whole request's Gateway saving (audit OX-H4,
+  DECISIONS §65).** Egress splices replacements into the caller's raw bytes rather than
+  re-serializing (invariant 9), and located each message by searching for `JSON.stringify(text)` —
+  where `text` came from `flattenMessageContent`, which sends every **non-string** content through
+  `JSON.stringify`. For `content: null` that produced the four-character string `null`, so the
+  search string was `"null"` *with quotes*, absent where the body holds a bare `null`.
+  `spliceIntoRawBody` returns `undefined` on the **first** miss, so one unmatchable message
+  discarded the replacements for every other message in the payload.
+
+  `content: null` is the standard OpenAI shape for an assistant turn that calls a tool, so
+  essentially every agentic OpenAI conversation carried one. Measured on a three-times-repeated
+  block the Gateway does save on: with such a message present, **8,685 bytes sent and 8,685
+  forwarded** — the entire saving gone. Array (multimodal) content failed identically at
+  **8,530 / 8,530**, which is why this is a structural span scan rather than the `null`
+  special-case the audit offered as an alternative: that would have fixed one shape and left the
+  other. Both share a cause — `JSON.stringify` of a *parsed* value is not the caller's bytes, and
+  a pretty-printed body defeats the search even for plain strings.
+
+  `scanContentSpans` now walks the raw body and returns each spliceable slot's `[start, end)` span,
+  and `spliceBySpans` overwrites those ranges directly. A span is where the value *is*, so it is
+  correct for every content shape, and repeated blocks need no forward cursor to disambiguate — the
+  cursor requirement survives by becoming unnecessary rather than by being dropped.
+
+  **The old value search is kept as a fallback**, so a payload the scanner declines behaves exactly
+  as before and this change can only add savings. **Declining remains the failure direction:** the
+  scanner refuses a non-object root, absent or non-array `messages`, a message with no `content`
+  key, a truncated body, or a missing expected `system`, and the splice refuses when spans do not
+  ascend across the entries it replaces.
+
+  Invariant 8 is untouched — the Gateway still plans only `cleanup:session-dedup`, and a sole
+  cross-turn copy is still refused. What this recovers is the *within-payload* saving on payloads
+  that happen to carry a non-string content.
+
 - **`debtScore` reported 35.00 on every file that reduced, and now measures something (audit
   OX-M7, DECISIONS §64).** `computeDebtBreakdown` added `metadata.originalBytes` to `elidedBytes`
   for any item flagged `elided`. But `originalBytes` is the item's **entire** pre-transform length

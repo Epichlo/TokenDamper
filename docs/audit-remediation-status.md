@@ -54,7 +54,7 @@ and the reasoning.
 | Lane | Scope | State |
 |---|---|---|
 | **A** | `src/cli/**`, `src/config/**`, `src/core/engine/`, `planner/`, `topology/`, `src/bench/runner.ts`, `src/gateway/exec.ts`, repo hygiene | partially closed — see below |
-| **B** | `src/gateway/{proxy,server,session-store,types}.ts`, `stages/cleanup/session-dedup.ts`, `stages/compression/token-hashing.ts`, `adapters/mcp/server.ts`, `bench/fixtures/loader.ts` | **entirely open** (H2, H4, M1, M5, M8, M9, L6, L7, L9, L10, L13) |
+| **B** | `src/gateway/{proxy,server,session-store,types}.ts`, `stages/cleanup/session-dedup.ts`, `stages/compression/token-hashing.ts`, `adapters/mcp/server.ts`, `bench/fixtures/loader.ts` | **H4 closed**; open: H2, M1, M5, M8, M9, L6, L7, L9, L10, L13 |
 
 **Closed (Lane A):** H1, H3, **H5**, M2, M3, M4, **M6**, **M7**, M10, M11, M12, M14, M16.
 
@@ -73,6 +73,16 @@ tracks the measured byte cut with correlation **1.0000**, with all 578 rows byte
 reachable only through the exported `optimize` API, not through any of the three bundled entry
 points, so its corpus arm differs on **0 of 578 rows** — which is a fact about the instrument, not
 evidence of correctness.
+
+**H4 is closed — DECISIONS §65, the first Lane B item taken.** Egress located each message by
+searching the raw body for `JSON.stringify(text)`, so a `content: null` tool-call turn — the
+standard OpenAI shape — produced the search string `"null"` *with quotes*, missed, and because
+`spliceIntoRawBody` declines on the **first** miss, discarded the replacements for every other
+message. Measured: **8,685 bytes sent, 8,685 forwarded**, the entire saving gone. Array content
+failed identically at 8,530/8,530, which is why the fix is a structural span scan rather than the
+`null` special-case the audit suggested. The old value search is kept as a fallback, so a declined
+payload behaves exactly as before. Invariant 8 untouched: still only `cleanup:session-dedup`, still
+no cross-turn saving.
 
 **Open (Lane A):** **M15 is awaiting a decision, not implementation** — whether plain `bench`
 should shell out to `python` by default. M13 and seven lows (L1, L8, L12, L17–L19, plus L4 recorded
