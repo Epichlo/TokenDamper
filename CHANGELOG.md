@@ -93,6 +93,33 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   largest remaining gain on Go is in that gate, not in the scanner.
 
 ### Fixed
+- **The Gateway no longer truncates streaming responses after 30 seconds (audit OX-H2, DECISIONS
+  §66).** `forwardUpstreamRequest` armed `AbortSignal.timeout(30000)` and handed it to `fetch` —
+  and a fetch signal does not stop applying when the promise resolves: **it governs the response
+  body stream too.** For `"stream": true` payloads the body reader rejected ~30 s in and the pump
+  destroyed the client response, truncating the answer mid-generation. LLM completions routinely
+  run longer than that, so this broke precisely the traffic the Gateway intercepts by default, and
+  from the client's side it was indistinguishable from the model stopping.
+
+  The budget is now time-to-first-byte and is disarmed in a `finally` the moment `fetch` settles.
+  An owned `AbortController` replaces `AbortSignal.timeout` because only a controller you own can
+  be left permanently *un*-fired; the 504 mapping survives by aborting with a `TimeoutError`
+  `DOMException`, which is the reason `AbortSignal.timeout` produced.
+
+  **Client-hangup abort is unchanged and asserted.** The caller-disconnect signal stays combined
+  into the fetch signal, so a client that walks away still aborts the upstream request — the half a
+  careless timeout fix removes. That test was mutation-checked, and it needed a second pass: the
+  first version sampled the upstream's state after the helper had already stopped the server, which
+  closes the upstream socket anyway, so it would have passed either way.
+
+  `upstreamTtfbTimeoutMs` is a new `GatewayConfig` field defaulting to 30000. It is also what makes
+  the defect testable: catching a 30-second bug previously required a 30-second upstream, which is
+  why no test caught it. The suite now runs against a real socket in about a second.
+
+  Measured against a real upstream at a 120 ms budget with a ~300 ms body: truncated mid-stream
+  before, full body after. A 40 ms budget against a ~400 ms body likewise. Slow *headers* still
+  return 504, unchanged.
+
 - **One `content: null` message no longer zeroes the whole request's Gateway saving (audit OX-H4,
   DECISIONS §65).** Egress splices replacements into the caller's raw bytes rather than
   re-serializing (invariant 9), and located each message by searching for `JSON.stringify(text)` —

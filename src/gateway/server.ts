@@ -45,6 +45,7 @@ export class GatewayServer {
       upstreamOpenAiUrl: config?.upstreamOpenAiUrl,
       upstreamAnthropicUrl: config?.upstreamAnthropicUrl,
       gatewayToken: config?.gatewayToken,
+      upstreamTtfbTimeoutMs: config?.upstreamTtfbTimeoutMs,
       mockUpstream: config?.mockUpstream,
       allowMissingUpstreamCredentials: config?.allowMissingUpstreamCredentials,
     };
@@ -195,6 +196,9 @@ export class GatewayServer {
           upstreamOpenAiUrl: this.config.upstreamOpenAiUrl,
           upstreamAnthropicUrl: this.config.upstreamAnthropicUrl,
           abortSignal: abortController.signal,
+          ...(this.config.upstreamTtfbTimeoutMs !== undefined
+            ? { upstreamTtfbTimeoutMs: this.config.upstreamTtfbTimeoutMs }
+            : {}),
           // The bytes as received, so the proxy can tell whether the string above is a faithful
           // representation of them. Concatenating correctly removes the chunk-boundary defect;
           // it does not make a body that was never valid UTF-8 representable. The CLI applies

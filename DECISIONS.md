@@ -4816,3 +4816,81 @@ too — declining is safe — and it is here to stay true afterwards, which is t
 - **`flattenMessageContent` is unchanged.** Structured content is still tagged `'structured'` and
   `core/elision` still refuses to elide it. This change lets other messages be elided *despite* one,
   not that one be elided.
+
+---
+
+## 66. The Upstream Budget Is Time-to-First-Byte, Because a Fetch Signal Outlives the Fetch
+
+**Audit OX-H2.** `forwardUpstreamRequest` armed `AbortSignal.timeout(30000)` and handed it to
+`fetch`. That is the whole defect: **a fetch signal does not stop applying when the promise
+resolves — it governs the response body stream too.**
+
+So for `"stream": true` payloads the body reader rejected roughly 30 seconds in, and the pump in
+`server.ts` called `res.destroy(...)`, truncating the answer mid-generation. LLM completions
+routinely run longer than 30 seconds, long-form Anthropic streams especially, so this broke exactly
+the traffic the Gateway intercepts by default. From the client's side it is indistinguishable from
+the model stopping.
+
+### The fix, and the one line that is the fix
+
+An owned `AbortController` replaces `AbortSignal.timeout`, and the timer is cleared in a `finally`
+on the header phase:
+
+```ts
+} finally {
+  clearTimeout(ttfbTimer);
+}
+```
+
+`AbortSignal.timeout` cannot be used here because it cannot be *un*-fired. Only a controller you own
+can be left permanently unaborted, which is what makes the budget time-to-first-byte: once `fetch`
+settles — resolved, timed out, or failed — nothing can fire it again, and the body phase is governed
+solely by the caller-disconnect signal.
+
+The 504 mapping is preserved by aborting with `new DOMException(…, 'TimeoutError')`, because the
+catch matches on `error.name` and that is exactly the reason `AbortSignal.timeout` used to produce.
+
+### The half that a careless fix removes
+
+`params.options.abortSignal` — the client-hangup signal, raised by `res.on('close')` in
+`server.ts` — stays combined into the fetch signal via `AbortSignal.any`. Disarming the *timeout*
+must not disarm the *disconnect*, or a client that walks away leaves the Gateway pulling a response
+nobody will read and paying the provider for it.
+
+That is asserted, and the assertion was mutation-checked: replacing the combined signal with
+`ttfbController.signal` alone fails that test and only that test.
+
+It also needed a second pass to be worth anything. The first version read the upstream's flag
+*after* `withGateway` returned — but that helper stops the server on the way out, which closes the
+upstream socket too, so the test would have passed whether or not the hangup propagated. The value
+is now sampled inside the gateway's lifetime.
+
+### Configurable, and why that is not scope creep
+
+`upstreamTtfbTimeoutMs` is now a `GatewayConfig` / `ProxyHandlerOptions` field defaulting to 30000.
+The audit suggested it, and it is what makes the defect testable at all: the reason no test caught
+a 30-second bug is that catching it required a 30-second upstream. This suite runs in about a
+second against a real socket, with budgets in the tens of milliseconds.
+
+The tests drive a real local upstream rather than `mockUpstream`, because `mockUpstream`
+short-circuits before `fetch` and the defect lives entirely in `fetch`'s signal handling.
+
+### Measured
+
+Against a real upstream, budget 120 ms, body streaming for ~300 ms:
+
+| case | before | after |
+|---|---|---|
+| headers fast, body outlives budget | truncated mid-stream | full body, `[DONE]`, all 5 chunks |
+| body an order of magnitude past budget (40 ms budget, ~400 ms body) | truncated | full body, all 8 chunks |
+| headers slower than budget | 504 | 504 (unchanged) |
+| client hangs up mid-stream | upstream aborted | upstream aborted (unchanged) |
+
+### What this does not establish
+
+- **Nothing about how long a body may take.** There is now no bound on it at all, deliberately. If
+  a stalled-mid-stream upstream ever needs bounding, that wants an idle timer on the pump — reset
+  per chunk — not a total-duration budget, and it is a different change.
+- **Nothing about the 10 MB body cap or the session store.** Untouched.
+- **Nothing about savings.** This path runs after optimization; it changes what reaches the client,
+  not what the Gateway elides.
