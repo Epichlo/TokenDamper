@@ -54,7 +54,7 @@ and the reasoning.
 | Lane | Scope | State |
 |---|---|---|
 | **A** | `src/cli/**`, `src/config/**`, `src/core/engine/`, `planner/`, `topology/`, `src/bench/runner.ts`, `src/gateway/exec.ts`, repo hygiene | partially closed — see below |
-| **B** | `src/gateway/{proxy,server,session-store,types}.ts`, `stages/cleanup/session-dedup.ts`, `stages/compression/token-hashing.ts`, `adapters/mcp/server.ts`, `bench/fixtures/loader.ts` | **H2 and H4 closed**; open: M1, M5, M8, M9, L6, L7, L9, L10, L13 |
+| **B** | `src/gateway/{proxy,server,session-store,types}.ts`, `stages/cleanup/session-dedup.ts`, `stages/compression/token-hashing.ts`, `adapters/mcp/server.ts`, `bench/fixtures/loader.ts` | **H2, H4, M1 closed**; open: M5, M8, M9, L6, L7, L9, L10, L13 |
 
 **Closed (Lane A):** H1, H3, **H5**, M2, M3, M4, **M6**, **M7**, M10, M11, M12, M14, M16.
 
@@ -91,6 +91,13 @@ time-to-first-byte, disarmed in a `finally` once `fetch` settles. Client-hangup 
 and mutation-checked. `upstreamTtfbTimeoutMs` (default 30000) is configurable, which is also what
 made the defect testable: catching a 30-second bug used to need a 30-second upstream, which is why
 no test caught it.
+
+**M1 is closed — DECISIONS §67.** Within-payload dedup was gated on the block also having been seen
+in a *previous* turn, so a first turn carrying the same block three times went out whole (8,459
+sent, 8,459 forwarded) while the README claimed it saved. The gate did no safety work there:
+`recoverable: true` means an intact copy survives in the same outbound payload, checkable without
+history. §16/§41 untouched — a sole copy across turns is still refused, and the ordinary
+conversational shape still saves 0 and still falls back.
 
 **Open (Lane A):** **M15 is awaiting a decision, not implementation** — whether plain `bench`
 should shell out to `python` by default. M13 and seven lows (L1, L8, L12, L17–L19, plus L4 recorded

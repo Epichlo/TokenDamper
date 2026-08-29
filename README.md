@@ -15,7 +15,13 @@ It acts as an intelligent middleware proxy that compresses and deduplicates cont
 > | shape | saving |
 > |---|---|
 > | the same block repeated **across turns** (the ordinary case) | **0 bytes**, falls back |
-> | the same block repeated **within one payload** | saves |
+> | the same block repeated **within one payload** | saves, from the first turn onward |
+>
+> The second row needed no history to be true and, until DECISIONS §67, was not: within-payload
+> deduplication was gated on the block having also been seen in a *previous* turn, so a first turn
+> containing the same block three times went out whole. The gate was doing no safety work there —
+> `recoverable: true` means an intact copy survives in the same outbound payload, which is
+> checkable without knowing anything about earlier turns.
 >
 > So use Gateway mode for transparent interception, validation and metrics. Do not adopt it expecting a token reduction on conversational traffic. CLI (`tokendamper optimize`) and MCP (`tokendamper mcp`) are where the compression actually happens.
 >
