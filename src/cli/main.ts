@@ -53,6 +53,17 @@ export function runCli(
         config,
       });
 
+      // `process.exit(0)` below can truncate a stdout frame the server has just written, because
+      // it does not wait for pending writes to flush — audit OX-L8.
+      //
+      // Recorded rather than fixed, and the reason is verifiability, not size. The fix is to stop
+      // forcing the exit — `server.stop(); process.stdin.pause(); process.exitCode = 0;` — and let
+      // the loop drain. But `stop()` only removes the `data` listener; it does not pause or unref
+      // stdin, so whether the process then exits at all depends on stream state this file does not
+      // control, and the failure mode of getting it wrong is `tokendamper mcp` hanging on Ctrl+C.
+      // Delivering SIGINT to exercise that is not something the suite can do here, and shipping an
+      // unverified change to a shutdown path to fix a rare truncated final frame is the wrong
+      // trade. See `docs/audit-remediation-status.md`.
       const shutdown = () => {
         server.stop();
         process.removeListener('SIGINT', shutdown);

@@ -93,6 +93,36 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   largest remaining gain on Go is in that gate, not in the scanner.
 
 ### Fixed
+- **The `oxaudit.md` LOW table, closed against its own list (DECISIONS §69).** Six fixed, five
+  recorded at their sites with the reason, three already "no action" in the audit itself.
+
+  - **L6** — the per-session seen-hash cap was a bare `1000` inside `capSeenBlockHashes` while every
+    neighbouring bound was configurable. Now `GatewayConfig.maxSeenBlockHashesPerSession`, same
+    default.
+  - **L7** — the MCP buffer-overflow check ran *before* `processBuffer` and then cleared the whole
+    buffer, so a chunk carrying complete requests followed by one oversized partial discarded the
+    complete ones too. Draining first leaves only the un-terminated remainder for the limit to
+    judge.
+  - **L9** — the bench loader's `limits` merge could never fire (`ResolvedConfig` has no such
+    field, which is why it needed two `as unknown as Record<string, unknown>` casts). Deleting it
+    also removed an `as unknown as ResolvedConfig` that was disabling type checking for every other
+    key in that literal.
+  - **L10** — dataset routing matched `includes('humaneval')` *before* checking for a real path, so
+    `./fixtures/humaneval-comparison-2026.jsonl` was silently answered with the bundled dataset.
+    Now exact name, then path, then substring as a last resort.
+  - **L12** — `package.json` and `src/version.ts` are hand-synced; a test now pins them equal.
+  - **L19** — `.gitignore` was the full GitHub Python template (245 lines, ~111 entries, Django
+    through pdm) with the dozen working entries buried at the bottom. Now 44 lines and 25 entries,
+    keeping a real Python block for `tokendamper-benchmark/`. Verified by diffing
+    `git status --porcelain` across the change: nothing became newly visible.
+
+  **Not fixed, and why:** **L1** (`expectedSavings: 0.45` is unconsumed and not a measurement — the
+  frozen-model precedent H4 set and OX-H5 followed), **L8** (the MCP shutdown flush race — the fix
+  depends on stream state the file does not control and getting it wrong hangs `mcp` on Ctrl+C,
+  which this suite cannot exercise), **L13** (`/health` exposing `sessionCount` is M8/M9's question,
+  and answering it twice is how two answers drift), **L17** and **L18** (both need a new
+  devDependency, which is not a call to make unasked on a LOW finding).
+
 - **Pricing a candidate region no longer registers it with the block store (audit OX-M5, DECISIONS
   §68).** `trimRegionsToCeiling` renders a marker for **every** candidate span in order to price it
   — correctly, since the marker is variable-length and self-describing and a saving estimated

@@ -42,6 +42,7 @@ export class GatewayServer {
       sessionTtlMs: config?.sessionTtlMs ?? 60 * 60 * 1000,
       maxSessions: config?.maxSessions ?? 100,
       maxContentEntriesPerSession: config?.maxContentEntriesPerSession ?? 100,
+      maxSeenBlockHashesPerSession: config?.maxSeenBlockHashesPerSession,
       upstreamOpenAiUrl: config?.upstreamOpenAiUrl,
       upstreamAnthropicUrl: config?.upstreamAnthropicUrl,
       gatewayToken: config?.gatewayToken,
@@ -54,6 +55,9 @@ export class GatewayServer {
       sessionTtlMs: this.config.sessionTtlMs,
       maxSessions: this.config.maxSessions,
       maxContentEntriesPerSession: this.config.maxContentEntriesPerSession,
+      ...(this.config.maxSeenBlockHashesPerSession !== undefined
+        ? { maxSeenBlockHashesPerSession: this.config.maxSeenBlockHashesPerSession }
+        : {}),
     });
 
     this.server = createServer((req, res) => this.onRequest(req, res));
@@ -99,6 +103,14 @@ export class GatewayServer {
     const url = req.url || '/';
     const method = req.method || 'GET';
 
+    // `/health` reports `sessionCount` and is served without authorization — audit OX-L13.
+    //
+    // On a loopback bind that is not a leak: the peer is already trusted enough to proxy
+    // requests through this process. It becomes one on an exposed bind, which is exactly the
+    // configuration OX-M8 and OX-M9 are about — a non-loopback host with no token, and no
+    // Origin checking. Deferred to those rather than patched here, because whether this
+    // endpoint should require a token is the same question as whether *any* endpoint should on
+    // a loopback peer, and answering it twice in two places is how the two answers drift.
     if (method === 'GET' && url === '/health') {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(

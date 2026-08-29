@@ -8,17 +8,20 @@ export class GatewaySessionStore {
   private readonly sessionTtlMs: number;
   private readonly maxSessions: number;
   private readonly maxContentEntriesPerSession: number;
+  private readonly maxSeenBlockHashesPerSession: number;
 
   constructor(
     options: {
       sessionTtlMs?: number | undefined;
       maxSessions?: number | undefined;
       maxContentEntriesPerSession?: number | undefined;
+      maxSeenBlockHashesPerSession?: number | undefined;
     } = {},
   ) {
     this.sessionTtlMs = options.sessionTtlMs ?? 60 * 60 * 1000; // 1 hour default
     this.maxSessions = options.maxSessions ?? 100;
     this.maxContentEntriesPerSession = options.maxContentEntriesPerSession ?? 100;
+    this.maxSeenBlockHashesPerSession = options.maxSeenBlockHashesPerSession ?? 1000;
   }
 
   /**
@@ -221,8 +224,7 @@ export class GatewaySessionStore {
   }
 
   private capSeenBlockHashes(session: GatewaySession): void {
-    const MAX_SEEN_BLOCK_HASHES = 1000;
-    while (session.seenBlockHashes.size > MAX_SEEN_BLOCK_HASHES) {
+    while (session.seenBlockHashes.size > this.maxSeenBlockHashesPerSession) {
       const oldestHash = session.seenBlockHashes.values().next().value;
       if (oldestHash !== undefined) {
         session.seenBlockHashes.delete(oldestHash);

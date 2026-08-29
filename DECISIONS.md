@@ -5024,3 +5024,64 @@ to demand.
   to candidates rather than elisions.
 - **Nothing about `bench`.** It supplies a hasher too, and was equally affected, but its runs are
   short-lived so the accumulation had nowhere to build up.
+
+---
+
+## 69. The OX LOW Table, Closed Against Its Own List
+
+**Audit OX-L1 through OX-L19**, minus the four the float pool took in §63 (L2, L3, L5, L11) and
+L4, recorded at its site when the ingestion work landed.
+
+`max_audit.md`'s LOW table went unscheduled and was found open weeks later (§55). The lesson
+recorded then was *close a document against its own list of findings, not against the list of work
+that was done*, so every row is dispositioned here — including the ones not fixed, which is the half
+that goes missing.
+
+### Fixed
+
+| id | what |
+|---|---|
+| **L6** | `MAX_SEEN_BLOCK_HASHES = 1000` was a bare local inside `capSeenBlockHashes` while `sessionTtlMs`, `maxSessions` and `maxContentEntriesPerSession` were all settable. The one bound that grows with conversation length was the one nobody could tune. Now `GatewayConfig.maxSeenBlockHashesPerSession`, default 1000. |
+| **L7** | The MCP overflow check ran *before* `processBuffer` and then cleared the whole buffer, so a chunk carrying complete requests followed by one oversized partial discarded the complete ones too. They were well-formed, already received, and answerable. Draining first leaves exactly the un-terminated remainder for the limit to judge — which is what the limit is about. |
+| **L9** | The `limits` merge in the bench loader could never fire: `ResolvedConfig` has no such field, which is *why* it needed two `as unknown as Record<string, unknown>` casts. Deleting it also removed the `as unknown as ResolvedConfig` laundering that was disabling type checking for every other key in that literal. |
+| **L10** | Dataset routing tested `includes('humaneval')` **before** checking whether the argument was a real path, so `./fixtures/humaneval-comparison-2026.jsonl` was silently answered with the bundled dataset. Order is now exact name, then path, then substring as a last resort — so the guess can only help an argument nothing else resolves. |
+| **L12** | `package.json` and `src/version.ts` are hand-synced. Not restructured — `src/version.ts` stays the single source every adapter derives from, per the release procedure — but a test now pins them equal, which closes the drift class rather than the duplication. |
+| **L19** | `.gitignore` was the full GitHub Python template: 245 lines, ~111 entries, covering Django, Flask, Scrapy, PyBuilder, Celery, SageMath, Spyder, Rope, pyenv, pipenv, poetry and pdm, none of which this repository uses, with the dozen entries that work buried at the bottom. Now 44 lines and 25 entries, keeping a real Python block for `tokendamper-benchmark/`. Verified by diffing `git status --porcelain` across the change: nothing became newly visible. |
+
+L6, L7, L10 and L12 are pinned by `test/unit/audit-ox-low-findings.test.ts`. L6 and L7 were
+mutation-checked — reverting either source file fails its test and only its test.
+
+### Recorded at their sites, not fixed
+
+- **L1 — `expectedSavings: 0.45`.** Nothing in `src/` reads it, and the number is not a
+  measurement: the same corpus reduces ~20% on TypeScript and ~16% on Python (§64's baseline).
+  Left in place on the precedent H4 set and OX-H5 followed — `OptimizationPlan` is frozen, and a
+  field awaiting an implementation is not the same defect as a dial that reports success. Nobody
+  can *set* it, so it misleads no caller. Wiring it means deriving a real estimate from the selected
+  stages, which is a planner change.
+- **L8 — the MCP shutdown flush race.** `process.exit(0)` can truncate a stdout frame just written.
+  The fix is to stop forcing the exit and let the loop drain, but `stop()` only removes the `data`
+  listener — it does not pause or unref stdin — so whether the process then exits depends on stream
+  state that file does not control, and getting it wrong hangs `tokendamper mcp` on Ctrl+C.
+  Delivering SIGINT to exercise that is not something this suite can do. Shipping an unverified
+  change to a shutdown path to fix a rare truncated final frame is the wrong trade, and it is the
+  same call made for L4.
+- **L13 — `/health` reports `sessionCount` without authorization.** On a loopback bind that is not
+  a leak; the peer is already trusted enough to proxy through the process. It becomes one on an
+  exposed bind, which is precisely what **M8 and M9** are about. Deferred to them, because "should
+  this endpoint require a token on a loopback peer" is the same question those answer, and
+  answering it twice in two places is how two answers drift apart.
+- **L17 — architecture import rules unpoliced** and **L18 — no coverage tooling.** Both require a
+  new devDependency (`eslint-plugin-boundaries` or dependency-cruiser; `@vitest/coverage-v8`).
+  The audit calls both optional. Adding dependencies to someone's package on the strength of a LOW
+  finding is not a call to make unasked; both are one command away when wanted.
+- **L14, L15, L16** were "no action" in the audit itself and remain so: the elision post-condition
+  comment is correct and instructs its own maintenance, the DriftTracker regex noise is an accepted
+  tradeoff, and deep-freeze cost is fine at current scales.
+
+### What this does not establish
+
+- **Nothing about M8, M9 or M15**, which are decisions rather than work and are still open.
+- **L19's prune is verified only against the current tree.** `git status` showed nothing newly
+  visible, which proves no *existing* file lost its ignore. A file type that does not happen to
+  exist right now and was covered by a removed template line would not have been caught.

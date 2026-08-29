@@ -54,7 +54,7 @@ and the reasoning.
 | Lane | Scope | State |
 |---|---|---|
 | **A** | `src/cli/**`, `src/config/**`, `src/core/engine/`, `planner/`, `topology/`, `src/bench/runner.ts`, `src/gateway/exec.ts`, repo hygiene | partially closed — see below |
-| **B** | `src/gateway/{proxy,server,session-store,types}.ts`, `stages/cleanup/session-dedup.ts`, `stages/compression/token-hashing.ts`, `adapters/mcp/server.ts`, `bench/fixtures/loader.ts` | **H2, H4, M1, M5 closed**; open: M8, M9 (both need a decision), L6, L7, L9, L10, L13 |
+| **B** | `src/gateway/{proxy,server,session-store,types}.ts`, `stages/cleanup/session-dedup.ts`, `stages/compression/token-hashing.ts`, `adapters/mcp/server.ts`, `bench/fixtures/loader.ts` | **H2, H4, M1, M5 closed**; lows dispositioned (§69); open: **M8, M9 — both need a decision** |
 
 **Closed (Lane A):** H1, H3, **H5**, M2, M3, M4, **M6**, **M7**, M10, M11, M12, M14, M16.
 
@@ -107,9 +107,31 @@ against 3 at 0.05. The store grew with candidates rather than elisions. Corpus A
 pricing and emission render identical bytes. The corpus cannot see the leak itself — CLI routes
 supply no hasher — so that half is covered by a unit test.
 
-**Open (Lane A):** **M15 is awaiting a decision, not implementation** — whether plain `bench`
-should shell out to `python` by default. M13 and seven lows (L1, L8, L12, L17–L19, plus L4 recorded
-below) are unstarted; L2, L3, L5 and L11 were taken from the float pool in §63.
+**The LOW table is closed against its own list — DECISIONS §69.** L6, L7, L9, L10, L12 and L19
+fixed; **L1, L8, L13, L17 and L18 recorded at their sites with the reason they are acceptable rather
+than correct**; L14–L16 were "no action" in the audit itself; L2, L3, L5 and L11 went with the float
+pool (§63) and L4 was recorded when the ingestion work landed. Every row is dispositioned, including
+the ones not fixed — which is the half that went missing when `max_audit.md`'s LOW table was
+declared closed (§55).
+
+**Open, and all three are decisions rather than work:**
+
+- **M15 (Lane A)** — should plain `tokendamper bench` shell out to `python` to evaluate fixture
+  code? It defaults on, which sits badly with the "offline, deterministic" claim, and the escape
+  hatch is an undocumented env var. Observed twice during this work: three bench tests flake under
+  parallel load and pass in isolation.
+- **M8 (Lane B)** — a non-loopback bind with no token is an unauthenticated relay. Refuse to start,
+  warn loudly, or auto-generate and print a token? They differ in whether an existing working config
+  breaks.
+- **M9 (Lane B)** — how much CORS/Origin policy does a localhost tool want? Requiring the token
+  header even on loopback cleanly splits browsers from local clients, but changes the local client
+  contract. **L13 is folded into this** — whether `/health` should require a token is the same
+  question.
+
+**M13 (Lane A) is the only remaining non-decision item**: document precisely that
+`--minimum-confidence` gates ledger confidence only. Worth pairing with the §64 finding that
+`--max-debt` cannot trip on a CLI run either — the two are one honest paragraph about dials that
+look live and are not.
 
 **Recorded rather than fixed:** **L4** (a symlink is skipped inside a directory walk but followed
 when named directly). The fix is small, but creating a symlink on the machine it was written on

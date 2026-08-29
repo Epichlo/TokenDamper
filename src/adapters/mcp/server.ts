@@ -54,6 +54,17 @@ export class McpStdioServer {
     const MAX_BUFFER_SIZE = 10 * 1024 * 1024;
     this.input.on('data', (chunk: string) => {
       this.buffer += chunk;
+
+      // Drain complete lines before judging the size — audit OX-L7.
+      //
+      // The limit check used to run first and then set `this.buffer = ''`, so a chunk carrying
+      // several complete requests followed by one oversized partial discarded the complete ones
+      // too. They were well-formed, already received, and answerable; nothing about them was too
+      // long. `processBuffer` consumes everything up to the last newline, so running it first
+      // leaves exactly the un-terminated remainder for the limit to judge — which is the thing the
+      // limit is actually about.
+      this.processBuffer();
+
       if (this.buffer.length > MAX_BUFFER_SIZE) {
         this.sendResponse({
           jsonrpc: '2.0',
@@ -62,9 +73,7 @@ export class McpStdioServer {
         });
         this.logMessage('Buffer limit exceeded: request line too long without newline');
         this.buffer = '';
-        return;
       }
-      this.processBuffer();
     });
 
     this.input.on('end', () => {
