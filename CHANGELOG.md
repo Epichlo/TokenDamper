@@ -93,6 +93,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   largest remaining gain on Go is in that gate, not in the scanner.
 
 ### Fixed
+- **Within-payload deduplication works on the first turn (audit OX-M1, DECISIONS §67).** It was
+  treated as a side condition of cross-turn matching: the dedup branch was gated on
+  `previousBlockHashes.has(hash)` and the stage returned early unless that set was non-empty, so a
+  first turn carrying the same block three times went out whole. The README's savings table said
+  "the same block repeated **within one payload** → saves" with no qualifier; it was true from turn
+  two.
+
+  The gate was doing no safety work there. `recoverable: true` means an intact copy survives in the
+  *same outbound payload*, which rule 3 guarantees by preserving the first occurrence — a claim
+  checkable without knowing anything about earlier turns. `previousBlockHashes` answers a different
+  question (*is this content old?*) and was deciding something it does not bear on.
+
+  **DECISIONS §16/§41 are untouched.** A **sole** copy elided across turns is still elided with
+  `recoverable: false`, still scored in full by `DriftTracker`, and still fails the gate — so the
+  ordinary conversational shape still saves 0 bytes and still falls back, which is the number the
+  README leads with.
+
+  Measured over real sockets with a block repeated three times: turn 1 went from **8,459 sent /
+  8,459 forwarded** to a real saving, while a turn 1 of all-distinct blocks still saves nothing —
+  the control that keeps "turn 1 saves now" from meaning "turn 1 always saves".
+
 - **The Gateway no longer truncates streaming responses after 30 seconds (audit OX-H2, DECISIONS
   §66).** `forwardUpstreamRequest` armed `AbortSignal.timeout(30000)` and handed it to `fetch` —
   and a fetch signal does not stop applying when the promise resolves: **it governs the response

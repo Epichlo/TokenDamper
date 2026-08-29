@@ -4894,3 +4894,70 @@ Against a real upstream, budget 120 ms, body streaming for ~300 ms:
 - **Nothing about the 10 MB body cap or the session store.** Untouched.
 - **Nothing about savings.** This path runs after optimization; it changes what reaches the client,
   not what the Gateway elides.
+
+---
+
+## 67. Within-Payload Deduplication Never Needed History, and Was Gated on It Anyway
+
+**Audit OX-M1.** `runSessionDedupStage` treated within-payload repetition as a *side condition* of
+cross-turn matching. The whole dedup branch was gated on
+`sessionContext.previousBlockHashes.has(item.contentHash)`, and the stage returned early unless that
+set was non-empty — so on turn 1, three identical blocks in one payload all survived.
+
+The README's savings table said "the same block repeated **within one payload** → saves", with no
+qualifier. It was true from turn 2.
+
+### Why the gate was wrong rather than merely conservative
+
+`recoverable: true` means **an intact copy survives elsewhere in the same outbound payload**. Rule 3
+guarantees that by preserving the first occurrence and eliding the ones after it. That claim is
+verifiable from the payload alone: the model has seen the content, in this request, so the marker
+resolves.
+
+Nothing in it refers to previous turns. The `previousBlockHashes` check was answering a different
+question — *is this content old?* — and using the answer to decide something it does not bear on.
+
+**DECISIONS §16 and §41 are untouched.** They concern a **sole** copy elided across turns, where the
+consumer is a stateless provider API with no rehydration mechanism, so the marker is deletion rather
+than reference. That case is still elided with `recoverable: false`, still scored in full by
+`DriftTracker`, and still fails the gate. It is pinned by the first test in
+`gateway-dedup-reality.test.ts`, which is unchanged.
+
+### The change
+
+Two gates, both relaxed by the same reasoning:
+
+- `shouldAttemptDedup` is now `previousBlockHashes.size > 0 || hasRepeatedContent`. The occurrence
+  map moved above the early return, since within-payload repetition is by itself a reason to run.
+- The per-item branch fires on `seenInEarlierTurn || repeatsInThisPayload`.
+
+Rule 3 and the `isRecoverable = survivingHashes.has(hash)` computation are unchanged, which is what
+keeps sole-copy elision out of the new path: the first occurrence is always preserved, so anything
+elided under `repeatsInThisPayload` is recoverable by construction.
+
+### Measured
+
+Real sockets, a block repeated three times in one payload:
+
+| | before | after |
+|---|---|---|
+| turn 1, block ×3 | 8,459 sent, **8,459 forwarded** | saves |
+| turn 2, block ×3 (already worked) | saves | saves |
+| cross-turn sole copy | 0 bytes, falls back | 0 bytes, falls back |
+| turn 1, all blocks distinct | no saving | no saving |
+
+The last row is the control that keeps the first honest — turn 1 did not become "always saves". The
+third is §41 still holding.
+
+### What this does not establish
+
+- **Nothing about cross-turn saving.** Invariant 8 stands; the Gateway still plans only
+  `cleanup:session-dedup`, and the ordinary conversational shape — one copy per payload, seen
+  before — still saves nothing and still falls back. That is the number the README leads with and
+  it has not moved.
+- **Nothing about the corpus.** This stage never runs on the CLI or MCP paths, which execute
+  `plan.stageIds` and do not include it. The instrument is the Gateway integration suite.
+- **No claim that this is a large win.** It closes the gap between what the README says and what
+  the code does. Whether real agent traffic repeats a block inside a single payload often enough to
+  matter was not measured, and the honest framing stays the one in the README notice: use Gateway
+  mode for interception, validation and metrics, not for compression.

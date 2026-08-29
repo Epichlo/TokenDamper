@@ -22,7 +22,27 @@ export function runSessionDedupStage(
 ): StageResult {
   const stageId = 'cleanup:session-dedup';
 
-  const shouldAttemptDedup = Boolean(sessionContext && sessionContext.previousBlockHashes.size > 0);
+  // How many times each content hash appears in this payload.
+  //
+  // Computed before the early return because within-payload repetition is, by itself, a reason to
+  // run — audit OX-M1. This used to sit below the gate, and the gate asked only about *previous*
+  // turns, so a first turn containing the same block three times returned here untouched.
+  const totalOccurrences = new Map<string, number>();
+  for (const item of bundle.items) {
+    totalOccurrences.set(item.contentHash, (totalOccurrences.get(item.contentHash) ?? 0) + 1);
+  }
+  const hasRepeatedContent = [...totalOccurrences.values()].some((count) => count > 1);
+
+  // Two independent reasons to deduplicate, and conflating them was the defect.
+  //
+  // Cross-turn matching needs history. Within-payload matching does not: `recoverable: true` means
+  // an intact copy survives in the *same outbound payload*, which rule 3 guarantees by preserving
+  // the first occurrence, and that claim is checkable without knowing anything about earlier
+  // turns. DECISIONS §16/§41 concern a **sole** copy elided across turns — a different case, still
+  // refused, and still scored in full by `DriftTracker`.
+  const shouldAttemptDedup = Boolean(
+    sessionContext && (sessionContext.previousBlockHashes.size > 0 || hasRepeatedContent),
+  );
   const shouldAttemptRehydration = Boolean(
     sessionContext?.getContent && sessionContext.rehydrateRefs && sessionContext.rehydrateRefs.size > 0,
   );
@@ -38,7 +58,7 @@ export function runSessionDedupStage(
         bytesSaved: 0,
         tokenEstimateSaved: 0,
       },
-      notes: 'No previous session block hashes available for deduplication.',
+      notes: 'No repeated content in this payload and no previous session block hashes.',
     });
   }
 
@@ -57,12 +77,6 @@ export function runSessionDedupStage(
     post_condition_rejected: 0,
   };
 
-  // How many times each content hash appears in this payload. Used to decide whether an
-  // elision can be verified as recoverable — see the `recoverable` comment below.
-  const totalOccurrences = new Map<string, number>();
-  for (const item of bundle.items) {
-    totalOccurrences.set(item.contentHash, (totalOccurrences.get(item.contentHash) ?? 0) + 1);
-  }
   // Content hashes for which an intact copy has already been kept earlier in this payload.
   const survivingHashes = new Set<string>();
 
@@ -88,8 +102,13 @@ export function runSessionDedupStage(
       return item;
     }
 
-    // Check if this item content hash was seen in previous turns
-    if (shouldAttemptDedup && sessionContext.previousBlockHashes.has(item.contentHash)) {
+    // Deduplicate when this content was seen in an earlier turn **or** repeats inside this
+    // payload (audit OX-M1). The second is what makes the README's within-payload claim true
+    // on turn 1; rule 3 below still preserves the first copy, so the elisions that follow it
+    // reference something demonstrably present in these same bytes.
+    const seenInEarlierTurn = sessionContext.previousBlockHashes.has(item.contentHash);
+    const repeatsInThisPayload = (totalOccurrences.get(item.contentHash) ?? 1) > 1;
+    if (shouldAttemptDedup && (seenInEarlierTurn || repeatsInThisPayload)) {
       // Rule 3: preserve the first copy of duplicated content, so the elisions that follow
       // it reference something demonstrably present in this same outbound payload.
       if (!survivingHashes.has(item.contentHash) && (totalOccurrences.get(item.contentHash) ?? 1) > 1) {
