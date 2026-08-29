@@ -124,6 +124,9 @@ export function runCli(
             budget: config.budget,
           },
         ],
+        // Absent unless `--evaluate-quality` was passed. The runner defaults it off (audit
+        // OX-M15), so plain `bench` never reaches for an interpreter.
+        ...(parsed.evaluateQuality ? { evaluateQuality: true } : {}),
       };
 
       const report = BenchmarkRunner.run(fixtures, runnerConfig);
@@ -436,6 +439,11 @@ export interface ParsedArguments {
   readonly extraInputPaths?: readonly string[];
   readonly datasetPath?: string;
   readonly reportJsonPath?: string;
+  /**
+   * `--evaluate-quality`: run the fixture-execution evaluator, which shells out to `python`.
+   * Off unless asked for by name — audit OX-M15.
+   */
+  readonly evaluateQuality?: boolean;
   readonly quiet?: boolean;
   readonly execArgs: readonly string[];
   readonly configPath?: string;
@@ -513,7 +521,7 @@ export const SUPPORTED_FLAGS: Readonly<Record<'optimize' | 'bench' | 'mcp', Read
     '--language',
     '--input-name',
   ]),
-  bench: new Set([...COMMON_FLAGS, '--report-json', '--quiet']),
+  bench: new Set([...COMMON_FLAGS, '--report-json', '--quiet', '--evaluate-quality']),
   mcp: new Set(COMMON_FLAGS),
 };
 
@@ -598,6 +606,7 @@ export function parseArguments(argv: readonly string[], cwd: string): ParsedArgu
   let maxDrift: number | undefined;
   let keepDocstrings = false;
   let reportJsonPath: string | undefined;
+  let evaluateQuality = false;
   let quiet = false;
   let language: string | undefined;
   let inputName: string | undefined;
@@ -643,6 +652,11 @@ export function parseArguments(argv: readonly string[], cwd: string): ParsedArgu
 
     if (flag === '--quiet') {
       quiet = true;
+      continue;
+    }
+
+    if (flag === '--evaluate-quality') {
+      evaluateQuality = true;
       continue;
     }
 
@@ -824,6 +838,7 @@ export function parseArguments(argv: readonly string[], cwd: string): ParsedArgu
       inputPath: inputPath || datasetPath || '',
       ...(datasetPath || inputPath ? { datasetPath: datasetPath || inputPath } : {}),
       ...(reportJsonPath ? { reportJsonPath } : {}),
+      ...(evaluateQuality ? { evaluateQuality } : {}),
       ...(quiet ? { quiet } : {}),
       execArgs: [],
       ...(configPath ? { configPath } : {}),

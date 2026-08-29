@@ -131,6 +131,28 @@ Launch the TokenDamper MCP stdio server to provide context optimization tools di
 tokendamper mcp
 ```
 
+### 4. Benchmarks (`bench`)
+
+```bash
+tokendamper bench                      # bundled datasets
+tokendamper bench ./my-fixtures.jsonl  # your own
+```
+
+Flags: `--report-json <path>` writes the full `BenchmarkReport`, `--quiet` suppresses the table,
+and the config/budget flags apply.
+
+**`bench` does not execute fixture code unless you ask it to.** `--evaluate-quality` turns on the
+evaluator that runs each fixture's code and its dataset checks in a `python` subprocess, and
+reports `pass@1` from the result. It is **off by default** (audit OX-M15): `ARCHITECTURE.md`
+describes the harness as offline and deterministic, and reaching for an interpreter because
+someone typed `bench` contradicts that. Without it, the run stays in-process and the report's
+`syntaxPassRate` / `passAt1Rate` are derived from validation outcomes instead of from execution
+— a weaker signal, reported under the same field names, so compare like with like.
+
+`TOKENDAMPER_BENCH_DISABLE_PYTHON=true` still forces the structural path even when
+`--evaluate-quality` is passed. It is a kill switch for environments where a `python` on
+`PATH` is the wrong `python`, not the primary control.
+
 ## MCP Integration Setup
 
 TokenDamper exposes optimization tools via the Model Context Protocol (MCP).
@@ -161,7 +183,7 @@ TokenDamper behavior can be configured dynamically using environment variables:
 | `TOKENDAMPER_MAX_INPUT_TOKENS` | Hard budget cap on the number of context tokens sent to the LLM. Any value above 0 also engages the optimizing planner. |
 | `TOKENDAMPER_TARGET_REDUCTION_RATIO` | Fraction of tokens to try to remove, 0–1. A real target since 1.3.0 — it resolves against the input into an absolute token ceiling that both selection and compression respect. Best effort, not a guarantee; see `--target-reduction-ratio` below. |
 | `TOKENDAMPER_PRESERVE_KINDS` | Comma-separated list of items to never prune (e.g. `prompt,file`). |
-| `TOKENDAMPER_MINIMUM_CONFIDENCE` | Validation confidence floor, 0–1 inclusive. Out-of-range and unparseable values are rejected. |
+| `TOKENDAMPER_MINIMUM_CONFIDENCE` | Confidence floor, 0–1 inclusive. Out-of-range and unparseable values are rejected. **Gates ledger confidence only** — it cannot affect a CLI run. See *Two dials that look live and are not*, below. |
 | `TOKENDAMPER_LOG_LEVEL` | Logging verbosity (`debug`, `info`, `warn`, `error`, `silent`). |
 | `TOKENDAMPER_APP_MODE` | `optimize` or `bench`. |
 
@@ -190,7 +212,8 @@ TokenDamper provides detailed explainability for how your context was optimized 
 
 - `--diff`: Prints a visual ANSI terminal diff comparing the raw input against the optimized output.
 - `--diff-html <path>`: Generates a beautiful HTML report visualizing exact token elisions and metrics.
-- `--max-debt <0-100>`: Fails validation if optimization debt (information loss score) exceeds this threshold.
+- `--max-debt <0-100>`: Debt ceiling above which the engine attempts re-hydration. **It cannot
+  change a CLI run** — see *Two dials that look live and are not*, below.
 - `--max-drift <0-1>`: Fails validation if semantic drift (structural deviation) exceeds this threshold.
 - `--keep-docstrings`: Keep a Python function's leading docstring outside the elided region, so
   the *why* of a function survives when its body does not. A retention/size trade you opt into:
@@ -203,6 +226,33 @@ TokenDamper provides detailed explainability for how your context was optimized 
   one region — usually a whole function body — and files often have one dominant region, so a
   modest target can overshoot. Measured at target 30%, 21 of 66 reducing files landed in 25–35%
   and 23 exceeded 50%.
+
+### Two dials that look live and are not
+
+`--minimum-confidence` and `--max-debt` are parsed, range-validated, and threaded all the way
+into `optimize()`. Neither can change what `tokendamper optimize` emits. This is documented
+rather than fixed (audit OX-M13, and DECISIONS §64 for the second half), because the machinery
+each one gates is real — it is reachable through the exported API — and only the CLI supplies
+neither of its two inputs.
+
+- **`--minimum-confidence`** gates *ledger* confidence. Validation confidence is binary:
+  `validate()` returns `passed ? 1 : 0`. So the engine's `validation.confidence < minimum`
+  test reads `1 < x` on a passing run — false for every value the schema admits, since it
+  validates into [0, 1] — and `0 < x` on a failing one, where `!validation.passed` has already
+  decided the same line. The other arm reads a `ConfidenceLedger`, and defaults to a literal
+  `1.0` when none is supplied. The CLI supplies none.
+- **`--max-debt`** sets the threshold above which the engine tries re-hydration.
+  `attemptAutomatedRehydration` returns immediately unless it is given a `TokenHasher` or a
+  `ConfidenceLedger`. The CLI supplies neither, so lowering the threshold enters the branch and
+  the branch does nothing. Note this is a stronger reason than "the debt score cannot reach the
+  default 75": `--max-debt` is exactly the flag that lowers the default, so the default is not
+  what makes it inert.
+
+Both dials are live for an **embedder** calling the exported `optimize()` with a `tokenHasher`
+and/or a `confidenceLedger`, and `--minimum-confidence` is live on the **Gateway**, which
+constructs a ledger per request. `test/unit/cli/inert-dials.test.ts` pins the CLI behaviour as a
+characterization test: if a change makes either dial live, that test fails and this section has to
+be rewritten in the same commit.
 
 ---
 
