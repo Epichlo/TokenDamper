@@ -109,6 +109,29 @@ export function runTokenHashingStage(
     return renderElisionMarker(text, describes, blockHash);
   };
 
+  /**
+   * The same bytes `markerFor` produces, without the registration — audit OX-M5.
+   *
+   * `trimRegionsToCeiling` renders a marker for **every** candidate span in order to price it,
+   * because the marker is variable-length and self-describing and a saving estimated without it
+   * would overstate every region. Handing it `markerFor` meant every span the ceiling considered
+   * and then discarded was written into the store anyway. Measured on a 12-region file: **12
+   * blocks registered against 5 actually elided** at target 0.1, and 12 against 3 at 0.05 — the
+   * store grew with the candidate count rather than with the elisions.
+   *
+   * Invisible on the CLI, which supplies no hasher. On MCP the server is long-lived and the hasher
+   * *is* the reversibility store, so it accumulated content that was never elided into any output,
+   * and `hasHash` / `expandBlockHash` answered for placeholders that appear nowhere.
+   *
+   * **The bytes must be identical to `markerFor`'s**, or the ceiling is computed against a
+   * different string from the one written and adherence shifts. That holds by construction rather
+   * than by care: `renderElisionMarker` is a pure function of the text, its noun and its hash, and
+   * `hashContent` is pure — registration never contributed to the output. Pinned by
+   * `token-hashing-store-pollution.test.ts`.
+   */
+  const priceMarker = (text: string, describes: string): string =>
+    renderElisionMarker(text, describes, hashContent(text));
+
   // The ceiling this run is aiming at, and a running estimate of where we are against it.
   //
   // This is what makes `--target-reduction-ratio` a *target* rather than a floor. Without it the
@@ -172,7 +195,7 @@ export function runTokenHashingStage(
     // item then has *all* of its regions removed in one call. Measured, that made the target
     // inert exactly where it is most used — 0.1, 0.3, 0.5 and 0.7 all produced **69.09%** on the
     // same file. The ceiling has to bind at the granularity the compression happens at.
-    const regions = trimRegionsToCeiling(item, allRegions, runningTokens, ceiling, markerFor, tokenizer);
+    const regions = trimRegionsToCeiling(item, allRegions, runningTokens, ceiling, priceMarker, tokenizer);
     if (regions.length > 0) {
       const regionOutcome = elideRegions({
         item,
@@ -397,7 +420,15 @@ function trimRegionsToCeiling(
   regions: ReadonlyArray<{ readonly start: number; readonly end: number }>,
   runningTokens: number,
   ceiling: number | undefined,
-  markerFor: (regionText: string, describes: string, blockType: string) => string,
+  /**
+   * Renders the marker a region *would* get, for pricing only.
+   *
+   * Deliberately not `markerFor` (audit OX-M5): that one registers the block with the hasher,
+   * and this function renders a marker for every candidate it considers, most of which are
+   * then discarded. It must produce byte-identical output to `markerFor`, or the ceiling is
+   * computed against a different string from the one emitted.
+   */
+  priceMarker: (regionText: string, describes: string) => string,
   tokenizer: TokenizerAdapter,
 ): ReadonlyArray<{ readonly start: number; readonly end: number }> {
   if (ceiling === undefined || regions.length === 0) {
@@ -435,7 +466,7 @@ function trimRegionsToCeiling(
   // region by the marker's own size.
   const withCost = candidates.map((region) => {
     const text = item.content.slice(region.start, region.end);
-    const marker = markerFor(text, FUNCTION_BODY_NOUN, item.kind);
+    const marker = priceMarker(text, FUNCTION_BODY_NOUN);
     const freed = Math.max(
       0,
       estimateBundleTokens([{ ...item, content: text }], tokenizer) -

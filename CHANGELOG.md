@@ -93,6 +93,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   largest remaining gain on Go is in that gate, not in the scanner.
 
 ### Fixed
+- **Pricing a candidate region no longer registers it with the block store (audit OX-M5, DECISIONS
+  §68).** `trimRegionsToCeiling` renders a marker for **every** candidate span in order to price it
+  — correctly, since the marker is variable-length and self-describing and a saving estimated
+  without it would overstate every region. But the renderer it was handed also called
+  `hasher.registerBlock(...)`, so every span the ceiling considered and then *discarded* was written
+  into the store anyway.
+
+  Measured on a 12-region file: **12 blocks registered against 5 actually emitted** at target 0.1,
+  and 12 against 3 at 0.05. The store held one block per candidate rather than per elision, so
+  memory grew with how much the scanner found rather than with how much was removed, and
+  `hasHash` / `expandBlockHash` answered for placeholders present in no output. Invisible on the
+  CLI, which supplies no hasher; it matters on **MCP**, where the server is long-lived and the
+  hasher *is* the reversibility store.
+
+  The binding constraint was that pricing and emission must render **identical bytes**, or the
+  ceiling is computed against a different string from the one written and
+  `--target-reduction-ratio` adherence shifts. Corpus A/B over 289 files / 578 rows frozen at
+  `48ac6c8`: **zero rows differ on any of ten compared fields**, with 101 rows genuinely reducing —
+  so the corpus contains the shape and the result is not vacuous. The A/B proves output-neutrality;
+  it cannot see the leak itself, because CLI routes supply no hasher. That is what the new unit test
+  is for.
+
 - **Within-payload deduplication works on the first turn (audit OX-M1, DECISIONS §67).** It was
   treated as a side condition of cross-turn matching: the dedup branch was gated on
   `previousBlockHashes.has(hash)` and the stage returned early unless that set was non-empty, so a

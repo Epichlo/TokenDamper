@@ -54,7 +54,7 @@ and the reasoning.
 | Lane | Scope | State |
 |---|---|---|
 | **A** | `src/cli/**`, `src/config/**`, `src/core/engine/`, `planner/`, `topology/`, `src/bench/runner.ts`, `src/gateway/exec.ts`, repo hygiene | partially closed — see below |
-| **B** | `src/gateway/{proxy,server,session-store,types}.ts`, `stages/cleanup/session-dedup.ts`, `stages/compression/token-hashing.ts`, `adapters/mcp/server.ts`, `bench/fixtures/loader.ts` | **H2, H4, M1 closed**; open: M5, M8, M9, L6, L7, L9, L10, L13 |
+| **B** | `src/gateway/{proxy,server,session-store,types}.ts`, `stages/cleanup/session-dedup.ts`, `stages/compression/token-hashing.ts`, `adapters/mcp/server.ts`, `bench/fixtures/loader.ts` | **H2, H4, M1, M5 closed**; open: M8, M9 (both need a decision), L6, L7, L9, L10, L13 |
 
 **Closed (Lane A):** H1, H3, **H5**, M2, M3, M4, **M6**, **M7**, M10, M11, M12, M14, M16.
 
@@ -98,6 +98,14 @@ sent, 8,459 forwarded) while the README claimed it saved. The gate did no safety
 `recoverable: true` means an intact copy survives in the same outbound payload, checkable without
 history. §16/§41 untouched — a sole copy across turns is still refused, and the ordinary
 conversational shape still saves 0 and still falls back.
+
+**M5 is closed — DECISIONS §68.** `trimRegionsToCeiling` priced every candidate span by rendering
+its marker, and the renderer it was handed also registered the block — so discarded candidates were
+stored anyway. Measured on a 12-region file: **12 registered against 5 emitted** at target 0.1, 12
+against 3 at 0.05. The store grew with candidates rather than elisions. Corpus A/B at `48ac6c8`:
+**0 of 578 rows differ**, with 101 genuinely reducing, which verifies the binding constraint that
+pricing and emission render identical bytes. The corpus cannot see the leak itself — CLI routes
+supply no hasher — so that half is covered by a unit test.
 
 **Open (Lane A):** **M15 is awaiting a decision, not implementation** — whether plain `bench`
 should shell out to `python` by default. M13 and seven lows (L1, L8, L12, L17–L19, plus L4 recorded
