@@ -52,6 +52,14 @@ export interface GatewayConfig {
   readonly maxContentEntriesPerSession?: number | undefined;
   readonly gatewayToken?: string | undefined;
   /**
+   * How long the upstream has to produce **response headers**, in milliseconds. Default 30000.
+   *
+   * Time-to-first-byte only. It deliberately does not bound how long the response *body* may
+   * take, because an LLM completion routinely streams for minutes and a budget that governed
+   * the body would truncate it mid-generation (audit OX-H2).
+   */
+  readonly upstreamTtfbTimeoutMs?: number | undefined;
+  /**
    * Test seams, forwarded to `ProxyHandlerOptions`. See the fields of the same names there —
    * both replace ambient environment reads that used to sit inside the request path (audit M8),
    * and neither belongs in a deployed configuration.
@@ -68,6 +76,8 @@ export interface ProxyHandlerOptions {
   readonly upstreamOpenAiUrl?: string | undefined;
   readonly upstreamAnthropicUrl?: string | undefined;
   readonly abortSignal?: AbortSignal | undefined;
+  /** Header budget in milliseconds; see `GatewayConfig.upstreamTtfbTimeoutMs`. Default 30000. */
+  readonly upstreamTtfbTimeoutMs?: number | undefined;
   /**
    * The request body exactly as it arrived on the socket.
    *

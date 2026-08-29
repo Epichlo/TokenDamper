@@ -54,7 +54,7 @@ and the reasoning.
 | Lane | Scope | State |
 |---|---|---|
 | **A** | `src/cli/**`, `src/config/**`, `src/core/engine/`, `planner/`, `topology/`, `src/bench/runner.ts`, `src/gateway/exec.ts`, repo hygiene | partially closed — see below |
-| **B** | `src/gateway/{proxy,server,session-store,types}.ts`, `stages/cleanup/session-dedup.ts`, `stages/compression/token-hashing.ts`, `adapters/mcp/server.ts`, `bench/fixtures/loader.ts` | **H4 closed**; open: H2, M1, M5, M8, M9, L6, L7, L9, L10, L13 |
+| **B** | `src/gateway/{proxy,server,session-store,types}.ts`, `stages/cleanup/session-dedup.ts`, `stages/compression/token-hashing.ts`, `adapters/mcp/server.ts`, `bench/fixtures/loader.ts` | **H2 and H4 closed**; open: M1, M5, M8, M9, L6, L7, L9, L10, L13 |
 
 **Closed (Lane A):** H1, H3, **H5**, M2, M3, M4, **M6**, **M7**, M10, M11, M12, M14, M16.
 
@@ -83,6 +83,14 @@ failed identically at 8,530/8,530, which is why the fix is a structural span sca
 `null` special-case the audit suggested. The old value search is kept as a fallback, so a declined
 payload behaves exactly as before. Invariant 8 untouched: still only `cleanup:session-dedup`, still
 no cross-turn saving.
+
+**H2 is closed — DECISIONS §66.** `AbortSignal.timeout(30000)` was handed to `fetch`, and a fetch
+signal keeps governing the **response body stream** after the promise resolves — so streaming
+answers were truncated ~30 s in, on the traffic the Gateway intercepts by default. The budget is now
+time-to-first-byte, disarmed in a `finally` once `fetch` settles. Client-hangup abort is unchanged
+and mutation-checked. `upstreamTtfbTimeoutMs` (default 30000) is configurable, which is also what
+made the defect testable: catching a 30-second bug used to need a 30-second upstream, which is why
+no test caught it.
 
 **Open (Lane A):** **M15 is awaiting a decision, not implementation** — whether plain `bench`
 should shell out to `python` by default. M13 and seven lows (L1, L8, L12, L17–L19, plus L4 recorded

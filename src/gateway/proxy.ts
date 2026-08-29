@@ -161,11 +161,33 @@ async function forwardUpstreamRequest(params: ForwardUpstreamOptions): Promise<P
   const upstreamUrl = buildUpstreamUrl(upstreamBase, params.requestUrl);
 
   let upstreamResponse: Response;
+  // Armed before the request and disarmed the moment headers arrive — audit OX-H2.
+  //
+  // This used to be `AbortSignal.timeout(30000)` handed straight to `fetch`. A fetch signal does
+  // not stop applying once the promise resolves: it governs the **response body stream** too. So
+  // for `"stream": true` payloads the body reader rejected ~30 s in and the pump destroyed the
+  // client response, truncating the answer mid-generation. LLM completions routinely run longer
+  // than that, so it broke precisely the traffic the Gateway intercepts by default — and it
+  // looked, from the client's side, like the model had simply stopped.
+  //
+  // The budget is time-to-first-byte and nothing else. An own `AbortController` is used rather
+  // than `AbortSignal.timeout` because only an owned controller can be *not* fired: clearing the
+  // timer below leaves the signal permanently unaborted for the body phase.
+  //
+  // The caller-disconnect signal stays combined into the same fetch signal, so a client hanging up
+  // still aborts the upstream request during the body. That is the half a naive fix removes.
+  const ttfbController = new AbortController();
+  const ttfbMs = params.options.upstreamTtfbTimeoutMs ?? 30000;
+  const ttfbTimer = setTimeout(() => {
+    // Aborting with a `TimeoutError` keeps the 504 mapping below working. `AbortSignal.timeout`
+    // produced exactly this reason, and the catch matches on `error.name`.
+    ttfbController.abort(new DOMException(`Upstream sent no response headers within ${ttfbMs}ms`, 'TimeoutError'));
+  }, ttfbMs);
+
   try {
-    const timeoutSignal = AbortSignal.timeout(30000);
-    const signal = params.options.abortSignal 
-      ? AbortSignal.any([params.options.abortSignal, timeoutSignal])
-      : timeoutSignal;
+    const signal = params.options.abortSignal
+      ? AbortSignal.any([params.options.abortSignal, ttfbController.signal])
+      : ttfbController.signal;
 
     const fetchInit: RequestInit = {
       method: 'POST',
@@ -185,7 +207,7 @@ async function forwardUpstreamRequest(params: ForwardUpstreamOptions): Promise<P
       return {
         statusCode: 504,
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ error: 'Gateway Timeout: Upstream request exceeded 30000ms' }),
+        body: JSON.stringify({ error: `Gateway Timeout: upstream sent no response headers within ${ttfbMs}ms` }),
         session: params.session,
       };
     }
@@ -196,6 +218,11 @@ async function forwardUpstreamRequest(params: ForwardUpstreamOptions): Promise<P
       body: JSON.stringify({ error: `Upstream ${params.provider} request failed: ${message}` }),
       session: params.session,
     };
+  } finally {
+    // Every exit from the header phase disarms it — resolved, timed out, or failed. This is the
+    // line that makes the budget time-to-first-byte: once `fetch` settles, nothing can fire this
+    // controller again, so the body stream is governed only by the caller-disconnect signal.
+    clearTimeout(ttfbTimer);
   }
 
   const responseHeaders = copyResponseHeaders(upstreamResponse.headers);
