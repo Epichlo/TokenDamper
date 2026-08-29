@@ -34,6 +34,7 @@ const VALUE_FOR: Readonly<Record<string, string | null>> = {
   '--input-name': 'snippet.py',
   '--report-json': 'report.json',
   '--quiet': null,
+  '--evaluate-quality': null,
 };
 
 const argvFor = (command: string, flag: string): string[] => {

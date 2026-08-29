@@ -29,7 +29,13 @@ export class BenchmarkRunner {
     }
 
     const runsPerFixture = config.runsPerFixture && config.runsPerFixture > 0 ? config.runsPerFixture : 1;
-    const evaluateQuality = config.evaluateQuality !== false;
+    // Opt-in, not opt-out — audit OX-M15. `BenchmarkEvaluator.evaluateFixture` executes fixture
+    // code in a `python` subprocess, which a harness ARCHITECTURE.md calls offline and
+    // deterministic should not do merely because someone typed `bench`. A caller that wants
+    // execution asks for it by name; the regression suites that assert on execution results pass
+    // `evaluateQuality: true`. With it off, `syntaxPassRate` and `passAt1Rate` fall back to
+    // validation outcomes below, so the report keeps its shape rather than growing a hole.
+    const evaluateQuality = config.evaluateQuality === true;
 
     const sweepResults: SweepResult[] = [];
     const allRunResults: FixtureRunResult[] = [];

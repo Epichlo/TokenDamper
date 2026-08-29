@@ -207,6 +207,32 @@ with **zero** new fallbacks and **zero** files that stopped reducing; 522 rows a
 because subdivision is confined to the ceiling path. Current measured baseline: python file
 **17.95%**, typescript file **18.52%** — status doc §2, not the figures a prior session may quote.
 
+**Unreleased on `main` since v1.6.1: `oxaudit.md` is closed in full (DECISIONS §70).** The last
+four findings, three of which were decisions rather than defects.
+
+- **M15** — plain `tokendamper bench` no longer runs fixture code through `python`.
+  `--evaluate-quality` asks for it. Plain `bench` writes **0** `python-subprocess` evaluations
+  against **5** with the flag, measured on the built artifact. The cost is real and is not a
+  regression: `syntaxPassRate` / `passAt1Rate` now come from validation, **0.6** against the
+  execution-derived **1.0**. Same field names, different quantity — the two regression suites
+  that assert on the execution figure ask for it by name, and that half is the point.
+- **M8** — a non-loopback bind with no `gatewayToken` throws from `start()` instead of serving
+  an unauthenticated relay. `allowUnauthenticatedNonLoopback` is the explicit opt-in. `exec` is
+  unaffected (loopback *and* a token). Loopback trust (C3) is untouched and asserted.
+- **M9 + L13** — a foreign `Origin` is refused on every bind; a foreign `Host` on a loopback
+  bind. `/health` returns `{"status":"ok"}` only. **Do not add an OPTIONS/CORS handler**: the
+  server already answers OPTIONS `405` with no `Access-Control-*` headers, measured, and the
+  threat is a *simple* request that never preflights. The audit asked for the wrong control.
+- **M13** — `--minimum-confidence` and `--max-debt` are documented as inert on the CLI rather
+  than made live. **The reason §64 gave for `--max-debt` does not carry**: it explained the
+  default 75 threshold, and `--max-debt` is the flag that lowers it. The real reason is that
+  `attemptAutomatedRehydration` returns immediately without a hasher or ledger, and the CLI
+  supplies neither. `test/unit/cli/inert-dials.test.ts` pins it as a characterization test.
+
+**The corpus was not run for any of the four, deliberately** — bench, the flag-parse loop and
+every Gateway path are off the optimize route, so byte-identical would have been vacuous rather
+than reassuring. §56's caution, in the other direction.
+
 **v1.6.1 shipped 2026-08-30** — the release that closes `oxaudit.md`'s Lane A and all of Lane B
 but two held decisions. **§62 withdraws `--trace-output` and the `explain` value of `--mode`**
 (nominally breaking; neither was ever read, and a config file still carrying `traceOutput` keeps

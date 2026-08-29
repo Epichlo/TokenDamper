@@ -195,12 +195,15 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
     }
   });
 
-  it('responds to GET /health', async () => {
+  it('responds to GET /health, and reports nothing but liveness', async () => {
+    // `activeSessions` was removed here — audit OX-L13, folded into OX-M9. It told an
+    // unauthenticated caller how much conversation traffic flows through the machine, and
+    // `/health` is the one endpoint a deployment exposes deliberately. Liveness is the job.
     const response = await fetch(`http://127.0.0.1:${port}/health`);
     expect(response.status).toBe(200);
-    const data = (await response.json()) as { status: string; activeSessions: number };
+    const data = (await response.json()) as Record<string, unknown>;
     expect(data.status).toBe('ok');
-    expect(typeof data.activeSessions).toBe('number');
+    expect(data).not.toHaveProperty('activeSessions');
   });
 
   it('deduplicates repetitive OpenAI message content across turns', async () => {

@@ -53,6 +53,12 @@ export interface BenchmarkSweepConfig {
 export interface BenchmarkRunnerConfig {
   readonly baseConfig: ResolvedConfig;
   readonly sweeps: ReadonlyArray<BenchmarkSweepConfig>;
+  /**
+   * Run `BenchmarkEvaluator.evaluateFixture`, which executes fixture code in a `python`
+   * subprocess. **Defaults to false** (audit OX-M15). Omitted or false, the run stays in-process
+   * and the report's `syntaxPassRate` / `passAt1Rate` are derived from validation outcomes
+   * instead of from execution.
+   */
   readonly evaluateQuality?: boolean;
   readonly runsPerFixture?: number;
 }

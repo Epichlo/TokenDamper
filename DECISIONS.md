@@ -5085,3 +5085,137 @@ mutation-checked — reverting either source file fails its test and only its te
 - **L19's prune is verified only against the current tree.** `git status` showed nothing newly
   visible, which proves no *existing* file lost its ignore. A file type that does not happen to
   exist right now and was covered by a removed template line would not have been caught.
+
+## 70. The Last Four OX Findings: Three Decisions and One Paragraph
+
+Closes `oxaudit.md`. Three of these were held open because they are choices about the product
+rather than defects with an obvious fix, and one needed no decision at all.
+
+### OX-M15 — `bench` stops executing dataset code
+
+`BenchmarkRunner.run` read `config.evaluateQuality !== false`, which defaults **on**, and
+`BenchmarkEvaluator.evaluateFixture` runs each fixture's code and its dataset checks through
+`python -c`. So a harness `ARCHITECTURE.md` describes as offline and deterministic spawned an
+interpreter because someone typed `bench`, and the only escape was
+`TOKENDAMPER_BENCH_DISABLE_PYTHON`, documented nowhere.
+
+**Decided: default off, opt-in by name.** The default is `=== true`, and `--evaluate-quality`
+asks for it — command-scoped per §30, a parse error naming `bench` anywhere else.
+
+Verified on the built artifact rather than in-process, because that is what a user runs: plain
+`bench humaneval --report-json` writes a report containing **0** occurrences of
+`python-subprocess`; the same command with `--evaluate-quality` writes **5**.
+
+The accepted cost is that plain `bench` reports a different quantity under the same field names.
+`syntaxPassRate` and `passAt1Rate` fall back to validation outcomes, which is a weaker signal —
+measured, 0.6 against the execution-derived 1.0 on the bundled fixtures. Two regression suites
+assert on the execution figure and now request it by name (bench.test.ts Test 5 and Test 6); that
+half is what keeps this from being a silent loss of coverage, and each site says so.
+
+### OX-M8 — an exposed bind must be authenticated
+
+The token gate reads `if (this.config.gatewayToken && !isLoopbackPeer(req))`: enforced only *if
+one was configured*. `host: '0.0.0.0'` with no token was therefore an unauthenticated relay
+forwarding arbitrary bodies to upstream providers, and nothing warned. README:154 already stated
+the intended rule — "enforced only on a non-loopback bind" — so the documentation described the
+intent and the code implemented "enforced only if provided".
+
+**Decided: refuse to start**, with `allowUnauthenticatedNonLoopback` as an explicit opt-in.
+
+Refusing rather than warning, because the configuration this protects is a server nobody is
+watching: a warning on stderr reaches the person who starts it in a terminal and no one who
+starts it from a unit file. Auto-generating a token was the other candidate and is worse in a
+specific way — startup succeeds, and every existing client of that bind begins failing with 401,
+which is a subtler break than a refusal that names itself.
+
+The check lives in `start()`, not the constructor, so constructing a server stays free of side
+effects; the exposure begins at `listen`, which is where it is refused. `isLoopbackHost` is the
+configuration-time counterpart of `isLoopbackPeer`, and treats `0.0.0.0` and `::` as **not**
+loopback — they include the loopback interface, which is what makes them easy to mistake for it,
+and every other interface besides.
+
+Loopback trust (C3) and the constant-time compare are untouched, and both are asserted, so a
+later change cannot quietly buy this guarantee by revoking C3. `tokendamper exec` is unaffected
+on two counts: it binds the default loopback host *and* generates a token.
+
+### OX-M9 — Origin and Host validation, not token-on-loopback
+
+**Decided: validate `Origin` and `Host`.** Requiring `x-tokendamper-token` even on loopback
+splits browsers from local clients more cleanly — browsers cannot set custom headers on a simple
+request — but it taxes every existing local client to close a browser-only hole. Declined for that
+reason.
+
+**The audit's stated fix direction was partly aimed at the wrong control, and this is the third
+time an OX reachability claim has needed measuring.** It proposed answering OPTIONS with a
+restrictive CORS policy. Measured before writing anything: this server *already* answers OPTIONS
+with `405` and no `Access-Control-*` headers, which is that policy. Adding a handler would have
+been ceremony. Preflight was never the gap — the threat is a **simple** `text/plain` POST, which
+skips preflight entirely, so the check has to be on requests that never preflight.
+
+**And the decision as recorded overstated one half.** It said non-browser clients "send neither
+header". True of `Origin`; false of `Host`, which every HTTP/1.1 client must send. The local
+client contract is preserved by *what is accepted*, not by the header being absent:
+
+- `Origin` present and not this gateway's own origin → 403, on every bind. Non-browser clients do
+  not send it, so nothing local changes. Same-host different-port is still foreign, which is the
+  shape a malicious local page actually has.
+- `Host` naming somewhere else → 403, **on a loopback bind only**. That is where DNS rebinding is
+  the threat: an attacker's name resolving to 127.0.0.1. Accepted are `localhost`, any `127.x`,
+  `::1`, and the configured bind. On an exposed bind hostnames are legitimately varied and the
+  token M8 now requires is the real control, so the rule would cost more than it buys.
+
+The policy runs **before** `/health`. A check the health endpoint sat in front of would be a
+check with a documented way around it.
+
+**OX-L13 is folded in, as intended.** `/health` now returns `{"status":"ok"}` and nothing else.
+`activeSessions` told an unauthenticated caller how much conversation traffic flows through the
+machine; on a loopback bind that is a small leak to a peer already trusted to proxy, and the
+reason to drop it anyway is that `/health` is the one endpoint deployments expose deliberately.
+`server.ts` had carried a comment deferring this to M8/M9 precisely so the two answers could not
+drift, and this is that answer.
+
+### OX-M13 — documented, not fixed
+
+`--minimum-confidence` and `--max-debt` are parsed, range-validated, and threaded into
+`optimize()`. Neither can change what the CLI emits.
+
+- Validation confidence is binary: `validate()` returns `passed ? 1 : 0`. Both engine gates read
+  `validation.confidence < minimumConfidence` — `1 < x` on a passing run, false for everything
+  the schema admits since §OX-M10 validates it into [0, 1]; `0 < x` on a failing one, where
+  `!validation.passed` has already decided the same line. The other arm reads a
+  `ConfidenceLedger` and is a literal `1.0` when none is supplied. The CLI supplies none.
+- `--max-debt` can flip `shouldRehydrate` and enter the rehydration branch, but
+  `attemptAutomatedRehydration` returns on its first line without a hasher or a ledger, and the
+  CLI supplies neither.
+
+**That second reason is stronger than the one §64 gave.** §64 said debt gates nothing on the CLI
+"because `shouldRehydrate` needs 75 and the elision term alone caps at 35". That explains the
+*default* threshold — but `--max-debt` is precisely the flag that lowers it, so the default is not
+what makes the flag inert. §64 was right about the outcome by an argument that does not carry.
+
+Documented rather than made live, because the machinery is real and reachable through the
+exported `optimize()`; only the CLI supplies neither input. Both dials are live for an embedder
+passing a `tokenHasher` and/or `confidenceLedger`, and `--minimum-confidence` is live on the
+Gateway, which builds a ledger per request.
+
+`test/unit/cli/inert-dials.test.ts` pins it in the shape of `validator-guarantee.test.ts`: a
+characterization test that passes against the tree that prompted it, and fails if either dial
+becomes live, so the README section has to be rewritten in the same commit rather than outliving
+the behaviour it describes.
+
+**Its control needed a second attempt, and the failure is worth keeping.** The first version used
+`--max-drift 0` against `--max-drift 1` to prove the harness could observe *any* flag. They emit
+identical bytes — drift on the fixture is already 0.0000, and the gate asks whether drift exceeds
+the threshold rather than reaches it. That is CLAUDE.md's note that 86% of elided Python function
+bodies contribute no symbols, arriving as a control that does not control. A budget flag replaced
+it: with none, the planner returns `pass_through` and reduction is guaranteed 0%.
+
+### What this does not establish
+
+The corpus was not run for any of the four. It cannot see them — bench, the flag-parse loop, and
+every Gateway path are all off the optimize route — so a byte-identical result would have been
+vacuous rather than reassuring. This is the §56 caution in its other direction: byte-identical is
+not evidence when the corpus does not contain the shape.
+
+M8 and M9 are both verified against real sockets rather than `mockUpstream`, because both live in
+header handling that a short-circuited upstream never exercises.

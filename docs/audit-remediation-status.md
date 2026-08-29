@@ -3,7 +3,8 @@
 Working state for the `max_audit.md` remediation. **Read this before picking up audit work**;
 it records what is done, what is measured, and what the next batch actually requires.
 
-Last updated 2026-08-30. **Shipped as v1.6.1:** a pruned-file warning (§7.8),
+Last updated 2026-08-30. **Unreleased on `main` since v1.6.1:** the last four `oxaudit.md`
+findings — M15, M8, M9 (with L13) and M13 — DECISIONS §70, §1 below. **Shipped as v1.6.1:** a pruned-file warning (§7.8),
 `--keep-docstrings` (DECISIONS §58, §7.9) — both found by dogfooding, not the audit — **widening
 elision to Go, all three steps** (DECISIONS §59, §60 and §61, §7.3, §9), and the `oxaudit.md`
 remediation itself: §62 (two withdrawn dials), §63 and §69 (the float pool and the OX LOW table),
@@ -60,10 +61,10 @@ and the reasoning.
 
 | Lane | Scope | State |
 |---|---|---|
-| **A** | `src/cli/**`, `src/config/**`, `src/core/engine/`, `planner/`, `topology/`, `src/bench/runner.ts`, `src/gateway/exec.ts`, repo hygiene | partially closed — see below |
-| **B** | `src/gateway/{proxy,server,session-store,types}.ts`, `stages/cleanup/session-dedup.ts`, `stages/compression/token-hashing.ts`, `adapters/mcp/server.ts`, `bench/fixtures/loader.ts` | **H2, H4, M1, M5 closed**; lows dispositioned (§69); open: **M8, M9 — both need a decision** |
+| **A** | `src/cli/**`, `src/config/**`, `src/core/engine/`, `planner/`, `topology/`, `src/bench/runner.ts`, `src/gateway/exec.ts`, repo hygiene | ✅ **closed** — the last two, M15 and M13, in §70 |
+| **B** | `src/gateway/{proxy,server,session-store,types}.ts`, `stages/cleanup/session-dedup.ts`, `stages/compression/token-hashing.ts`, `adapters/mcp/server.ts`, `bench/fixtures/loader.ts` | ✅ **closed** — H2, H4, M1, M5, lows (§69), and **M8, M9 + L13 decided and implemented (§70)** |
 
-**Closed (Lane A):** H1, H3, **H5**, M2, M3, M4, **M6**, **M7**, M10, M11, M12, M14, M16.
+**Closed (Lane A):** H1, H3, **H5**, M2, M3, M4, **M6**, **M7**, M10, M11, M12, **M13**, M14, **M15**, M16.
 
 **H5 was decided as *withdraw*** — DECISIONS §62. `--trace-output`, `TOKENDAMPER_TRACE_OUTPUT` and
 the `explain` value of `--mode` / `TOKENDAMPER_APP_MODE` are gone from every input surface; the
@@ -121,24 +122,35 @@ pool (§63) and L4 was recorded when the ingestion work landed. Every row is dis
 the ones not fixed — which is the half that went missing when `max_audit.md`'s LOW table was
 declared closed (§55).
 
-**Open, and all three are decisions rather than work:**
+**`oxaudit.md` is closed in full — every finding, verified against source 2026-08-30.** The
+last four are DECISIONS §70: three were decisions rather than work, and one was a paragraph.
 
-- **M15 (Lane A)** — should plain `tokendamper bench` shell out to `python` to evaluate fixture
-  code? It defaults on, which sits badly with the "offline, deterministic" claim, and the escape
-  hatch is an undocumented env var. Observed twice during this work: three bench tests flake under
-  parallel load and pass in isolation.
-- **M8 (Lane B)** — a non-loopback bind with no token is an unauthenticated relay. Refuse to start,
-  warn loudly, or auto-generate and print a token? They differ in whether an existing working config
-  breaks.
-- **M9 (Lane B)** — how much CORS/Origin policy does a localhost tool want? Requiring the token
-  header even on loopback cleanly splits browsers from local clients, but changes the local client
-  contract. **L13 is folded into this** — whether `/health` should require a token is the same
-  question.
+- **M15 (Lane A) — decided *default off*.** Plain `tokendamper bench` no longer executes fixture
+  code through `python`; `--evaluate-quality` asks for it, and the two regression suites that
+  assert on execution results now request it by name. Verified on the built artifact: plain
+  `bench` writes **0** `python-subprocess` evaluations, `--evaluate-quality` writes **5**.
+- **M8 (Lane B) — decided *refuse to start*.** A non-loopback bind with no `gatewayToken` is a
+  startup error naming the exposure, with `allowUnauthenticatedNonLoopback` as the explicit
+  opt-in. Loopback trust (C3) and the constant-time compare are untouched and asserted. `exec` is
+  unaffected — it binds loopback *and* generates a token.
+- **M9 (Lane B) — decided *Origin/Host validation*.** A foreign `Origin` is refused on every
+  bind; a foreign `Host` is refused on a loopback bind, where DNS rebinding is the threat.
+  **L13 folded in**: `/health` returns `{"status":"ok"}` and no longer reports `sessionCount`.
+  Two corrections went with it — the audit's proposed OPTIONS/CORS handler was measured
+  unnecessary (OPTIONS already answers `405` with no CORS headers, and the threat is a *simple*
+  request that skips preflight), and the recorded decision's claim that non-browser clients "send
+  neither header" is false of `Host`, which every HTTP/1.1 client sends.
+- **M13 (Lane A) — documented, not fixed.** `--minimum-confidence` gates ledger confidence only
+  (validation confidence is binary 0/1) and `--max-debt` cannot trip on a CLI run either, because
+  `attemptAutomatedRehydration` returns immediately without a hasher or ledger and the CLI
+  supplies neither. That reason is stronger than §64's — §64 explained the *default* threshold,
+  and `--max-debt` is the flag that lowers it. `test/unit/cli/inert-dials.test.ts` pins both as a
+  characterization test.
 
-**M13 (Lane A) is the only remaining non-decision item**: document precisely that
-`--minimum-confidence` gates ledger confidence only. Worth pairing with the §64 finding that
-`--max-debt` cannot trip on a CLI run either — the two are one honest paragraph about dials that
-look live and are not.
+**The corpus was not run for any of the four, deliberately.** Bench, the flag-parse loop and every
+Gateway path are off the optimize route, so a byte-identical result would have been vacuous. This
+is §56's caution in the other direction: byte-identical is not evidence when the corpus cannot
+contain the shape.
 
 **Recorded rather than fixed:** **L4** (a symlink is skipped inside a directory walk but followed
 when named directly). The fix is small, but creating a symlink on the machine it was written on
