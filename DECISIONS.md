@@ -4642,3 +4642,91 @@ determinism is invariant 1. Documented at `normalizeGitPath` and the scorer's ca
 `npm run typecheck`, `npm run lint` and `npm test` clean; the suite pins each disposition
 (`model.test.ts` for L2, `content-classification.test.ts` for L11, `declared-language.test.ts`
 for L3). L5 changes no code path, so no corpus run applies; nothing here touches engine output.
+
+---
+
+## 64. The Debt Score Was a Constant, and the Corpus Could Not See the Other Half
+
+**Audit OX-M6 and OX-M7**, both in `computeDebtBreakdown` / `attemptAutomatedRehydration`
+(`src/core/engine/index.ts`). Measured over a corpus frozen at `8b447ce`, 289 files, 578 rows
+(both CLI routes), target ratio 0.3.
+
+### M7: `debtScore` reported 35.00 on every file that reduced
+
+`computeDebtBreakdown` added `metadata.originalBytes` to `elidedBytes` for any item carrying
+`elided: true`. `originalBytes` is the item's **entire** pre-transform length — every stage that
+sets it does so from `item.content.length` — and `elided` is a boolean on the whole item. So an
+item that lost 5% of its bytes contributed 100% of its size to the numerator.
+
+On the CLI a single file is a single-item bundle, which makes `elidedBytes === totalBytes` whenever
+anything was elided at all. The ratio was 1.0 by construction.
+
+**Measured, baseline arm:** of 578 rows, 317 carried any debt at all, and **317 of 317 scored
+`debtScore` exactly 35.00** — the `weightElisionRatio * 100` ceiling — whether the file lost 4.7%
+or 66.8% of its bytes. `Math.min(1.0, …)` in `calculateDebt` was clamping a ratio with no business
+exceeding 1, which is why nothing ever looked wrong. The number was a constant wearing the name of
+a measurement, and `--max-debt` was a dial against a value that never moved.
+
+The fix counts bytes actually removed, `originalBytes - content.length`.
+
+**Measured, candidate arm:** 0 of 317 pinned at the ceiling; the distribution runs 1.31 → 34.99
+with a median of 33.08. Over the 101 rows that reduce, the implied ratio (`debtScore / 35`) against
+the measured byte cut has **correlation 1.0000** — 0.047 against 0.047, 0.198 against 0.198, 0.429
+against 0.429. It is now the quantity it claims to be.
+
+**Output did not move.** Per-row over 578 rows the only field that changed is `debtScore`;
+`outputSha`, `byteIdentical`, `tokenBefore`, `tokenAfter`, `reduction`, `fallbackUsed`,
+`driftScore`, `planMode` and `stageCount` are identical. Debt gates nothing on the CLI, because
+`shouldRehydrate` needs 75 and the elision term alone caps at 35.
+
+**The audit's stated mechanism was wrong and the finding was right.** It described a denominator
+mixing pre- and post-transform sizes. That does not happen: every stage setting `elided` also sets
+`originalBytes`, and untouched items are unchanged, so `totalBytes` was already a clean sum of
+original sizes. The numerator was the defect, and it was worse than "skewed" — it was saturated.
+
+### M6: an empty candidate set meant "restore everything"
+
+`attemptAutomatedRehydration` guarded with `candidates && candidates.size > 0 &&
+!candidates.has(item.id)`. The `size > 0` clause exists for the *missing* ledger case, where no
+statement has been made about which items matter. It also swallowed the case where a ledger exists
+and reports **zero** items below the confidence threshold, turning "nothing needs restoring" into
+"restore every elision in the bundle".
+
+**Reachability, checked rather than assumed.** None of the three bundled entry points reaches it:
+the CLI passes neither hasher nor ledger and returns at the first guard; MCP and `bench` pass a
+hasher but no ledger, so `candidates` is `null` and the intended fall-through applies; the Gateway
+passes a ledger but no hasher and plans only `cleanup:session-dedup`, so nothing it elides could be
+rehydrated. It **is** reachable through the public API — `optimize` is exported, and an embedder
+supplying both a `tokenHasher` and a `confidenceLedger` lands on it.
+
+Reproduced there: a 1,481-byte item came back at exactly 1,481 bytes, every elision undone, with
+`debtScore` then recomputed to 0 on the restored bundle so the trace reported no debt either.
+
+**The corpus is silent on this, and silence is not agreement.** The `m7 -> m6m7` arm differs on
+**0 of 578 rows**, which is exactly what the structure predicts and is *not* evidence the fix is
+correct — the corpus runs CLI routes, which supply no ledger, so the instrument cannot see the
+shape at all. This is §56's lesson with the sign reversed: byte-identical is not inert, and here it
+is not even informative.
+
+**The test had to be rebuilt twice.** The first version passed against the unfixed code, because
+the default `maxDebtThreshold` of 75 is unreachable on turn 1 — confidence penalty 0, turn age 0,
+elision term capped at 35 — so the branch it claimed to exercise never ran. The committed version
+carries two controls: one proving the setup elides at all, and one proving the branch *is* entered
+under `maxDebtThreshold: 1` via the no-ledger path, where a full restore is the intended behaviour
+rather than the bug.
+
+### What this does not establish
+
+- **Nothing about the Gateway.** Both findings are engine-level; the Gateway supplies a ledger but
+  no hasher, and its plan cannot produce a rehydratable elision. Neither fix changes Gateway
+  behaviour, and neither was measured there.
+- **Nothing about multi-item CLI bundles.** The harness runs one file per invocation. M7's
+  correction is larger on multi-item bundles — a partially-elided item over-contributes there too —
+  but that is reasoned, not measured.
+- **No absolute figure here is comparable to §2.** This corpus is 289 files at `8b447ce`; the
+  recipe expected 62 TypeScript and 17 prose files and selected 63 and 18, because the repository
+  has grown since the recipe was written. Only the per-row A/B over this one frozen corpus means
+  anything, which is the standing rule.
+- **`--max-debt` still gates nothing on the CLI.** Debt is now a real number, but the default
+  threshold of 75 remains unreachable without a ledger, so no CLI run can trip it. Whether the
+  threshold or the weights should change is a separate question and was not touched.

@@ -56,7 +56,7 @@ and the reasoning.
 | **A** | `src/cli/**`, `src/config/**`, `src/core/engine/`, `planner/`, `topology/`, `src/bench/runner.ts`, `src/gateway/exec.ts`, repo hygiene | partially closed — see below |
 | **B** | `src/gateway/{proxy,server,session-store,types}.ts`, `stages/cleanup/session-dedup.ts`, `stages/compression/token-hashing.ts`, `adapters/mcp/server.ts`, `bench/fixtures/loader.ts` | **entirely open** (H2, H4, M1, M5, M8, M9, L6, L7, L9, L10, L13) |
 
-**Closed (Lane A):** H1, H3, **H5**, M2, M3, M4, M10, M11, M12, M14, M16.
+**Closed (Lane A):** H1, H3, **H5**, M2, M3, M4, **M6**, **M7**, M10, M11, M12, M14, M16.
 
 **H5 was decided as *withdraw*** — DECISIONS §62. `--trace-output`, `TOKENDAMPER_TRACE_OUTPUT` and
 the `explain` value of `--mode` / `TOKENDAMPER_APP_MODE` are gone from every input surface; the
@@ -65,10 +65,18 @@ untouched — it rewrites the command, which is a live effect. Note the flag's o
 repo, `tools/corpus-harness/measure.js`, was passing `--trace-output stderr` while reading stderr
 correctly all along; it was updated in the same change and re-verified.
 
+**M6 and M7 are closed — DECISIONS §64, and the measurement is the point of the entry.** M7 was
+larger than the audit stated: `debtScore` read exactly **35.00 on 317 of the 317 rows that carried
+any debt**, the clamp ceiling, regardless of whether a file lost 4.7% or 66.8%. It was a constant
+wearing the name of a measurement. After the fix, 0 of 317 sit at the ceiling and the implied ratio
+tracks the measured byte cut with correlation **1.0000**, with all 578 rows byte-identical. M6 is
+reachable only through the exported `optimize` API, not through any of the three bundled entry
+points, so its corpus arm differs on **0 of 578 rows** — which is a fact about the instrument, not
+evidence of correctness.
+
 **Open (Lane A):** **M15 is awaiting a decision, not implementation** — whether plain `bench`
-should shell out to `python` by default. M6 and M7 change engine output and need the
-freeze → pin → vary-only-`dist/` loop (§4), not just tests. M13 and nine lows
-(L1, L2, L3, L5, L8, L11, L12, L17–L19) are unstarted.
+should shell out to `python` by default. M13 and seven lows (L1, L8, L12, L17–L19, plus L4 recorded
+below) are unstarted; L2, L3, L5 and L11 were taken from the float pool in §63.
 
 **Recorded rather than fixed:** **L4** (a symlink is skipped inside a directory walk but followed
 when named directly). The fix is small, but creating a symlink on the machine it was written on
