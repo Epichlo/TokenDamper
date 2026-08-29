@@ -3,16 +3,23 @@
 Working state for the `max_audit.md` remediation. **Read this before picking up audit work**;
 it records what is done, what is measured, and what the next batch actually requires.
 
-Last updated 2026-08-23. **Unreleased on `main` since v1.6.0:** a pruned-file warning (§7.8),
-`--keep-docstrings` (DECISIONS §58, §7.9) — both found by dogfooding, not the audit — and **widening elision
-to Go, all three steps** (DECISIONS §59, §60 and §61, §7.3, §9). **Go reduces** — application Go
-27.46% and stdlib 19.42% at target 0.3, against this repo's TypeScript at 21.22%. The main
-287-file corpus is 574/574 byte-identical, because every Go path is gated on the language. **Shipped as
-v1.6.0** — §54 (M7), §55 (the LOW table), §56 (the measured precondition for widening elision, §9)
-and §57 (the block-hash false positive), on top of **v1.5.0** (§52, the constraint gate stops
-firing on narrative comments), v1.4.0 (§50) and v1.3.0 (§48, §49). Suite: **737 passing**,
-typecheck, lint and build clean. `npm run format` no longer exists; `lint` is the enforced style
-gate.
+Last updated 2026-08-30. **Shipped as v1.6.1:** a pruned-file warning (§7.8),
+`--keep-docstrings` (DECISIONS §58, §7.9) — both found by dogfooding, not the audit — **widening
+elision to Go, all three steps** (DECISIONS §59, §60 and §61, §7.3, §9), and the `oxaudit.md`
+remediation itself: §62 (two withdrawn dials), §63 and §69 (the float pool and the OX LOW table),
+§64 (`debtScore` becomes a measurement) and §65–§68 (four Gateway defects that reached provider
+traffic). **Go reduces** — application Go 27.46% and stdlib 19.42% at target 0.3, against this
+repo's TypeScript at 21.22%. The main 287-file corpus is 574/574 byte-identical, because every Go
+path is gated on the language. On top of **v1.6.0** — §54 (M7), §55 (the LOW table), §56 (the
+measured precondition for widening elision, §9) and §57 (the block-hash false positive), itself on
+**v1.5.0** (§52, the constraint gate stops firing on narrative comments), v1.4.0 (§50) and v1.3.0
+(§48, §49). Suite: **826 passing across 91 files**, typecheck, lint and build clean.
+`npm run format` no longer exists; `lint` is the enforced style gate.
+
+**v1.6.1 is numbered a patch even though output moved.** Go elision and §64 both change what the
+same command emits for the same input, which is normally this project's threshold for a minor
+(§53). The number was an explicit call at ship time; the rule is unchanged for the next release.
+Do not read the patch digit as evidence that nothing moved.
 
 **`max_audit.md` is closed in full — every severity band, verified against source 2026-08-15.**
 §54 and §55 are what closed it, and both were items this document had already declared done. Read

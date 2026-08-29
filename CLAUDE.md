@@ -207,14 +207,25 @@ with **zero** new fallbacks and **zero** files that stopped reducing; 522 rows a
 because subdivision is confined to the ceiling path. Current measured baseline: python file
 **17.95%**, typescript file **18.52%** — status doc §2, not the figures a prior session may quote.
 
-**Unreleased on `main` since v1.6.0** — two improvements found by dogfooding, not the audit: a CLI
-warning when the knapsack drops whole files to meet the budget (they were vanishing from stdout
-with no marker), and `--keep-docstrings` (DECISIONS §58), an opt-in flag that keeps a Python
-function's docstring when its body is elided. The default path stays 576/576 byte-identical; §58
-measured the trade at 14.2%–21.1% of the saving. Not yet released — decide a version at ship time
-(§53).
+**v1.6.1 shipped 2026-08-30** — the release that closes `oxaudit.md`'s Lane A and all of Lane B
+but two held decisions. **§62 withdraws `--trace-output` and the `explain` value of `--mode`**
+(nominally breaking; neither was ever read, and a config file still carrying `traceOutput` keeps
+loading), **§61 makes Go the fourth language that elides**, **§64 turns `debtScore` from a constant
+pinned at its 35.00 clamp into a measurement tracking the byte cut at correlation 1.0000**, and
+four Gateway defects that reached provider traffic are fixed (§65 one `content: null` turn no
+longer zeroes a request's saving, §66 streaming responses are no longer truncated at 30 s, §67
+within-payload dedup works on turn 1, §68 pricing a region no longer registers it). It also
+carries the two dogfooding improvements: a CLI warning when the knapsack drops whole files to meet
+the budget (they were vanishing from stdout with no marker), and `--keep-docstrings` (DECISIONS
+§58), an opt-in flag keeping a Python function's docstring when its body is elided — the default
+path stays 576/576 byte-identical and §58 measured the trade at 14.2%–21.1% of the saving.
 
-**Also unreleased: widening elision to Go, all three steps (DECISIONS §59, §60, §61).**
+**The number is a patch, but the output moved — do not infer otherwise from it.** Go elision and
+§64 both change what the same command emits for the same input, which is this project's usual
+threshold for a minor (§53, and the `release` skill). It was numbered 1.6.1 by explicit decision
+at ship time; the rule itself is unchanged for the next one.
+
+**Also in v1.6.1: elision widened to Go, all three steps (DECISIONS §59, §60, §61).**
 **Go reduces: 27.46% on application Go and 19.42% on the stdlib at target 0.3, against this
 repo's TypeScript at 21.22%.** The main 287-file corpus is 574/574 byte-identical, because every Go
 path is gated on the language.

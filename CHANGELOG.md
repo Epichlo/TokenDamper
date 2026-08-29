@@ -9,7 +9,56 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > rewriting it would falsify that. See `docs/retired-documents.md` for where each conclusion
 > lives now and how to read the original out of git.
 
-## [Unreleased]
+## [v1.6.1] - 2026-08-30
+
+**Four languages reduce instead of three, and four Gateway defects that reached provider
+traffic are fixed.** This release closes Lane A of `oxaudit.md` and all of Lane B except two
+items held open for a decision — a second, independent audit against `79aedef`, unrelated to
+`max_audit.md`’s wave structure.
+
+**The one thing that can break a script:** `--trace-output` is now `Unknown argument`, and
+`explain` is rejected rather than ignored from `--mode`, `TOKENDAMPER_APP_MODE` and the config
+file. Nothing that took effect stops taking effect — neither dial was ever read — but a wrapper
+passing `--trace-output stderr` will now exit non-zero. A config file still carrying a
+`traceOutput` key keeps loading, and the trace itself has not moved: stderr, as always.
+
+**Numbered as a patch.** Two changes here do alter what the same command emits for the same
+input — Go now elides, and `debtScore` reports a measurement rather than a constant pinned at
+its clamp — so pin exactly if your tooling depends on byte-stable output or parses `debtScore`
+out of the trace.
+
+### Removed
+- **`--trace-output` / `TOKENDAMPER_TRACE_OUTPUT`, and the `explain` value of `--mode` /
+  `TOKENDAMPER_APP_MODE` (audit OX-H5, DECISIONS §62).** Both were parsed, validated against an
+  enum, threaded through the file → env → CLI precedence chain, frozen onto `ResolvedConfig` — and
+  read by nothing. `traceOutput` appears at ten sites in `src/`; every one is a write or a type
+  declaration. The trace is emitted by a literal `io.stderr.write(...)`, so `--trace-output stdout`
+  reported success and changed nothing, and a caller redirecting it to capture a trace in a pipe
+  concluded the tool had ignored them. It had. Nothing branched on `explain` at all.
+
+  This is the defect audit H4 already removed three flags for; these two survived that sweep only
+  because they sit on `ResolvedConfig` rather than `OptimizationBudget`. Withdrawn on H4's terms:
+  **the surfaces go, the model fields stay**, documented as unconsumed, because `ARCHITECTURE.md`
+  pins the model as frozen and a field awaiting an implementation is not the same defect as a dial
+  that reports success.
+
+  Implementing `--trace-output` would have been two lines. The evidence against it is that the only
+  caller in this repository which passed it — `tools/corpus-harness/measure.js`, with
+  `--trace-output stderr` — has been reading stderr correctly the whole time *while passing a flag
+  that did nothing*. The sole user asked for the default.
+
+  **`--mode` is narrowed by value, not removed.** `--mode bench` rewrites the command, which is a
+  live effect; it lives in the parser rather than in anything that reads `appMode`, and that
+  distinction is why the flag survives.
+
+  What changes for existing setups: `--trace-output` is now `Unknown argument`, and `explain` is
+  rejected rather than ignored from all three surfaces — the rule 1.6.0 set for the
+  `TOKENDAMPER_*` enums. Nothing that took effect stops taking effect, because none of it ever did.
+  A config file still carrying a `traceOutput` key keeps loading: the key is no longer validated or
+  read, and withdrawing a knob must not turn a file that loaded yesterday into a hard error.
+  `tools/corpus-harness/measure.js` was updated in the same change, since leaving it would have
+  turned the measurement harness into a parse error. **The trace itself has not moved** — stderr,
+  as always.
 
 ### Added
 - **The CLI says when whole files were dropped to meet the budget.** `pruning:topology-pruner`
@@ -93,6 +142,149 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   largest remaining gain on Go is in that gate, not in the scanner.
 
 ### Fixed
+- **A comment claimed `--target-reduction-ratio` is "nearly as inert — the planner reads it only as
+  `> 0`".** False since DECISIONS §48 resolved the ratio into an absolute token ceiling that both
+  `pruning:topology-pruner` and `compression:token-hashing` respect, with §50 narrowing the
+  adherence gap further via sub-region elision. The README's environment-variable table carried the
+  same stale claim. Comments record decisions in this codebase; one recording a *superseded*
+  decision argues for undoing the fix.
+
+- **`minimumConfidence` is validated as the probability it is (audit OX-M10).** It reached
+  `TokenDamperConfig` through a bare finite-number check, so `TOKENDAMPER_MINIMUM_CONFIDENCE=1.5`
+  forced a fallback on **every** run — full output, 0% reduction, permanently, with no diagnostic
+  naming the cause, because no confidence the pipeline computes can reach 1.5. Negative values were
+  simply meaningless. Out-of-range and unparseable values are now rejected in the message style
+  v1.6.0 gave the `TOKENDAMPER_*` enums.
+
+  The audit named only the environment variable. The CLI flag carried the identical
+  `Number.isFinite`-and-nothing-else check and the config file was type-checked as `number`, so
+  **all three doors** are validated — enumerate the doors, not the one that got reported.
+
+- **`ARCHITECTURE.md`'s pipeline diagram described a pipeline that does not exist (audit OX-M11).**
+  It listed execution as "Session Deduplication (TokenHasher) → Delta Compression (Myers Diff) →
+  Workspace Topology Pruning". Every clause was wrong: that is not the knapsack order,
+  `cleanup:constraint-preservation` was missing from the front of it, `cleanup:session-dedup` is
+  not in that plan at all, and it uses the session store rather than `TokenHasher`. The file
+  declares itself the canonical frozen reference, so contributors and agents were validating new
+  stages against a fiction.
+
+  It now documents all three real plan shapes — `topology_knapsack`, `session_dedup` and
+  `pass_through` (which runs zero stages, the case users repeatedly mistake for a bug).
+  `test/unit/architecture-doc-accuracy.test.ts` checks the documented stage lists against the
+  planner that emits them, so the lists are derived rather than hand-maintained; all four of its
+  cases fail against the previous text.
+
+- **`bench/runner.ts` no longer documents a default that was deliberately removed (audit OX-M12).**
+  The comment said `token-hashing` "falls back to `new TokenHasher()` internally when none is
+  supplied". It did once; that default was removed because a store constructed inside the stage is
+  garbage-collected when the stage returns, leaving markers referring to content held by nothing.
+  A comment asserting removed behavior is an invitation to "simplify" the runner back into relying
+  on it and silently recreate the defect.
+
+- **A directory walk no longer descends into agent worktrees, and orders the same on every OS
+  (audit OX-M4, OX-M16).** Both are selection defects, and selection is load-bearing: the
+  cache-aware prefix lock pins the first ~1,024 tokens and pinned items bypass the knapsack
+  entirely, so which files appear — and in what order — decides which survive (invariants 6, 7).
+
+  - `SKIP_DIRECTORIES` enumerated `.git`, `.next` and `.venv` by name, so `.claude` was missing —
+    and `.claude/worktrees/<name>/` holds entire duplicate checkouts. Observed: `tokendamper
+    optimize .` ingested this repository's own source twice, once from `src/` and once from a
+    stale worktree. Skipping is now by *shape* — any dot-directory — because enumerating names
+    never kept up: `.agents`, `.cursor`, `.idea`, `.cache` each arrive as a silent duplicate
+    rather than an error. Explicitly naming a file inside one still takes it; the rule governs
+    walking only.
+  - Paths were built with `path.join` (native separators) and then sorted as native strings, so
+    `\` (0x5C) was compared on Windows where `/` (0x2F) was compared elsewhere. Every sibling
+    whose name sorts between them — every digit and every capital letter — ordered differently
+    per platform: `src/a.ts` precedes `srcZ/a.ts` on POSIX because `/` < `Z`, and follows it on
+    Windows because `Z` < `\`. The same directory produced two different bundles. Sorting now
+    runs on separator-normalized keys; the emitted paths stay native, since they are what the
+    envelope prints and what the caller has to be able to open.
+
+  **OX-L4 (symlinks skipped in a walk, followed when named) is recorded at its site, not fixed.**
+  The fix is small, but it could not be exercised where it was written — creating a symlink needs
+  elevation or Developer Mode on Windows and returned `EPERM` — and shipping an unverified change
+  to the code that decides which files reach the pipeline is the trade this project keeps
+  declining. Skipping is the safe direction: a file is omitted, never corrupted.
+
+- **The multi-file route stops accepting flags it then drops (audit OX-M2, OX-M3, OX-M14).**
+  `SUPPORTED_FLAGS` exists so an inapplicable flag is a parse error naming where it *does* apply
+  (DECISIONS §30). These got past it by being genuinely valid on `optimize` — just not on the
+  branch a directory or a second path takes.
+
+  - `--diff` is now rendered on a multi-file run. It was honored on the single-file path and
+    silently ignored here, so asking for a terminal diff over a directory produced nothing.
+    `renderTerminalDiff` already accepts a whole `ContextBundle`, so there was no missing capability
+    — only a missing call.
+  - `--language` is now **refused** when a directory or more than one path is ingested, rather than
+    stamped onto every file. It exists for input with no filename to classify by; a walk has one
+    filename per file, so a blanket declaration can only overwrite a correct answer with a single
+    wrong one, and declaration outranks extension by design. The harm is bigger than a mislabel:
+    measured on a three-file tree, `--language python` moved `languageSupport` from "1 unsupported
+    (json)" to **"3 supported, 0 unsupported"**, left `astCoverage` reading `unchecked: 0` because
+    the Python validator genuinely did look at the JSON, and **fell the whole run back** — a
+    coverage report that lies with a guaranteed 0% behind it. Single-file and stdin are unchanged.
+  - The dropped-files warning no longer advises in both directions at once. It read *"Raise
+    `--target-reduction-ratio`'s budget (a lower ratio prunes less)"* — the verb and the
+    parenthesis disagreed, and a reader following the verb did the opposite of what was meant.
+
+  **`--input-name` was reported alongside these and is not a defect.** `parseArguments` already
+  throws `--input-name applies to stdin input only` for any non-`-` input path, so it never silently
+  no-oped on a directory. Verified rather than assumed, and pinned so it stays that way.
+
+- **`tokendamper exec` exits with the code its child exited with (audit OX-H1).** `runExecCommand`
+  always resolved the real code. `runCli` threw it away: the `exec` branch fired the promise,
+  attached a `.catch`, and returned a synchronous `0` that had already been assigned to
+  `process.exitCode` before the child finished. The process stayed alive only because the spawned
+  child holds the inherited stdio, so the code did arrive — into nothing. `tokendamper exec --
+  aider … && next-step` therefore ran `next-step` after a failed tool, and any CI step wrapping a
+  build in `exec` reported green regardless. Invariant 10 at the process boundary.
+
+  `runCli` now returns `number | Promise<number>` — a union rather than a blanket `async`, because
+  `optimize`, `bench` and `mcp` have their code immediately and every existing caller reads the
+  result directly. `await` handles both.
+
+  **The larger half of this fix was not in `exec` at all.** `package.json`'s `bin` points at
+  `dist/src/cli/main.js`, so the shipped command runs the `require.main === module` block at the
+  foot of the file — not the exported `main()` that tests and the wrapper call. The two had drifted
+  into separate copies of the same assignment, and the copy at the foot carried a
+  `typeof exitCode === 'number'` guard that was harmless dead code while `runCli` always returned a
+  number. The moment `exec` returned a promise it became a silent drop: **the installed binary
+  would have gone on exiting 0 with the entire suite green behind it.** The block now delegates to
+  `main()`, and `test/integration/cli-exec-exit-code.test.ts` pins the delegation as well as the
+  codes, because the defect was duplication rather than any particular line.
+
+  Verified end to end on the built binary, not only through `runCli`: requested 0/3/42 give exit
+  0/3/42, an unresolvable command gives 1, and `optimize` still exits 0.
+
+- **`npm test` no longer collects suites belonging to other checkouts (audit OX-H3).** The
+  repository had no vitest config, so collection used vitest's default `include` and walked the
+  whole tree from the root. Agent worktrees live under `.claude/worktrees/<name>/` and each is a
+  *full* checkout, `test/` included — so every stale worktree silently contributed a second, older
+  copy of the entire suite. Measured: the canonical suite is **78 files / 723 tests**; the audit's
+  run in a tree holding one stale worktree reported **155 / 1410**, almost exactly double, with the
+  extra half two commits behind `main`.
+
+  The cost is not wall-clock. A stale copy passes against its own frozen source, so a green run
+  says nothing about the tree being edited — invariant 10 (a check that never looked reads exactly
+  like a check that passed) arriving through the test runner itself. CI was never affected, because
+  a fresh checkout has no `.claude/`, so "the suite" meant two different things locally and
+  remotely.
+
+  `vitest.config.ts` now anchors `include` to `test/**/*.test.ts` and restates `node_modules`,
+  `dist` and `.claude` in `exclude` — restated because specifying `exclude` *replaces* vitest's
+  default rather than extending it, and `dist` is not hypothetical: `tsc -p tsconfig.json` compiles
+  `test/` as well as `src/`, so any build leaves a second copy of every suite in `dist/test/`.
+  `globals: true` is set to make `tsconfig.json`'s existing `types: ["node", "vitest/globals"]`
+  declaration true rather than decorative — no test relies on it today, all 78 import from
+  `'vitest'` explicitly.
+
+  `test/unit/test-collection-scope.test.ts` pins it, and pins the half that an anchored `include`
+  puts at risk: that every suite in the repo really does live under `test/`, so the anchor is not
+  hiding one. The guard was mutation-checked rather than assumed — widening the include, dropping
+  `.claude` from exclude, deleting the config, and planting a suite outside `test/` each fail it.
+  `npm run lint` needed no equivalent guard; it is already path-scoped as `eslint src test`.
+
 - **The `oxaudit.md` LOW table, closed against its own list (DECISIONS §69).** Six fixed, five
   recorded at their sites with the reason, three already "no action" in the audit itself.
 
@@ -303,183 +495,7 @@ to the default now fails at startup. See the L1 entry below.
 Minor rather than major on this project's standing rule: nothing removed, but the same command
 over the same input emits different bytes. Minor rather than patch for the same reason.
 
-### Removed
-- **`--trace-output` / `TOKENDAMPER_TRACE_OUTPUT`, and the `explain` value of `--mode` /
-  `TOKENDAMPER_APP_MODE` (audit OX-H5, DECISIONS §62).** Both were parsed, validated against an
-  enum, threaded through the file → env → CLI precedence chain, frozen onto `ResolvedConfig` — and
-  read by nothing. `traceOutput` appears at ten sites in `src/`; every one is a write or a type
-  declaration. The trace is emitted by a literal `io.stderr.write(...)`, so `--trace-output stdout`
-  reported success and changed nothing, and a caller redirecting it to capture a trace in a pipe
-  concluded the tool had ignored them. It had. Nothing branched on `explain` at all.
-
-  This is the defect audit H4 already removed three flags for; these two survived that sweep only
-  because they sit on `ResolvedConfig` rather than `OptimizationBudget`. Withdrawn on H4's terms:
-  **the surfaces go, the model fields stay**, documented as unconsumed, because `ARCHITECTURE.md`
-  pins the model as frozen and a field awaiting an implementation is not the same defect as a dial
-  that reports success.
-
-  Implementing `--trace-output` would have been two lines. The evidence against it is that the only
-  caller in this repository which passed it — `tools/corpus-harness/measure.js`, with
-  `--trace-output stderr` — has been reading stderr correctly the whole time *while passing a flag
-  that did nothing*. The sole user asked for the default.
-
-  **`--mode` is narrowed by value, not removed.** `--mode bench` rewrites the command, which is a
-  live effect; it lives in the parser rather than in anything that reads `appMode`, and that
-  distinction is why the flag survives.
-
-  What changes for existing setups: `--trace-output` is now `Unknown argument`, and `explain` is
-  rejected rather than ignored from all three surfaces — the rule 1.6.0 set for the
-  `TOKENDAMPER_*` enums. Nothing that took effect stops taking effect, because none of it ever did.
-  A config file still carrying a `traceOutput` key keeps loading: the key is no longer validated or
-  read, and withdrawing a knob must not turn a file that loaded yesterday into a hard error.
-  `tools/corpus-harness/measure.js` was updated in the same change, since leaving it would have
-  turned the measurement harness into a parse error. **The trace itself has not moved** — stderr,
-  as always.
-
 ### Fixed
-- **A comment claimed `--target-reduction-ratio` is "nearly as inert — the planner reads it only as
-  `> 0`".** False since DECISIONS §48 resolved the ratio into an absolute token ceiling that both
-  `pruning:topology-pruner` and `compression:token-hashing` respect, with §50 narrowing the
-  adherence gap further via sub-region elision. The README's environment-variable table carried the
-  same stale claim. Comments record decisions in this codebase; one recording a *superseded*
-  decision argues for undoing the fix.
-
-- **`minimumConfidence` is validated as the probability it is (audit OX-M10).** It reached
-  `TokenDamperConfig` through a bare finite-number check, so `TOKENDAMPER_MINIMUM_CONFIDENCE=1.5`
-  forced a fallback on **every** run — full output, 0% reduction, permanently, with no diagnostic
-  naming the cause, because no confidence the pipeline computes can reach 1.5. Negative values were
-  simply meaningless. Out-of-range and unparseable values are now rejected in the message style
-  v1.6.0 gave the `TOKENDAMPER_*` enums.
-
-  The audit named only the environment variable. The CLI flag carried the identical
-  `Number.isFinite`-and-nothing-else check and the config file was type-checked as `number`, so
-  **all three doors** are validated — enumerate the doors, not the one that got reported.
-
-- **`ARCHITECTURE.md`'s pipeline diagram described a pipeline that does not exist (audit OX-M11).**
-  It listed execution as "Session Deduplication (TokenHasher) → Delta Compression (Myers Diff) →
-  Workspace Topology Pruning". Every clause was wrong: that is not the knapsack order,
-  `cleanup:constraint-preservation` was missing from the front of it, `cleanup:session-dedup` is
-  not in that plan at all, and it uses the session store rather than `TokenHasher`. The file
-  declares itself the canonical frozen reference, so contributors and agents were validating new
-  stages against a fiction.
-
-  It now documents all three real plan shapes — `topology_knapsack`, `session_dedup` and
-  `pass_through` (which runs zero stages, the case users repeatedly mistake for a bug).
-  `test/unit/architecture-doc-accuracy.test.ts` checks the documented stage lists against the
-  planner that emits them, so the lists are derived rather than hand-maintained; all four of its
-  cases fail against the previous text.
-
-- **`bench/runner.ts` no longer documents a default that was deliberately removed (audit OX-M12).**
-  The comment said `token-hashing` "falls back to `new TokenHasher()` internally when none is
-  supplied". It did once; that default was removed because a store constructed inside the stage is
-  garbage-collected when the stage returns, leaving markers referring to content held by nothing.
-  A comment asserting removed behavior is an invitation to "simplify" the runner back into relying
-  on it and silently recreate the defect.
-
-- **A directory walk no longer descends into agent worktrees, and orders the same on every OS
-  (audit OX-M4, OX-M16).** Both are selection defects, and selection is load-bearing: the
-  cache-aware prefix lock pins the first ~1,024 tokens and pinned items bypass the knapsack
-  entirely, so which files appear — and in what order — decides which survive (invariants 6, 7).
-
-  - `SKIP_DIRECTORIES` enumerated `.git`, `.next` and `.venv` by name, so `.claude` was missing —
-    and `.claude/worktrees/<name>/` holds entire duplicate checkouts. Observed: `tokendamper
-    optimize .` ingested this repository's own source twice, once from `src/` and once from a
-    stale worktree. Skipping is now by *shape* — any dot-directory — because enumerating names
-    never kept up: `.agents`, `.cursor`, `.idea`, `.cache` each arrive as a silent duplicate
-    rather than an error. Explicitly naming a file inside one still takes it; the rule governs
-    walking only.
-  - Paths were built with `path.join` (native separators) and then sorted as native strings, so
-    `\` (0x5C) was compared on Windows where `/` (0x2F) was compared elsewhere. Every sibling
-    whose name sorts between them — every digit and every capital letter — ordered differently
-    per platform: `src/a.ts` precedes `srcZ/a.ts` on POSIX because `/` < `Z`, and follows it on
-    Windows because `Z` < `\`. The same directory produced two different bundles. Sorting now
-    runs on separator-normalized keys; the emitted paths stay native, since they are what the
-    envelope prints and what the caller has to be able to open.
-
-  **OX-L4 (symlinks skipped in a walk, followed when named) is recorded at its site, not fixed.**
-  The fix is small, but it could not be exercised where it was written — creating a symlink needs
-  elevation or Developer Mode on Windows and returned `EPERM` — and shipping an unverified change
-  to the code that decides which files reach the pipeline is the trade this project keeps
-  declining. Skipping is the safe direction: a file is omitted, never corrupted.
-
-- **The multi-file route stops accepting flags it then drops (audit OX-M2, OX-M3, OX-M14).**
-  `SUPPORTED_FLAGS` exists so an inapplicable flag is a parse error naming where it *does* apply
-  (DECISIONS §30). These got past it by being genuinely valid on `optimize` — just not on the
-  branch a directory or a second path takes.
-
-  - `--diff` is now rendered on a multi-file run. It was honored on the single-file path and
-    silently ignored here, so asking for a terminal diff over a directory produced nothing.
-    `renderTerminalDiff` already accepts a whole `ContextBundle`, so there was no missing capability
-    — only a missing call.
-  - `--language` is now **refused** when a directory or more than one path is ingested, rather than
-    stamped onto every file. It exists for input with no filename to classify by; a walk has one
-    filename per file, so a blanket declaration can only overwrite a correct answer with a single
-    wrong one, and declaration outranks extension by design. The harm is bigger than a mislabel:
-    measured on a three-file tree, `--language python` moved `languageSupport` from "1 unsupported
-    (json)" to **"3 supported, 0 unsupported"**, left `astCoverage` reading `unchecked: 0` because
-    the Python validator genuinely did look at the JSON, and **fell the whole run back** — a
-    coverage report that lies with a guaranteed 0% behind it. Single-file and stdin are unchanged.
-  - The dropped-files warning no longer advises in both directions at once. It read *"Raise
-    `--target-reduction-ratio`'s budget (a lower ratio prunes less)"* — the verb and the
-    parenthesis disagreed, and a reader following the verb did the opposite of what was meant.
-
-  **`--input-name` was reported alongside these and is not a defect.** `parseArguments` already
-  throws `--input-name applies to stdin input only` for any non-`-` input path, so it never silently
-  no-oped on a directory. Verified rather than assumed, and pinned so it stays that way.
-
-- **`tokendamper exec` exits with the code its child exited with (audit OX-H1).** `runExecCommand`
-  always resolved the real code. `runCli` threw it away: the `exec` branch fired the promise,
-  attached a `.catch`, and returned a synchronous `0` that had already been assigned to
-  `process.exitCode` before the child finished. The process stayed alive only because the spawned
-  child holds the inherited stdio, so the code did arrive — into nothing. `tokendamper exec --
-  aider … && next-step` therefore ran `next-step` after a failed tool, and any CI step wrapping a
-  build in `exec` reported green regardless. Invariant 10 at the process boundary.
-
-  `runCli` now returns `number | Promise<number>` — a union rather than a blanket `async`, because
-  `optimize`, `bench` and `mcp` have their code immediately and every existing caller reads the
-  result directly. `await` handles both.
-
-  **The larger half of this fix was not in `exec` at all.** `package.json`'s `bin` points at
-  `dist/src/cli/main.js`, so the shipped command runs the `require.main === module` block at the
-  foot of the file — not the exported `main()` that tests and the wrapper call. The two had drifted
-  into separate copies of the same assignment, and the copy at the foot carried a
-  `typeof exitCode === 'number'` guard that was harmless dead code while `runCli` always returned a
-  number. The moment `exec` returned a promise it became a silent drop: **the installed binary
-  would have gone on exiting 0 with the entire suite green behind it.** The block now delegates to
-  `main()`, and `test/integration/cli-exec-exit-code.test.ts` pins the delegation as well as the
-  codes, because the defect was duplication rather than any particular line.
-
-  Verified end to end on the built binary, not only through `runCli`: requested 0/3/42 give exit
-  0/3/42, an unresolvable command gives 1, and `optimize` still exits 0.
-
-- **`npm test` no longer collects suites belonging to other checkouts (audit OX-H3).** The
-  repository had no vitest config, so collection used vitest's default `include` and walked the
-  whole tree from the root. Agent worktrees live under `.claude/worktrees/<name>/` and each is a
-  *full* checkout, `test/` included — so every stale worktree silently contributed a second, older
-  copy of the entire suite. Measured: the canonical suite is **78 files / 723 tests**; the audit's
-  run in a tree holding one stale worktree reported **155 / 1410**, almost exactly double, with the
-  extra half two commits behind `main`.
-
-  The cost is not wall-clock. A stale copy passes against its own frozen source, so a green run
-  says nothing about the tree being edited — invariant 10 (a check that never looked reads exactly
-  like a check that passed) arriving through the test runner itself. CI was never affected, because
-  a fresh checkout has no `.claude/`, so "the suite" meant two different things locally and
-  remotely.
-
-  `vitest.config.ts` now anchors `include` to `test/**/*.test.ts` and restates `node_modules`,
-  `dist` and `.claude` in `exclude` — restated because specifying `exclude` *replaces* vitest's
-  default rather than extending it, and `dist` is not hypothetical: `tsc -p tsconfig.json` compiles
-  `test/` as well as `src/`, so any build leaves a second copy of every suite in `dist/test/`.
-  `globals: true` is set to make `tsconfig.json`'s existing `types: ["node", "vitest/globals"]`
-  declaration true rather than decorative — no test relies on it today, all 78 import from
-  `'vitest'` explicitly.
-
-  `test/unit/test-collection-scope.test.ts` pins it, and pins the half that an anchored `include`
-  puts at risk: that every suite in the repo really does live under `test/`, so the anchor is not
-  hiding one. The guard was mutation-checked rather than assumed — widening the include, dropping
-  `.claude` from exclude, deleting the config, and planting a suite outside `test/` each fail it.
-  `npm run lint` needed no equivalent guard; it is already path-scoped as `eslint src test`.
-
 - **A file that documents the block-hash placeholder format is no longer mistaken for a corrupted
   one — DECISIONS §57.** `detectCorruptedPlaceholders` scanned for `<BLOCK_HASH:([^>]+)>`, matching
   any text up to the next `>`. This repository's own `src/core/elision/regions.ts` contains the
