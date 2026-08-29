@@ -93,6 +93,50 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   largest remaining gain on Go is in that gate, not in the scanner.
 
 ### Fixed
+- **`debtScore` reported 35.00 on every file that reduced, and now measures something (audit
+  OX-M7, DECISIONS §64).** `computeDebtBreakdown` added `metadata.originalBytes` to `elidedBytes`
+  for any item flagged `elided`. But `originalBytes` is the item's **entire** pre-transform length
+  and `elided` is a boolean on the whole item, so an item that lost 5% of its bytes contributed
+  100% of its size to the numerator. On the CLI a single file is a single-item bundle, which makes
+  `elidedBytes === totalBytes` whenever anything is elided at all — the ratio was 1.0 by
+  construction, and `Math.min(1.0, …)` in `calculateDebt` was quietly clamping a value with no
+  business exceeding 1.
+
+  Measured over a corpus frozen at `8b447ce` — 289 files, 578 rows, ratio 0.3 — **317 of the 317
+  rows carrying any debt scored exactly 35.00**, the `weightElisionRatio * 100` ceiling, whether
+  the file lost 4.7% or 66.8%. After the fix (bytes actually removed, `originalBytes -
+  content.length`): **0 of 317** at the ceiling, distribution 1.31 → 34.99, and over the 101
+  reducing rows the implied ratio tracks the measured byte cut with **correlation 1.0000**.
+
+  **No output moved.** Per-row across 578 rows the only field that changed is `debtScore` —
+  `outputSha`, `byteIdentical`, `tokenBefore`, `tokenAfter`, `reduction`, `fallbackUsed`,
+  `driftScore`, `planMode` and `stageCount` are identical. Debt gates nothing on the CLI, because
+  `shouldRehydrate` needs 75 and the elision term alone caps at 35 — so `--max-debt` still cannot
+  trip on a CLI run. It is now a real number, not yet a live gate.
+
+  The audit described this as a denominator mixing pre- and post-transform sizes. That is not what
+  happened — every stage setting `elided` also sets `originalBytes`, so the denominator was already
+  clean. The numerator was the defect, and it was saturated rather than skewed.
+
+- **An empty rehydration-candidate set no longer means "restore everything" (audit OX-M6,
+  DECISIONS §64).** `attemptAutomatedRehydration` guarded with `candidates && candidates.size > 0
+  && !candidates.has(item.id)`. The `size > 0` clause is there for the *missing* ledger case; it
+  also swallowed the case where a ledger exists and reports **zero** items below the confidence
+  threshold, turning "nothing needs restoring" into "restore every elision in the bundle".
+
+  None of the three bundled entry points reaches it — the CLI supplies neither hasher nor ledger,
+  MCP and `bench` supply a hasher but no ledger, and the Gateway supplies a ledger but no hasher
+  and plans only `cleanup:session-dedup`. It is reachable through the **public API**: `optimize` is
+  exported, and an embedder passing both a `tokenHasher` and a `confidenceLedger` lands on it.
+  Reproduced there, a 1,481-byte item came back at exactly 1,481 bytes with every elision undone,
+  and `debtScore` recomputed to 0 on the restored bundle so the trace reported no debt either.
+
+  The corpus arm for this change differs on **0 of 578 rows**, which is what the structure predicts
+  and is *not* evidence of correctness — the harness runs CLI routes, which supply no ledger, so it
+  cannot see the shape. The test carries two controls for the same reason: the first version passed
+  against the unfixed code, because the default `maxDebtThreshold` of 75 is unreachable on turn 1
+  and the branch it claimed to exercise never ran.
+
 - **Content hashing no longer collapses `undefined` onto `null`** (DECISIONS §63). The
   serialization fallback in `stableSerialize` turned an explicit `undefined` into `null`'s
   bytes, so two different values shared one hash. No live constructor reaches the branch —

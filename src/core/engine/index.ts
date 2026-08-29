@@ -483,9 +483,37 @@ function computeDebtBreakdown(
 
   for (const item of bundle.items) {
     const itemBytes = item.content.length;
-    totalBytes += typeof item.metadata.originalBytes === 'number' ? item.metadata.originalBytes : itemBytes;
+    const originalItemBytes =
+      typeof item.metadata.originalBytes === 'number' ? item.metadata.originalBytes : itemBytes;
+
+    totalBytes += originalItemBytes;
+
     if (item.metadata.elided) {
-      elidedBytes += typeof item.metadata.originalBytes === 'number' ? item.metadata.originalBytes : itemBytes;
+      // Bytes actually **removed**, not the whole size of an item that was touched at all —
+      // audit OX-M7.
+      //
+      // `originalBytes` is the item's entire pre-transform length (every stage that sets it does
+      // so from `item.content.length`), and `elided` is a boolean on the whole item. Adding the
+      // former on the strength of the latter made an item that lost 5% of its bytes contribute
+      // 100% of its size to the numerator. On the CLI a single file is a single-item bundle, so
+      // `elidedBytes === totalBytes` whenever anything was elided and the ratio was 1.0 by
+      // construction.
+      //
+      // Measured over a frozen 289-file corpus at ratio 0.3 before the fix: **all 101 rows that
+      // reduced scored `debtScore` exactly 35.00** — the `weightElisionRatio * 100` ceiling —
+      // whether the file lost 4.7% or 66.8%. `Math.min(1.0, …)` in `calculateDebt` was clamping a
+      // ratio that had no business exceeding 1, which is why nothing looked wrong.
+      //
+      // This is the granularity failure the project already diagnosed for drift, where `R_AST`
+      // was "a boolean" on single-item bundles (Issue 3 / Phase 1d). It outlives that one: it
+      // needs no single-item bundle, because any partially-elided item over-contributes on any
+      // bundle.
+      //
+      // Note the audit's stated mechanism — a denominator mixing pre- and post-transform sizes —
+      // is not what happened. Every stage setting `elided` also sets `originalBytes`, and
+      // untouched items are unchanged, so `totalBytes` was already a clean sum of original sizes.
+      // The numerator was the defect.
+      elidedBytes += Math.max(0, originalItemBytes - itemBytes);
     }
   }
 
@@ -526,8 +554,22 @@ function attemptAutomatedRehydration(
   const candidates = ledger ? new Set(ledger.getRehydrationCandidates(turn).map((c) => c.itemId)) : null;
 
   const newItems: ContextItem[] = bundle.items.map((item) => {
-    // If ledger specifies candidates, target those; otherwise rehydrate any elided placeholder item
-    if (candidates && candidates.size > 0 && !candidates.has(item.id)) {
+    // A ledger's answer is respected even when it is "none" — audit OX-M6.
+    //
+    // The guard used to read `candidates && candidates.size > 0 && !candidates.has(item.id)`. The
+    // `size > 0` clause exists for the *missing* ledger case, where there is no statement about
+    // which items matter and every elided placeholder stays eligible. But it also swallowed the
+    // case where a ledger exists and reports **zero** items below the confidence threshold, and
+    // turned "nothing needs restoring" into "restore everything in the bundle" — the exact
+    // opposite of what the ledger said, and a whole-bundle semantic cliff behind a small boolean.
+    //
+    // Measured: with a hasher, a ledger, and `maxDebtThreshold` low enough to enter this branch,
+    // a 1,481-byte item came back at exactly 1,481 bytes — every elision undone, and `debtScore`
+    // then recomputed to 0 on the restored bundle, so the trace reported no debt either.
+    //
+    // `candidates === null` is the no-ledger case and still falls through. An empty set is now a
+    // statement, not an absence.
+    if (candidates !== null && !candidates.has(item.id)) {
       return item;
     }
 
