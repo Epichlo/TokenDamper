@@ -4961,3 +4961,66 @@ third is §41 still holding.
   the code does. Whether real agent traffic repeats a block inside a single payload often enough to
   matter was not measured, and the honest framing stays the one in the README notice: use Gateway
   mode for interception, validation and metrics, not for compression.
+
+---
+
+## 68. Pricing a Region Registered It, So the Store Grew With Candidates Instead of Elisions
+
+**Audit OX-M5.** `trimRegionsToCeiling` renders a marker for **every** candidate span in order to
+price it — correctly, because the marker is variable-length and self-describing and a saving
+estimated without it would overstate every region. The renderer it was handed, `markerFor`, also
+called `hasher.registerBlock(...)`. So every span the ceiling considered and then discarded was
+written into the store anyway.
+
+### Measured
+
+A 12-region TypeScript file, run through the stage with a `TokenHasher`:
+
+| target ratio | blocks registered | markers actually emitted |
+|---|---|---|
+| 0.10 | **12** | 5 |
+| 0.05 | **12** | 3 |
+
+The store held one block per *candidate*, not per elision. Memory therefore grows with how much the
+scanner finds, not with how much is removed — and `hasHash` / `expandBlockHash` answer for
+placeholders that appear in no output anywhere.
+
+Invisible on the CLI, which supplies no hasher at all. It matters on **MCP**, where the server
+instance is long-lived and the hasher *is* the reversibility store.
+
+### The fix, and the constraint that governed it
+
+`priceMarker` renders the same bytes without registering; `trimRegionsToCeiling` takes it instead of
+`markerFor`, and registration now happens only on the two paths that actually elide.
+
+The binding constraint was that **pricing and emission must render identical bytes** — otherwise the
+ceiling is computed against a different string from the one written, and `--target-reduction-ratio`
+adherence shifts. That holds by construction rather than by care: `renderElisionMarker` is a pure
+function of the text, its noun and its hash, and `hashContent` is pure. Registration never
+contributed to the output.
+
+### Corpus A/B: 578 of 578 rows byte-identical
+
+Corpus frozen at `48ac6c8`, 289 files, 578 rows, both CLI routes, ratio 0.3. Comparison engines
+built with an src-only tsconfig; `dist` hashes `7a3bad0f515f` (baseline) and `83e544289dc4`
+(candidate), so neither arm was compared against itself.
+
+**Zero rows differ, on any of the ten compared fields** — `outputSha`, `byteIdentical`,
+`tokenBefore`, `tokenAfter`, `reduction`, `fallbackUsed`, `driftScore`, `debtScore`, `planMode`,
+`stageCount`. That is the constraint above, verified end to end.
+
+**And it is not a vacuous result: 101 of those rows actually reduced**, so markers were genuinely
+priced and emitted. The corpus contains the shape the change touches, which is the check §56 exists
+to demand.
+
+### What this does not establish
+
+- **The corpus cannot see the defect itself.** It runs CLI routes, and the CLI supplies no
+  `TokenHasher`, so `markerFor`'s registration branch was already a no-op there. The A/B proves
+  *output-neutrality* — the constraint — and nothing about the leak. The leak is measured by
+  `token-hashing-store-pollution.test.ts`, which supplies a hasher directly.
+- **Nothing about MCP memory in practice.** The counts above are from a 12-region fixture. How much
+  a real long-lived MCP session accumulated was not measured, only that the growth was proportional
+  to candidates rather than elisions.
+- **Nothing about `bench`.** It supplies a hasher too, and was equally affected, but its runs are
+  short-lived so the accumulation had nowhere to build up.
