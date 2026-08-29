@@ -50,6 +50,15 @@ export interface GatewayConfig {
   readonly sessionTtlMs: number;
   readonly maxSessions: number;
   readonly maxContentEntriesPerSession?: number | undefined;
+  /**
+   * Cap on the per-session set of block hashes seen in earlier turns. Default 1000.
+   *
+   * Configurable because its neighbours are (audit OX-L6): it was a bare local constant inside
+   * `capSeenBlockHashes` while `sessionTtlMs`, `maxSessions` and `maxContentEntriesPerSession`
+   * were all settable, so the one bound that grows with conversation length was the one nobody
+   * could tune. Eviction is insertion-ordered, so lowering it discards the oldest hashes first.
+   */
+  readonly maxSeenBlockHashesPerSession?: number | undefined;
   readonly gatewayToken?: string | undefined;
   /**
    * How long the upstream has to produce **response headers**, in milliseconds. Default 30000.
