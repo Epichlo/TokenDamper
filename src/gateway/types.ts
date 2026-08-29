@@ -75,6 +75,15 @@ export interface GatewayConfig {
    */
   readonly mockUpstream?: boolean | undefined;
   readonly allowMissingUpstreamCredentials?: boolean | undefined;
+  /**
+   * Permit binding a non-loopback host with no `gatewayToken`. Default false, and `start()`
+   * throws rather than listening — audit OX-M8.
+   *
+   * This is not a test seam. It is the deliberate escape hatch for someone who genuinely wants
+   * an open relay on a trusted network, and it is a separate field rather than a magic token
+   * value so that the intent is legible in a config file and greppable in a deployment.
+   */
+  readonly allowUnauthenticatedNonLoopback?: boolean | undefined;
 }
 
 /**

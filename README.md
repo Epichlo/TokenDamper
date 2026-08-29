@@ -179,7 +179,7 @@ TokenDamper behavior can be configured dynamically using environment variables:
 
 | Variable | Description |
 |----------|-------------|
-| `TOKENDAMPER_GATEWAY_TOKEN` | Auth token for gateway requests, enforced only on a **non-loopback** bind. Auto-generated and injected by `exec`; loopback peers are trusted and need not present it. |
+| `TOKENDAMPER_GATEWAY_TOKEN` | Auth token for gateway requests, enforced on a **non-loopback** bind and now *required* for one — the server refuses to start otherwise. Auto-generated and injected by `exec`; loopback peers are trusted and need not present it. See *Binding the Gateway beyond loopback*, below. |
 | `TOKENDAMPER_MAX_INPUT_TOKENS` | Hard budget cap on the number of context tokens sent to the LLM. Any value above 0 also engages the optimizing planner. |
 | `TOKENDAMPER_TARGET_REDUCTION_RATIO` | Fraction of tokens to try to remove, 0–1. A real target since 1.3.0 — it resolves against the input into an absolute token ceiling that both selection and compression respect. Best effort, not a guarantee; see `--target-reduction-ratio` below. |
 | `TOKENDAMPER_PRESERVE_KINDS` | Comma-separated list of items to never prune (e.g. `prompt,file`). |
@@ -226,6 +226,45 @@ TokenDamper provides detailed explainability for how your context was optimized 
   one region — usually a whole function body — and files often have one dominant region, so a
   modest target can overshoot. Measured at target 30%, 21 of 66 reducing files landed in 25–35%
   and 23 exceeded 50%.
+
+### Binding the Gateway beyond loopback
+
+The Gateway binds `127.0.0.1` by default and trusts loopback peers, so the ordinary local case
+needs no token (audit C3 — the token gate previously made `tokendamper exec` impossible by
+construction, since no third-party client knows to send `x-tokendamper-token`).
+
+**A non-loopback bind with no `gatewayToken` now refuses to start** (audit OX-M8). It was an
+unauthenticated relay: the gate read "enforce the token *if one is configured*", so binding
+`0.0.0.0` and setting none forwarded arbitrary request bodies to upstream providers for anyone
+who could reach the port, with no warning. Three ways forward, in order of preference:
+
+- set `gatewayToken` / `TOKENDAMPER_GATEWAY_TOKEN` and have clients send `x-tokendamper-token`;
+- bind a loopback host and reach it through an SSH tunnel or a reverse proxy that terminates auth;
+- set `allowUnauthenticatedNonLoopback: true` if an open relay on a trusted network is genuinely
+  what you want. It is a separate field rather than a magic token value so the intent is legible
+  in a config file and greppable in a deployment.
+
+Note `0.0.0.0` and `::` are **not** loopback. They include the loopback interface, which is what
+makes them easy to mistake for it, and every other interface as well.
+
+**Browser-initiated requests are rejected** (audit OX-M9). A page the user visits can issue a
+simple cross-origin `POST` (`text/plain`) to `http://127.0.0.1:<port>/v1/chat/completions` with
+no preflight. It cannot read the response and must supply its own upstream credentials, so what
+it gains is the victim's machine as a relay. Two checks close it:
+
+- a request whose `Origin` is present and is not this gateway's own origin gets `403`. Non-browser
+  clients do not send `Origin`, so nothing local changes.
+- on a **loopback bind**, a `Host` header naming somewhere else gets `403` — the DNS-rebinding
+  shape. Every HTTP/1.1 client sends `Host`, so this is defined by what is *accepted*:
+  `localhost`, any `127.x`, `::1`, and the configured bind address. It is not enforced on an
+  exposed bind, where hostnames are legitimately varied and the required token is the real control.
+
+No permissive CORS headers are ever sent, and `OPTIONS` is answered `405` — measured as already
+true before OX-M9, which is why no OPTIONS handler was added. Preflight was never the gap; simple
+requests skip it.
+
+`GET /health` reports `{"status":"ok"}` and nothing else. It used to include `activeSessions`
+(audit OX-L13), which told an unauthenticated caller how much traffic flows through the machine.
 
 ### Two dials that look live and are not
 

@@ -9,6 +9,89 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > rewriting it would falsify that. See `docs/retired-documents.md` for where each conclusion
 > lives now and how to read the original out of git.
 
+## [Unreleased]
+
+**`oxaudit.md` is closed in full.** The last four findings, three of which were decisions
+rather than defects — DECISIONS §70.
+
+### Changed
+- **`tokendamper bench` no longer executes dataset code (audit OX-M15).**
+  `BenchmarkRunner.run` read `config.evaluateQuality !== false`, so quality evaluation
+  defaulted **on**, and the evaluator runs each fixture's code and its dataset checks through
+  `python -c`. A harness `ARCHITECTURE.md` calls offline and deterministic reached for an
+  interpreter because someone typed `bench`, and the only way out was
+  `TOKENDAMPER_BENCH_DISABLE_PYTHON`, documented nowhere.
+
+  `--evaluate-quality` now asks for it, command-scoped per DECISIONS §30. Verified on the
+  built artifact rather than in-process: plain `bench humaneval --report-json` writes a report
+  containing **0** occurrences of `python-subprocess`; with `--evaluate-quality`, **5**.
+
+  **What changes for you:** plain `bench` reports a different quantity under the same field
+  names. `syntaxPassRate` and `passAt1Rate` fall back to validation outcomes — measured, 0.6
+  against the execution-derived 1.0 on the bundled fixtures. Pass `--evaluate-quality` to get
+  the old numbers. The two regression suites that assert on them now request it by name.
+
+- **A non-loopback Gateway bind with no token refuses to start (audit OX-M8).** The token gate
+  read `if (this.config.gatewayToken && !isLoopbackPeer(req))` — enforced only *if one was
+  configured*. Binding `0.0.0.0` and setting none served an unauthenticated relay that
+  forwarded arbitrary request bodies to upstream providers, with no warning. The README already
+  described the intended rule; the code implemented "enforced only if provided".
+
+  `start()` now throws, naming the host and the ways out. `allowUnauthenticatedNonLoopback` is
+  the explicit opt-in for someone who genuinely wants an open relay — a separate field rather
+  than a magic token value, so the intent is legible in a config file.
+
+  Refusing rather than warning, because the configuration this protects is a server nobody is
+  watching: stderr reaches the person starting it in a terminal and no one starting it from a
+  unit file. Auto-generating a token was considered and is worse in a specific way — startup
+  succeeds and every existing client begins failing 401, a subtler break than a named refusal.
+
+  **What changes for you:** an existing exposed-bind config breaks loudly. That is the
+  decision, not a side effect. `tokendamper exec` is unaffected — it binds loopback *and*
+  generates a token. Loopback trust (audit C3) and the constant-time compare are untouched,
+  and both are asserted so a later change cannot buy this guarantee by revoking C3.
+
+- **The Gateway rejects browser-initiated requests (audit OX-M9, and OX-L13 folded in).** A page
+  the user visits can issue a **simple** cross-origin `POST` (`text/plain`) to
+  `http://127.0.0.1:<port>/v1/chat/completions` with no preflight. It cannot read the response
+  and must supply its own credentials, so what it gains is the victim's machine as a relay.
+
+  A request whose `Origin` is present and foreign now gets `403` on every bind; a `Host` naming
+  somewhere else gets `403` on a **loopback** bind, which is where DNS rebinding is the threat.
+  `localhost`, any `127.x`, `::1` and the configured bind are accepted, so local clients are
+  unaffected. The policy runs before `/health` — a check that endpoint sat in front of would be
+  a check with a documented way around it.
+
+  **Two corrections to the finding, both from measuring before fixing.** The audit proposed an
+  OPTIONS handler with a restrictive CORS policy; measured, the server already answers OPTIONS
+  with `405` and no `Access-Control-*` headers, which *is* that policy — and preflight was
+  never the gap, since a simple request skips it. And the recorded decision said non-browser
+  clients "send neither header": true of `Origin`, false of `Host`, which every HTTP/1.1 client
+  must send. The local client contract is preserved by what is accepted, not by absence.
+
+  **`GET /health` now returns `{"status":"ok"}` and nothing else** (audit OX-L13).
+  `activeSessions` told an unauthenticated caller how much conversation traffic flows through
+  the machine, and `/health` is the one endpoint deployments expose deliberately.
+
+### Documentation
+- **`--minimum-confidence` and `--max-debt` documented as inert on the CLI (audit OX-M13).**
+  Both are parsed, range-validated and threaded into `optimize()`, and neither can change what
+  `tokendamper optimize` emits. Validation confidence is binary (`passed ? 1 : 0`), so the gate
+  reads `1 < x` on a passing run and `0 < x` on a failing one where `!validation.passed` has
+  already decided; the ledger arm is a literal `1.0` with no ledger, and the CLI supplies none.
+  `--max-debt` can enter the rehydration branch, but `attemptAutomatedRehydration` returns on
+  its first line without a hasher or ledger — and the CLI supplies neither.
+
+  That last reason is **stronger than the one DECISIONS §64 gave** ("`shouldRehydrate` needs 75
+  and the elision term caps at 35"), which explains the *default* threshold — and `--max-debt`
+  is precisely the flag that lowers it. Right outcome, argument that does not carry.
+
+  Documented rather than made live because the machinery is real and reachable through the
+  exported `optimize()`. Both are live for an embedder passing a `tokenHasher` and/or
+  `confidenceLedger`; `--minimum-confidence` is live on the Gateway, which builds a ledger per
+  request. `test/unit/cli/inert-dials.test.ts` pins the CLI behaviour as a characterization
+  test, so a change making either dial live fails it and forces the README to be rewritten.
+
 ## [v1.6.1] - 2026-08-30
 
 **Four languages reduce instead of three, and four Gateway defects that reached provider
