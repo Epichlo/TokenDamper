@@ -63,7 +63,38 @@ describe('test collection scope', () => {
   });
 
   it('confirms the anchor hides nothing: every suite in the repo lives under test/', () => {
-    const skip = new Set(['node_modules', 'dist', '.claude', '.git', 'coverage', '.venv']);
+    // Mirrors what `.gitignore` keeps out of the repository, because "every suite **in the
+    // repo**" is the claim being checked and a dependency tree is not in the repo.
+    //
+    // `venv` was missing while `.venv` was present, and the two spellings are not
+    // interchangeable: `.gitignore:16` ignores `venv/`, which is the name
+    // `tokendamper-benchmark/` actually uses. The walk therefore descended **68,061 entries**
+    // of a Python virtualenv on any checkout where the benchmark harness had been set up, and
+    // blew the 5 s limit under parallel load while passing in isolation and in CI, where no
+    // venv exists. Caught by `prepublishOnly`, which is the gate working.
+    //
+    // It was also a latent *false positive*: any third-party package shipping a bundled
+    // `foo.test.js` would have been reported as a stray suite in this repository. The cost of
+    // the miss was never only time.
+    //
+    // This list and `.gitignore` are hand-synced, which is the same drift this entry is an
+    // instance of. It is not derived from `.gitignore` because the walk must still see
+    // **untracked** files — audit OX-H3 was a duplicated suite in an untracked worktree copy,
+    // so anything keyed on tracked files would miss the case the test exists for.
+    const skip = new Set([
+      'node_modules',
+      'dist',
+      '.claude',
+      '.git',
+      'coverage',
+      '.venv',
+      'venv',
+      'env',
+      '__pycache__',
+      '.tox',
+      '.mypy_cache',
+      '.pytest_cache',
+    ]);
     const strays: string[] = [];
 
     const walk = (dir: string, relative: string): void => {
