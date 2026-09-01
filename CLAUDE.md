@@ -207,6 +207,12 @@ with **zero** new fallbacks and **zero** files that stopped reducing; 522 rows a
 because subdivision is confined to the ceiling path. Current measured baseline: python file
 **17.95%**, typescript file **18.52%** — status doc §2, not the figures a prior session may quote.
 
+**v1.7.3 shipped 2026-09-01** — §71: `DriftCoverage.symbolBearingItems` counts symbols
+rather than validator coverage. **A patch number that moves a trace field on 254 of 580 corpus
+rows**, numbered that way because `outputSha` is identical on all 580 and stdout does not
+move — the change is confined to the trace. Anything parsing `driftCoverage` should treat
+it as breaking. The old value was provably `astCoverage.checked` under another name.
+
 **v1.7.1 shipped 2026-09-01 — `oxaudit.md` is closed in full (DECISIONS §70).** The last four
 findings, three of which were decisions rather than defects. v1.7.1 adds nothing beyond v1.7.0
 but a test fix; the audit content is v1.7.0's.
@@ -222,10 +228,11 @@ two configs back into one**: `rootDir: "."` is what keeps output at `dist/src/..
 src-only build without it relocates every file to `dist/*` and breaks `main`/`bin` while still
 compiling. The package went 508 → 223 entries, 3.08 → 1.65 MB unpacked.
 
-**v1.7.0 is the first npm release since 1.6.0.** 1.6.1 was tagged and released on GitHub but
-never published — the audit work landed before the publish, and shipping different bytes under
-an already-tagged number is the hazard the `release` skill exists to prevent. Anything citing
-1.6.1 as "the current release" means the tag, not the registry.
+**v1.7.1 was the first npm release since 1.6.0 — neither 1.6.1 nor 1.7.0 was ever published.**
+Both are GitHub releases only. Each time, work landed on `main` between tagging and
+publishing, and shipping different bytes under an already-tagged number is the hazard the
+`release` skill exists to prevent. **A tag in this repo does not imply a registry version** —
+check `npm view tokendamper version` rather than the tag list.
 
 - **M15** — plain `tokendamper bench` no longer runs fixture code through `python`.
   `--evaluate-quality` asks for it. Plain `bench` writes **0** `python-subprocess` evaluations
