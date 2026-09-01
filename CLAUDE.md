@@ -211,10 +211,16 @@ because subdivision is confined to the ceiling path. Current measured baseline: 
 findings, three of which were decisions rather than defects. v1.7.1 adds nothing beyond v1.7.0
 but a test fix; the audit content is v1.7.0's.
 
-**A test-only change is not consumer-invisible here, and that has now cost a version number.**
-`tsc -p tsconfig.json` compiles `test/` as well as `src/`, and `package.json` `files` ships all
-of `dist` — so the compiled suite is in the published tarball, 285 of its 508 entries. Check
-`npm pack --dry-run` before assuming a change cannot reach consumers.
+**Check `npm pack --dry-run` before assuming a change cannot reach consumers.** This cost a
+version number in v1.7.1: `tsc -p tsconfig.json` compiled `test/` as well as `src/`, and `files`
+ships all of `dist`, so a test-only edit changed the tarball.
+
+**Since v1.7.2 the build is `tsconfig.build.json` (`src/` only) while `typecheck` stays on
+`tsconfig.json` (`src/` + `test/`).** Only emission narrowed — tests are still type-checked, and
+that is mutation-checked in `test/unit/published-package-scope.test.ts`. **Do not "simplify" the
+two configs back into one**: `rootDir: "."` is what keeps output at `dist/src/...`, and a
+src-only build without it relocates every file to `dist/*` and breaks `main`/`bin` while still
+compiling. The package went 508 → 223 entries, 3.08 → 1.65 MB unpacked.
 
 **v1.7.0 is the first npm release since 1.6.0.** 1.6.1 was tagged and released on GitHub but
 never published — the audit work landed before the publish, and shipping different bytes under

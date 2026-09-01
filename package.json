@@ -1,6 +1,6 @@
 {
   "name": "tokendamper",
-  "version": "1.7.1",
+  "version": "1.7.2",
   "private": false,
   "description": "Universal context optimization for AI coding assistants.",
   "engines": {
@@ -42,7 +42,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
     "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
     "lint": "node ./node_modules/eslint/bin/eslint.js src test",
     "test": "vitest run",
