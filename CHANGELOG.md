@@ -9,8 +9,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > rewriting it would falsify that. See `docs/retired-documents.md` for where each conclusion
 > lives now and how to read the original out of git.
 
-## [Unreleased]
+## [v1.7.3] - 2026-09-01
 
+**Read this if anything you own parses the trace.** `DriftCoverage.symbolBearingItems` changes
+meaning: it counted items an AST validator covered, and now counts items that actually yield
+symbols. The number moves on **254 of 580** corpus rows, always upward.
+
+**Numbered a patch because the optimized output does not move** — `outputSha` is identical on
+all 580 rows, so the same command over the same input emits the same bytes on stdout. The change
+is confined to the diagnostic trace on stderr and in the MCP response. If you consume only the
+optimized text this release is inert for you; if you parse `driftCoverage`, treat it as
+breaking and read DECISIONS §71 before upgrading.
 ### Fixed
 - **`DriftCoverage.symbolBearingItems` counts symbols rather than validator coverage (DECISIONS
   §71).** It was `astCoverage.checked` computed a second way, under a name asserting a fact about
