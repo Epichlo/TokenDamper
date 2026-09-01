@@ -9,6 +9,47 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > rewriting it would falsify that. See `docs/retired-documents.md` for where each conclusion
 > lives now and how to read the original out of git.
 
+## [v1.7.2] - 2026-09-01
+
+**The published package no longer ships its own test suite.** No runtime behaviour changes; the
+product files are byte-for-byte what 1.7.1 shipped.
+
+### Changed
+- **`npm run build` emits `src/` only, via a new `tsconfig.build.json`.** `tsconfig.json` covers
+  `src/` *and* `test/` because `npm run typecheck` wants it to — a type error in a test is a real
+  error, and that config is what catches a bad generic in a suite vitest runs green. But the
+  build shared it, so `tsc` emitted `dist/test/` as well, and `files` ships all of `dist`.
+
+  Measured with `npm pack --dry-run`:
+
+  | | entries | packed | unpacked |
+  |---|---|---|---|
+  | 1.7.1 | 508 | 778 KB | 3.08 MB |
+  | 1.7.2 | **223** | **496 KB** | **1.65 MB** |
+
+  All 285 removed entries are under `dist/test/`; **nothing was added, and no product file
+  changed** — `dist/src/` is the same 210 files at the same paths. Compiled suites were 46% of
+  the unpacked package, against 210 entries for the product itself.
+
+  **Only emission narrows.** `npm run typecheck` still runs against `tsconfig.json` and still
+  covers the suite — mutation-checked by planting a type error in a test file: `typecheck` reports
+  `TS2322`, the build config ignores it. Losing that coverage would have been a worse trade than
+  the bytes are worth.
+
+  **`rootDir: "."` is load-bearing and is now pinned by a test.** It is set explicitly in
+  `tsconfig.json`, which is the only reason narrowing `include` to `src/**` is safe: unset, `tsc`
+  infers the common root of its inputs, which for a src-only build is `src/` — silently relocating
+  every output from `dist/src/cli/main.js` to `dist/cli/main.js` and breaking `main`, `types` and
+  `bin` in a build that still succeeds. Verified by diffing the emitted file list across the
+  change: identical.
+
+  `test/unit/published-package-scope.test.ts` pins the arrangement, including that the build
+  script actually *uses* the new config — a config nothing runs is inert, and asserting on the
+  file alone would pass in a repository that ignores it.
+
+  The vitest `dist` exclude (audit OX-H3) **stays**, and its comment is corrected rather than
+  deleted: `npm run build` no longer produces `dist/test/`, but `tsc -p tsconfig.json` without
+  `--noEmit` still does, so the guard is cheaper than remembering that.
 ## [v1.7.1] - 2026-09-01
 
 **No runtime behaviour changes.** One test file, and the version number needed to carry it.

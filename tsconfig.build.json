@@ -1,0 +1,23 @@
+{
+  // Emit-only configuration — the published package should not carry the test suite.
+  //
+  // `tsconfig.json` covers `src/` *and* `test/`, which is what `npm run typecheck` wants: a type
+  // error in a test is a real error and is caught there. But `npm run build` used the same config,
+  // so `tsc` emitted `dist/test/` as well, and `package.json` `files` ships all of `dist` — so the
+  // compiled suite travelled to every consumer. Measured: 285 of the tarball's 508 entries, and
+  // 46% of its unpacked bytes.
+  //
+  // `rootDir` is inherited as `"."` and that is load-bearing. Without it set explicitly, narrowing
+  // `include` to `src/**` would make `tsc` infer the common root as `src/`, silently relocating
+  // every output from `dist/src/cli/main.js` to `dist/cli/main.js` — breaking `main`, `types` and
+  // `bin` in a build that still succeeds. Verified by diffing the emitted file list across the
+  // change: identical, 210 files at identical paths.
+  //
+  // `types` drops `vitest/globals`: nothing under `src/` may depend on test-runner types, and
+  // narrowing it here makes that a compile error rather than a convention.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts"]
+}
