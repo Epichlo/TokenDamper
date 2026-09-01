@@ -207,8 +207,14 @@ with **zero** new fallbacks and **zero** files that stopped reducing; 522 rows a
 because subdivision is confined to the ceiling path. Current measured baseline: python file
 **17.95%**, typescript file **18.52%** — status doc §2, not the figures a prior session may quote.
 
-**v1.7.0 shipped 2026-09-01 — `oxaudit.md` is closed in full (DECISIONS §70).** The last four
-findings, three of which were decisions rather than defects.
+**v1.7.1 shipped 2026-09-01 — `oxaudit.md` is closed in full (DECISIONS §70).** The last four
+findings, three of which were decisions rather than defects. v1.7.1 adds nothing beyond v1.7.0
+but a test fix; the audit content is v1.7.0's.
+
+**A test-only change is not consumer-invisible here, and that has now cost a version number.**
+`tsc -p tsconfig.json` compiles `test/` as well as `src/`, and `package.json` `files` ships all
+of `dist` — so the compiled suite is in the published tarball, 285 of its 508 entries. Check
+`npm pack --dry-run` before assuming a change cannot reach consumers.
 
 **v1.7.0 is the first npm release since 1.6.0.** 1.6.1 was tagged and released on GitHub but
 never published — the audit work landed before the publish, and shipping different bytes under

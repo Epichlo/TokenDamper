@@ -9,6 +9,43 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > rewriting it would falsify that. See `docs/retired-documents.md` for where each conclusion
 > lives now and how to read the original out of git.
 
+## [v1.7.1] - 2026-09-01
+
+**No runtime behaviour changes.** One test file, and the version number needed to carry it.
+
+Cut because v1.7.0 could not absorb it: that tag was already published on GitHub, and the fix
+does change the tarball. `tsc -p tsconfig.json` compiles `test/` as well as `src/`, and `files`
+ships all of `dist`, so the compiled suite travels with the package — 285 of the tarball's 508
+entries. Worth stating because it is easy to assume a test-only change cannot reach consumers
+here, and it does.
+
+**v1.7.1 is the first npm release since 1.6.0.** Neither 1.6.1 nor 1.7.0 was published; both
+are GitHub releases only. Everything in their notes ships here, and anyone upgrading from 1.6.0
+should read all three sections.
+
+### Fixed
+- **The stray-suite guard walked a Python virtualenv (audit OX-H3's test, not the fix).**
+  `test-collection-scope` skipped `.venv` but not `venv` — and `.gitignore:16` ignores `venv/`,
+  which is the name `tokendamper-benchmark/` actually uses. On any checkout where the benchmark
+  harness had been set up, the walk descended **68,061 entries** of a virtualenv.
+
+  Measured in the checkout that failed, same walk, only the skip set varied: **298 ms / 68,593
+  entries → 3 ms / 530 entries**. Strays: 0 in both arms — it stops walking a dependency tree,
+  it does not stop looking.
+
+  The symptom was a 5 s timeout rather than an assertion, which is why it passed in isolation,
+  in CI and in a fresh worktree: none of those has a venv. It surfaced only under
+  `prepublishOnly`, which is that gate doing its job.
+
+  **It was also a latent false positive**, and that is the half worth keeping: any third-party
+  package shipping a bundled `foo.test.js` would have been reported as a stray suite belonging
+  to this repository. The cost of the miss was never only time.
+
+  The skip list stays hand-synced with `.gitignore` rather than derived from it, because the
+  walk must still see **untracked** files — OX-H3 was a duplicated suite in an untracked
+  worktree copy, so anything keyed on tracked files would miss the case the test exists for.
+  The drift between the two lists is exactly what this entry is an instance of, and the reason
+  is recorded at the site.
 ## [v1.7.0] - 2026-09-01
 
 **`oxaudit.md` is closed in full** — a second independent audit, closed across two releases.
