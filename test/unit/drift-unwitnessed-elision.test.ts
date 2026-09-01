@@ -289,7 +289,14 @@ describe('drift refuses to certify an elision it has no evidence for', () => {
       // an item a validator covers.
       expect(result.trace.stageCount).toBeGreaterThan(0);
       expect(result.validation.driftCoverage?.contentChanged).toBe(true);
-      expect(result.validation.driftCoverage?.symbolBearingItems).toBe(1);
+      expect(result.trace.astCoverage?.checked).toBe(1);
+
+      // Zero, and that is the point of the whole test: a barrel of `export * from` lines
+      // yields no symbols, which is *why* the elision is unwitnessed. This asserted `1`
+      // until DECISIONS §59, three lines below `unwitnessedItems.length: 1` — the trace
+      // claiming the item bore symbols and left no witness, simultaneously. The field
+      // counted validator coverage, so it was really `astCoverage.checked` above.
+      expect(result.validation.driftCoverage?.symbolBearingItems).toBe(0);
     });
   });
   /**

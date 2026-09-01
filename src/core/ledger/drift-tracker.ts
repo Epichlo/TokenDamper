@@ -94,6 +94,19 @@ export interface DriftReport {
   readonly structuralIntegrityRatio: number; // R_struct in [0.0, 1.0]
   readonly symbolsBeforeCount: number;
   readonly symbolsAfterCount: number;
+  /**
+   * How many retained items `symbolsBeforeCount` was harvested from.
+   *
+   * The companion `symbolsBeforeCount` has always needed and never had: a total with no
+   * denominator cannot distinguish "every item carries symbols" from "one item carries all
+   * of them and the rest are barrels". `findUnwitnessedItems` already asks this question per
+   * item, so this is the same predicate counted rather than a second notion of a symbol.
+   *
+   * Computed over `retainedBefore`, not `beforeBundle`, for the same reason
+   * `symbolsBeforeCount` is: an item the planner pruned away contributes to neither, so the
+   * pair stays readable as "N symbols, from M items".
+   */
+  readonly symbolBearingItemCount: number;
   readonly markersBeforeCount: number;
   readonly markersAfterCount: number;
   /** Markers derived from content rather than from `item.path` or metadata. */
@@ -213,8 +226,16 @@ export class DriftTracker {
         }
       : beforeBundle;
 
-    const symbolsBefore = this.extractSymbols(retainedBefore);
+    // One pass for both numbers: the bundle-level set and the count of items that fed it.
+    const symbolsBefore = new Set<string>();
+    let symbolBearingItemCount = 0;
+    for (const item of retainedBefore.items) {
+      const itemSymbols = this.extractItemSymbols(item);
+      if (itemSymbols.size > 0) symbolBearingItemCount++;
+      for (const symbol of itemSymbols) symbolsBefore.add(symbol);
+    }
     const symbolsAfter = this.extractSymbols(effectiveAfter);
+
 
     let astSymbolRetentionRatio = 1.0;
     if (symbolsBefore.size > 0) {
@@ -337,6 +358,7 @@ export class DriftTracker {
       structuralIntegrityRatio,
       symbolsBeforeCount: symbolsBefore.size,
       symbolsAfterCount: symbolsAfter.size,
+      symbolBearingItemCount,
       markersBeforeCount: markersBefore.size,
       markersAfterCount: markersAfter.size,
       contentMarkersBeforeCount: contentMarkersBefore.size,
@@ -438,171 +460,185 @@ export class DriftTracker {
    */
   public extractSymbols(bundle: ContextBundle): Set<string> {
     const symbols = new Set<string>();
-
     for (const item of bundle.items) {
-      const content = item.content;
-      const fnNames = new Set<string>();
+      for (const symbol of this.extractItemSymbols(item)) symbols.add(symbol);
+    }
+    return symbols;
+  }
 
-      // 1. JS/TS functions
-      const fnRegex = /(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][A-Za-z0-9_$]*)/g;
-      let match: RegExpExecArray | null;
-      while ((match = fnRegex.exec(content)) !== null) {
-        if (match[1]) {
-          symbols.add(`fn:${match[1]}`);
-          fnNames.add(match[1]);
-        }
-      }
+  /**
+   * The symbols one item yields, which is what the bundle-level extractor accumulates.
+   *
+   * Split out so `symbolsBefore` and `DriftCoverage.symbolBearingItems` come from **one** pass.
+   * Computing the latter as a separate `items.filter(...)` over the same extractor cost a
+   * measured **19 ms of 196 ms** on an 18-item bundle — every regex run twice over every item,
+   * for a reporting field. The split is behaviour-preserving by construction: the loop body was
+   * already a pure function of one item, writing to the shared set through 11 `add` calls and
+   * reading it zero times, so a union of per-item sets is the set it used to accumulate.
+   */
+  public extractItemSymbols(item: ContextItem): Set<string> {
+    const symbols = new Set<string>();
+    const content = item.content;
+    const fnNames = new Set<string>();
 
-      // 2. Python functions
-      const pyFnRegex = /def\s+([A-Za-z_][A-Za-z0-9_]*)/g;
-      while ((match = pyFnRegex.exec(content)) !== null) {
-        if (match[1]) {
-          symbols.add(`fn:${match[1]}`);
-          fnNames.add(match[1]);
-        }
-      }
-
-      // 3. Go functions and methods.
-      //
-      // **Step 1 of widening elision to Go, and alone in its commit on purpose (DECISIONS
-      // §56).** `extractSymbols` is regex over `item.content` and never consults
-      // `selectValidator`, which makes it the one gate that can be widened while the language is
-      // still unelidable — and it is the one that has to go first. Probed on real Go before this
-      // block existed, the only symbols harvested were `type:Point` (because `struct` is an
-      // alternative in the class regex below) and `import:fmt`. Both are signature-level and
-      // **survive body elision by construction**, so a region scanner shipped first would score
-      // `R_AST = 1.0` with `astMeasured: true` on a file whose every function body had been
-      // deleted. §33 closed the case where the before-set is empty; this is its sibling — a
-      // before-set that is non-empty but structurally incapable of registering the loss — and on
-      // the CLI, where elision is irreversible, that is data loss every gate reports as green.
-      //
-      // `func` is why Go is the first language added: an unambiguous header keyword, where C's
-      // `int foo(...)` cannot be told from a prototype. Anchored to the start of a line because a
-      // Go function declaration is always a top-level one — which also stops `func` inside a
-      // string literal, or mid-sentence in a comment, from inventing a symbol.
-      //
-      // The trailing `[([]` admits the generic form (`func Map[T any](...)`) without balancing
-      // brackets: the name is what identifies the function, and the type parameter list is not
-      // needed to find it.
-      //
-      // Deliberately **not** harvested — anonymous literals (`x := func() {}`) and func types
-      // (`type Handler func(int) error`) have no name to take, and an interface method
-      // declaration has no body, so harvesting it would add one more symbol that survives elision
-      // by construction. That is the exact dependency this block exists to remove.
-      const goFnRegex = /^[ \t]*func\s+([A-Za-z_][A-Za-z0-9_]*)\s*[([]/gm;
-      while ((match = goFnRegex.exec(content)) !== null) {
-        if (match[1]) {
-          symbols.add(`fn:${match[1]}`);
-          fnNames.add(match[1]);
-        }
-      }
-
-      // Go methods are qualified by their receiver type, where the class methods in block 8 are
-      // not. Go convention gives many types in one file the same method names — `String`,
-      // `Error`, `Read` — so a bare `method:String` collapses all of them into a single symbol,
-      // and losing ten of them would read as losing one. The receiver is right there in the
-      // syntax, and nothing downstream parses these strings (they are only ever set-compared for
-      // `R_AST`), so the resolution costs nothing.
-      //
-      // `func\s+\(` rather than `func\s*\(` keeps an anonymous literal at the start of a line out
-      // of the receiver slot. gofmt writes that space, and Go corpora are gofmt'd.
-      const goMethodRegex =
-        /^[ \t]*func\s+\(\s*(?:[A-Za-z_][A-Za-z0-9_]*\s+)?\*?\s*([A-Za-z_][A-Za-z0-9_]*)[^)\n]*\)\s*([A-Za-z_][A-Za-z0-9_]*)\s*[([]/gm;
-      while ((match = goMethodRegex.exec(content)) !== null) {
-        if (match[1] && match[2]) {
-          symbols.add(`method:${match[1]}.${match[2]}`);
-        }
-      }
-
-      // 4. JS/TS Classes / Interfaces / Types / Enums / Structs
-      const classRegex = /(?:export\s+)?(?:class|interface|type|enum|struct)\s+([A-Za-z_$][A-Za-z0-9_$]*)/g;
-      while ((match = classRegex.exec(content)) !== null) {
-        if (match[1]) symbols.add(`type:${match[1]}`);
-      }
-
-      // 5. Python classes
-      const pyClassRegex = /class\s+([A-Za-z_][A-Za-z0-9_]*)/g;
-      while ((match = pyClassRegex.exec(content)) !== null) {
-        if (match[1]) symbols.add(`type:${match[1]}`);
-      }
-
-      // 6. Top-level const/let/var declarations.
-      //
-      // **Anchored to the start of a line, which excludes function-local bindings.** This used
-      // to match anywhere, so every `const i`, `const result`, `const msg` inside a function
-      // body counted as a semantic symbol on par with an exported function — and body elision
-      // is precisely the transform that removes them. Measured on this repo at
-      // `targetReductionRatio: 0.5`, on the two files whose drift scores sit closest to the
-      // gate:
-      //
-      //   src/core/hashing/tokenizer.ts   9 of 17 symbols "lost" — all 9 function-local
-      //   src/core/engine/index.ts       42 of 63 symbols "lost" — 41 function-local
-      //
-      // Not one exported function, type or interface was lost in either case, because
-      // `selectElisionRegions` retains signatures by construction. So `R_AST` was reporting
-      // 66.7% semantic loss for a file that had lost no API surface at all, and the audit's
-      // "you can destroy two-thirds of every symbol in a file and pass" was measuring
-      // temporaries inside bodies the caller asked to have elided.
-      //
-      // Python is the control: its extractor never had a locals rule, its measured symbol loss
-      // under the same elision is **0.0%**, and it is unaffected by this change.
-      //
-      // `^` with the `m` flag rather than an indentation test, because in TS and JS a top-level
-      // declaration *is* a column-0 declaration. Indented ones are inside a function, a class or
-      // a block, and are body content.
-      const constRegex = /^(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=/gm;
-      while ((match = constRegex.exec(content)) !== null) {
-        if (match[1]) symbols.add(`var:${match[1]}`);
-      }
-
-      // 7. Imports (JS/TS & Python)
-      const jsImportRegex = /(?:import\s+(?:[\w$*{}min\s,]+from\s+)?['"]([^'"]+)['"])/g;
-      while ((match = jsImportRegex.exec(content)) !== null) {
-        if (match[1]) symbols.add(`import:${match[1]}`);
-      }
-
-      const pyImportRegex = /(?:^|\n)\s*(?:import\s+([A-Za-z0-9_.]+)|from\s+([A-Za-z0-9_.]+)\s+import)/g;
-      while ((match = pyImportRegex.exec(content)) !== null) {
-        const mod = match[1] || match[2];
-        if (mod) symbols.add(`import:${mod}`);
-      }
-
-      // 8. Methods inside classes
-      const methodRegex = /(?:public|private|protected|async|static|get|set)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g;
-      const reservedKeywords = new Set([
-        'if',
-        'while',
-        'for',
-        'switch',
-        'catch',
-        'function',
-        'constructor',
-        'return',
-        'import',
-        'export',
-        'class',
-        'interface',
-        'type',
-        'enum',
-        'def',
-        'typeof',
-        'instanceof',
-      ]);
-      while ((match = methodRegex.exec(content)) !== null) {
-        if (match[1] && !reservedKeywords.has(match[1]) && !fnNames.has(match[1])) {
-          symbols.add(`method:${match[1]}`);
-        }
-      }
-
-      // 9. JSON keys / entity identifiers if JSON
-      if (item.contentType === 'json') {
-        const jsonKeyRegex = /"([^"\\]+)":/g;
-        while ((match = jsonKeyRegex.exec(content)) !== null) {
-          if (match[1]) symbols.add(`jsonkey:${match[1]}`);
-        }
+    // 1. JS/TS functions
+    const fnRegex = /(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][A-Za-z0-9_$]*)/g;
+    let match: RegExpExecArray | null;
+    while ((match = fnRegex.exec(content)) !== null) {
+      if (match[1]) {
+        symbols.add(`fn:${match[1]}`);
+        fnNames.add(match[1]);
       }
     }
 
+    // 2. Python functions
+    const pyFnRegex = /def\s+([A-Za-z_][A-Za-z0-9_]*)/g;
+    while ((match = pyFnRegex.exec(content)) !== null) {
+      if (match[1]) {
+        symbols.add(`fn:${match[1]}`);
+        fnNames.add(match[1]);
+      }
+    }
+
+    // 3. Go functions and methods.
+    //
+    // **Step 1 of widening elision to Go, and alone in its commit on purpose (DECISIONS
+    // §56).** `extractSymbols` is regex over `item.content` and never consults
+    // `selectValidator`, which makes it the one gate that can be widened while the language is
+    // still unelidable — and it is the one that has to go first. Probed on real Go before this
+    // block existed, the only symbols harvested were `type:Point` (because `struct` is an
+    // alternative in the class regex below) and `import:fmt`. Both are signature-level and
+    // **survive body elision by construction**, so a region scanner shipped first would score
+    // `R_AST = 1.0` with `astMeasured: true` on a file whose every function body had been
+    // deleted. §33 closed the case where the before-set is empty; this is its sibling — a
+    // before-set that is non-empty but structurally incapable of registering the loss — and on
+    // the CLI, where elision is irreversible, that is data loss every gate reports as green.
+    //
+    // `func` is why Go is the first language added: an unambiguous header keyword, where C's
+    // `int foo(...)` cannot be told from a prototype. Anchored to the start of a line because a
+    // Go function declaration is always a top-level one — which also stops `func` inside a
+    // string literal, or mid-sentence in a comment, from inventing a symbol.
+    //
+    // The trailing `[([]` admits the generic form (`func Map[T any](...)`) without balancing
+    // brackets: the name is what identifies the function, and the type parameter list is not
+    // needed to find it.
+    //
+    // Deliberately **not** harvested — anonymous literals (`x := func() {}`) and func types
+    // (`type Handler func(int) error`) have no name to take, and an interface method
+    // declaration has no body, so harvesting it would add one more symbol that survives elision
+    // by construction. That is the exact dependency this block exists to remove.
+    const goFnRegex = /^[ \t]*func\s+([A-Za-z_][A-Za-z0-9_]*)\s*[([]/gm;
+    while ((match = goFnRegex.exec(content)) !== null) {
+      if (match[1]) {
+        symbols.add(`fn:${match[1]}`);
+        fnNames.add(match[1]);
+      }
+    }
+
+    // Go methods are qualified by their receiver type, where the class methods in block 8 are
+    // not. Go convention gives many types in one file the same method names — `String`,
+    // `Error`, `Read` — so a bare `method:String` collapses all of them into a single symbol,
+    // and losing ten of them would read as losing one. The receiver is right there in the
+    // syntax, and nothing downstream parses these strings (they are only ever set-compared for
+    // `R_AST`), so the resolution costs nothing.
+    //
+    // `func\s+\(` rather than `func\s*\(` keeps an anonymous literal at the start of a line out
+    // of the receiver slot. gofmt writes that space, and Go corpora are gofmt'd.
+    const goMethodRegex =
+      /^[ \t]*func\s+\(\s*(?:[A-Za-z_][A-Za-z0-9_]*\s+)?\*?\s*([A-Za-z_][A-Za-z0-9_]*)[^)\n]*\)\s*([A-Za-z_][A-Za-z0-9_]*)\s*[([]/gm;
+    while ((match = goMethodRegex.exec(content)) !== null) {
+      if (match[1] && match[2]) {
+        symbols.add(`method:${match[1]}.${match[2]}`);
+      }
+    }
+
+    // 4. JS/TS Classes / Interfaces / Types / Enums / Structs
+    const classRegex = /(?:export\s+)?(?:class|interface|type|enum|struct)\s+([A-Za-z_$][A-Za-z0-9_$]*)/g;
+    while ((match = classRegex.exec(content)) !== null) {
+      if (match[1]) symbols.add(`type:${match[1]}`);
+    }
+
+    // 5. Python classes
+    const pyClassRegex = /class\s+([A-Za-z_][A-Za-z0-9_]*)/g;
+    while ((match = pyClassRegex.exec(content)) !== null) {
+      if (match[1]) symbols.add(`type:${match[1]}`);
+    }
+
+    // 6. Top-level const/let/var declarations.
+    //
+    // **Anchored to the start of a line, which excludes function-local bindings.** This used
+    // to match anywhere, so every `const i`, `const result`, `const msg` inside a function
+    // body counted as a semantic symbol on par with an exported function — and body elision
+    // is precisely the transform that removes them. Measured on this repo at
+    // `targetReductionRatio: 0.5`, on the two files whose drift scores sit closest to the
+    // gate:
+    //
+    //   src/core/hashing/tokenizer.ts   9 of 17 symbols "lost" — all 9 function-local
+    //   src/core/engine/index.ts       42 of 63 symbols "lost" — 41 function-local
+    //
+    // Not one exported function, type or interface was lost in either case, because
+    // `selectElisionRegions` retains signatures by construction. So `R_AST` was reporting
+    // 66.7% semantic loss for a file that had lost no API surface at all, and the audit's
+    // "you can destroy two-thirds of every symbol in a file and pass" was measuring
+    // temporaries inside bodies the caller asked to have elided.
+    //
+    // Python is the control: its extractor never had a locals rule, its measured symbol loss
+    // under the same elision is **0.0%**, and it is unaffected by this change.
+    //
+    // `^` with the `m` flag rather than an indentation test, because in TS and JS a top-level
+    // declaration *is* a column-0 declaration. Indented ones are inside a function, a class or
+    // a block, and are body content.
+    const constRegex = /^(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=/gm;
+    while ((match = constRegex.exec(content)) !== null) {
+      if (match[1]) symbols.add(`var:${match[1]}`);
+    }
+
+    // 7. Imports (JS/TS & Python)
+    const jsImportRegex = /(?:import\s+(?:[\w$*{}min\s,]+from\s+)?['"]([^'"]+)['"])/g;
+    while ((match = jsImportRegex.exec(content)) !== null) {
+      if (match[1]) symbols.add(`import:${match[1]}`);
+    }
+
+    const pyImportRegex = /(?:^|\n)\s*(?:import\s+([A-Za-z0-9_.]+)|from\s+([A-Za-z0-9_.]+)\s+import)/g;
+    while ((match = pyImportRegex.exec(content)) !== null) {
+      const mod = match[1] || match[2];
+      if (mod) symbols.add(`import:${mod}`);
+    }
+
+    // 8. Methods inside classes
+    const methodRegex = /(?:public|private|protected|async|static|get|set)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g;
+    const reservedKeywords = new Set([
+      'if',
+      'while',
+      'for',
+      'switch',
+      'catch',
+      'function',
+      'constructor',
+      'return',
+      'import',
+      'export',
+      'class',
+      'interface',
+      'type',
+      'enum',
+      'def',
+      'typeof',
+      'instanceof',
+    ]);
+    while ((match = methodRegex.exec(content)) !== null) {
+      if (match[1] && !reservedKeywords.has(match[1]) && !fnNames.has(match[1])) {
+        symbols.add(`method:${match[1]}`);
+      }
+    }
+
+    // 9. JSON keys / entity identifiers if JSON
+    if (item.contentType === 'json') {
+      const jsonKeyRegex = /"([^"\\]+)":/g;
+      while ((match = jsonKeyRegex.exec(content)) !== null) {
+        if (match[1]) symbols.add(`jsonkey:${match[1]}`);
+      }
+    }
     return symbols;
   }
 

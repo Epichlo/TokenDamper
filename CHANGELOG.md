@@ -9,6 +9,47 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > rewriting it would falsify that. See `docs/retired-documents.md` for where each conclusion
 > lives now and how to read the original out of git.
 
+## [Unreleased]
+
+### Fixed
+- **`DriftCoverage.symbolBearingItems` counts symbols rather than validator coverage (DECISIONS
+  §71).** It was `astCoverage.checked` computed a second way, under a name asserting a fact about
+  symbols that nothing checked. `extractSymbols` is regexes over content with no language gate and
+  `selectValidator` has four branches; the two agreed only while every language with symbols also
+  had a validator.
+
+  Both directions are real. Go between §59 and §60 reported `symbolsBefore >= 3` beside
+  `symbolBearingItems: 0` on all 80 frozen Go files — §60 gave Go a validator, which removed Go
+  from that population **without fixing the field**. The reverse case is in this repository: six of
+  its own barrel files are validator-covered and yield no symbols, and those are precisely the
+  files §28 and §33 exist to protect.
+
+  **Measured over a corpus frozen at `1e0f71f`** — 290 files, 580 rows, ratio 0.3, both routes,
+  16 fields compared per row with the key asserted unique:
+
+  | | |
+  |---|---|
+  | rows differing | **254 of 580** |
+  | fields differing | **`symbolBearingItems` only** |
+  | direction | **254 up, 0 down** — it only ever under-counted |
+  | rows with `symbolsBefore > 0` beside `symbolBearingItems: 0` | **254 → 0** |
+  | `outputSha` | identical on **all 580** |
+
+  The differing buckets name the cause — `tcl`, `c`, `shell`, `perl`, `rust`, `css`, every
+  language with no validator — plus **63 rows of `typescript/stdin`**, this project's own language
+  on its own second route, where pathless TypeScript gets no validator either (§29).
+
+  The per-item extractor is split out as `extractItemSymbols`, so the count and `symbolsBefore`
+  come from **one** pass. Computed as a separate filter it cost a measured **19 ms of 196 ms** on
+  an 18-item bundle — every regex run twice over every item, for a reporting field; the split
+  brings that to ~6 ms. It is behaviour-preserving by construction rather than by testing: the
+  loop body was already a pure function of one item, with 11 writes to the shared set and **zero**
+  reads, so a union of per-item sets is the set it used to accumulate.
+
+  **`unwitnessedItems` is not a subset of it**, though its doc comment said “of those”. §33
+  widened the unwitnessed rule from validator-covered items to every item — the opposite of a
+  subset, and the exact population §33 was written to stop losing.
+
 ## [v1.7.2] - 2026-09-01
 
 **The published package no longer ships its own test suite.** No runtime behaviour changes; the

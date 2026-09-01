@@ -364,8 +364,13 @@ describe('end to end: the declared route reaches what the file route reaches', (
     // **Phase A closed the undeclared half too.** The measurement gate no longer keys on
     // validator coverage, so the barrel is refused over stdin whether or not a language is
     // declared. Both arms below now assert a refusal; before Phase A the first asserted the
-    // hole. What the declaration still changes is *coverage* — `symbolBearingItems` goes
+    // hole. What the declaration still changes is *coverage* — `astCoverage.checked` goes
     // 0 -> 1 — which is what §29 was actually for.
+    //
+    // That claim was asserted on `symbolBearingItems` until DECISIONS §59, which was the same
+    // number by accident: the field counted validator-covered items, not symbol-bearing ones.
+    // It now counts symbols, and this barrel has none either way — so the arms differ on
+    // coverage and agree on symbols, which is exactly what §29 buys and what it does not.
     const content =
       Array.from({ length: 14 }, (_, i) => `export * from './module-number-${i}';`).join('\n') +
       '\n';
@@ -382,6 +387,7 @@ describe('end to end: the declared route reaches what the file route reaches', (
       'SEMANTIC_DRIFT_UNMEASURABLE',
     );
     // Still uncovered — the refusal no longer depends on coverage.
+    expect(probed.trace.astCoverage?.checked).toBe(0);
     expect(probed.validation.driftCoverage?.symbolBearingItems).toBe(0);
 
     const declared = optimize({
@@ -394,7 +400,10 @@ describe('end to end: the declared route reaches what the file route reaches', (
     );
     expect(declared.fallbackUsed).toBe(true);
     expect(declared.emittedOutput).toBe(content);
-    expect(declared.validation.driftCoverage?.symbolBearingItems).toBe(1);
+    // Coverage is what the declaration bought.
+    expect(declared.trace.astCoverage?.checked).toBe(1);
+    // Symbols are what it did not: a barrel bears none, declared or probed.
+    expect(declared.validation.driftCoverage?.symbolBearingItems).toBe(0);
   });
 });
 
