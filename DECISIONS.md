@@ -5219,3 +5219,78 @@ not evidence when the corpus does not contain the shape.
 
 M8 and M9 are both verified against real sockets rather than `mockUpstream`, because both live in
 header handling that a short-circuited upstream never exercises.
+
+## 71. `symbolBearingItems` Counts Symbols Now, Which It Never Did
+
+`DriftCoverage.symbolBearingItems` was `new Set(after.items.filter((i) => !unchecked.has(i.id)))`
+— the count of items an **AST validator covered**. That is `trace.astCoverage.checked` arriving a
+second way, under a name asserting a fact about symbols that nothing had checked.
+
+§60 found it and left it deliberately, on the grounds that a trace field consumers parse should not
+be changed as a ride-along in the commit that exposed it. This is that decision taken on its own.
+
+### The two counts never had to agree, and both directions are real
+
+`extractSymbols` is regexes over `item.content` with **no language gate**. Validator coverage is
+`selectValidator`, which has four branches. Nothing ties them together; they agreed only for as
+long as every language with symbols also had a validator and every language without one had
+neither.
+
+- **Symbols without a validator.** Go between §59 and §60 was the first instance: all 80 frozen Go
+  files reported `symbolsBefore >= 3` beside `symbolBearingItems: 0`. §60 then gave Go a
+  validator, which removed Go from the population **without fixing the field** — the symptom moved,
+  the defect did not.
+- **A validator without symbols.** Six of this repository's own `src/**/*.ts` files are barrels
+  that a validator covers and that yield no symbols at all. Those are precisely the files §28 and
+  §33 exist to protect, and the field asserted symbols were the witness standing behind them.
+
+### Measured: 254 of 580 rows, one field, no output
+
+Corpus frozen at `1e0f71f`, 290 files, 580 rows, ratio 0.3, both routes. Sixteen fields compared
+per row, keyed on `corpusPath` + route with the key asserted unique:
+
+| | |
+|---|---|
+| rows differing | **254 of 580** |
+| fields differing | **`symbolBearingItems` only** |
+| direction | **254 up, 0 down** — it only ever under-counted |
+| self-contradicting rows (`symbolsBefore > 0` beside `symbolBearingItems: 0`) | **254 → 0** |
+| `outputSha` | identical on **all 580** |
+
+`byteIdentical`, `reduction`, `fallbackUsed`, `driftScore`, `debtScore`, `planMode`,
+`stageCount`, `astChecked`, `driftMeasured` and `unwitnessedItems` are unchanged on every row.
+
+The differing buckets name the cause: `tcl` (58), `c` (56), `shell` (30), `perl` (8), `rust` (4),
+`css` (6) — every language with no validator — plus **63 rows of `typescript/stdin`**. That last
+one is this repository's own source: pathless TypeScript gets no validator (§29 declined a TS
+content probe because its positives overlap prose negatives), so the largest single bucket of the
+contradiction was the project's own primary language on its own second route.
+
+### The count is a denominator, and it had to be free
+
+`symbolsBefore` is a bundle-level `Set`, so it deduplicates across items and cannot say whether 31
+symbols came from one item or thirty. Read as a pair, `symbolsBefore: 31, symbolBearingItems: 3`
+says the symbols came from three items and every other retained item has `R_AST`'s empty-set
+default rather than a measurement standing behind it.
+
+The obvious implementation — `items.filter(i => extractSymbols({...bundle, items: [i]}).size > 0)`
+— **costs a measured 19 ms of 196 ms** on an 18-item bundle, because it runs every regex a second
+time over every item for a reporting field. `extractItemSymbols` splits the per-item body out so
+`symbolsBefore` and the count come from one pass; overhead falls to ~6 ms.
+
+The split is behaviour-preserving **by construction, not by testing**: the loop body was already a
+pure function of one item, declaring all its state inside the loop and touching the shared set
+through 11 `add` calls and **zero** reads. A union of per-item sets is exactly the set it used to
+accumulate. The corpus confirms it — `symbolsBefore` feeds `R_AST`, which gates fallback, so any
+drift in that number would have moved `outputSha`, and none did.
+
+### What this does not establish
+
+The corpus arm proves output-neutrality and that the field moved on real files. It says nothing
+about whether the **new** number is the useful one — that is a claim about what a reader should do
+with it, and the doc comments on `DriftCoverage` are where it is argued.
+
+`unwitnessedItems` is **not** a subset of `symbolBearingItems`, and its doc comment said "of
+those" until now. §33 widened the unwitnessed rule from validator-covered items to every item,
+which is the opposite of a subset and describes the exact population §33 was written to stop
+losing. Symbols are one accepted witness; content markers are the other.

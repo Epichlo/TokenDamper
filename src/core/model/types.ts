@@ -268,9 +268,27 @@ export interface DriftCoverage {
   readonly contentChanged: boolean;
   readonly symbolsBefore: number;
   readonly contentMarkersBefore: number;
-  /** Items an AST validator covers, for which symbols are the expected witness. */
+  /**
+   * How many retained items `symbolsBefore` was harvested from.
+   *
+   * Read the two together: `symbolsBefore: 31, symbolBearingItems: 3` says the symbols came
+   * from three items, and any item outside that count has `R_AST`'s empty-set default rather
+   * than a measurement standing behind it.
+   *
+   * Until DECISIONS §59 this counted items an **AST validator** covered — `astCoverage.checked`
+   * arrived at a second way, under a name asserting something about symbols that nothing
+   * checked. Do not re-derive it from validator coverage: the two are independent, and on a
+   * mixed bundle the old computation was wrong in both directions at once.
+   */
   readonly symbolBearingItems: number;
-  /** Of those, the ones changed without leaving any evidence of retention. */
+  /**
+   * Items that changed and left no evidence of retention, of either kind.
+   *
+   * **Not a subset of `symbolBearingItems`** — this said "of those" while §33 was widening the
+   * rule from validator-covered items to every item, which is the opposite of a subset and
+   * describes the exact population §33 was written to stop losing. Symbols are one accepted
+   * witness here; content markers are the other.
+   */
   readonly unwitnessedItems: ReadonlyArray<string>;
 }
 

@@ -92,30 +92,36 @@ export function validate(
   const driftTrackerOptions = options?.maxDriftThreshold !== undefined ? { maxDriftThreshold: options.maxDriftThreshold } : {};
   const driftTracker = new DriftTracker(driftTrackerOptions);
 
-  // Reuse the coverage computed in step 1. `validateBundleAst` ran over `after`, and elision
-  // carries `id`, `path`, `language` and `contentType` through unchanged, so an item covered
-  // after was covered before — no second AST pass, and no second copy of the validator
-  // precedence rules to drift out of sync.
+  // `DriftCoverage.symbolBearingItems` used to be computed here, as the set of items an AST
+  // validator covered — `astCoverage.checked` a second way, under a name that asserts a fact
+  // about symbols nothing had checked. It is now `driftReport.symbolBearingItemCount`, counted
+  // by the extractor that produces `symbolsBefore` (DECISIONS §59).
   //
-  // This is now **reporting only**. Until Phase A it also scoped the unwitnessed-item rule,
-  // so the rule could not fire on anything no validator covered — which is precisely the
-  // population that was being deleted unwitnessed. `calculateDrift` no longer takes it.
+  // It counted validator-covered items — `astCoverage.checked` arriving a second way, under a
+  // name asserting a fact about symbols that nothing had checked. The two agreed for as long as
+  // every language with symbols also had a validator and every language without one had neither,
+  // so they agreed by coincidence of coverage rather than by construction.
   //
-  // **`symbolBearingItems` counts validator-covered items, not items bearing symbols, and the
-  // name is wrong rather than loose (DECISIONS §60).** It is `astChecked` computed a second
-  // way. Nothing had ever made the difference visible, because until §59 every language with
-  // symbols also had a validator and every language without one had neither — so the two
-  // counts agreed by coincidence of coverage, not by construction.
+  // They come apart in both directions, and both are measured:
   //
-  // Go between §59 and §60 was the first case where they came apart, and the pair is
-  // self-contradicting: measured over 80 frozen Go files on the file route, **all 80** report
-  // `symbolsBefore = 3` or more next to `symbolBearingItems = 0`. `symbolsBefore` is the field
-  // that actually counts symbols; read that one.
+  //   - Go between §59 and §60 was the first language to have symbols without a validator. On 80
+  //     frozen Go files, the file route reported `symbolsBefore = 3`+ next to
+  //     `symbolBearingItems = 0` on **all 80** — a self-contradicting pair on one trace. §60
+  //     closed that by giving Go a validator, which fixed the symptom for one language and left
+  //     the field still counting the wrong thing.
+  //   - The reverse case is in this repository and always was: six of its own `src/**/*.ts`
+  //     files are barrels that a validator covers and that yield no symbols at all. Those are
+  //     precisely the files §28 and §33 exist to protect, and the field claimed symbols were the
+  //     witness standing behind them.
   //
-  // Left as it is here on purpose. It is a trace field consumers parse, so renaming it (or,
-  // worse, making it count what its name says and moving the number for every language) is a
-  // decision with its own blast radius, not a ride-along in the commit that exposed it.
-  const symbolBearingItemIds = new Set(after.items.filter((item) => !unchecked.has(item.id)).map((item) => item.id));
+  // §60 left it deliberately, on the grounds that a trace field consumers parse should not be
+  // changed as a ride-along in the commit that exposed it. This is that decision taken on its
+  // own: the number moves for any bundle where coverage and symbol-bearing disagree.
+  //
+  // The old set also scoped the unwitnessed-item rule until Phase A, so the rule could not fire
+  // on anything no validator covered — which was exactly the population being deleted
+  // unwitnessed (§33). `calculateDrift` has not taken it since, so removing it here is a pure
+  // reporting change.
 
   // Computed over `before`, not `after`: the question is what this build could have done to the
   // input, which is a property of the input's languages and does not depend on what the stages
@@ -131,7 +137,7 @@ export function validate(
     contentChanged: driftReport.contentChanged,
     symbolsBefore: driftReport.symbolsBeforeCount,
     contentMarkersBefore: driftReport.contentMarkersBeforeCount,
-    symbolBearingItems: symbolBearingItemIds.size,
+    symbolBearingItems: driftReport.symbolBearingItemCount,
     unwitnessedItems: driftReport.unwitnessedItemIds,
   };
 
