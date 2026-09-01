@@ -24,6 +24,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   its own barrel files are validator-covered and yield no symbols, and those are precisely the
   files §28 and §33 exist to protect.
 
+  **This is a breaking change to the trace surface** for anything parsing `driftCoverage` off
+  stderr or out of the MCP trace — the number moves for every uncovered-but-symbol-bearing item.
+  Renaming it to `astCoveredItems` instead was considered: that breaks the surface identically,
+  so it buys nothing on the axis where it looks cheaper, and it would keep a field that provably
+  duplicates the one beside it.
+
+  It survived this long because it was wrong in **both directions at once** on a mixed bundle —
+  counting a symbol-free barrel, excluding a symbol-bearing Go file — and the errors partly
+  cancelled to a plausible-looking number. Two tests pinned the misnomer rather than the
+  behaviour: `drift-unwitnessed-elision.test.ts` asserted `symbolBearingItems: 1` three
+  lines below `unwitnessedItems.length: 1`, the trace claiming the item both bore symbols and
+  left no witness. Both are corrected.
+
   **Measured over a corpus frozen at `1e0f71f`** — 290 files, 580 rows, ratio 0.3, both routes,
   16 fields compared per row with the key asserted unique:
 
