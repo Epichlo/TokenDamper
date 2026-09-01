@@ -5229,6 +5229,22 @@ second way, under a name asserting a fact about symbols that nothing had checked
 §60 found it and left it deliberately, on the grounds that a trace field consumers parse should not
 be changed as a ride-along in the commit that exposed it. This is that decision taken on its own.
 
+### Why it survived: it was wrong in both directions, and the errors cancelled
+
+On a four-item mixed bundle the field was wrong **both ways at once** — counting a symbol-free
+barrel, and excluding a symbol-bearing Go file and a symbol-bearing markdown document. The two
+errors partly cancelled, to a plausible-looking `2` where the truthful count was `3`. It was
+not obviously broken; it was quietly ratified.
+
+Two tests helped ratify it, by pinning the misnomer rather than the behaviour. Both used the same
+14-line `export * from` barrel, and `test/unit/drift-unwitnessed-elision.test.ts` asserted
+`symbolBearingItems: 1` three lines below `unwitnessedItems.length: 1` — the trace claiming
+simultaneously that the item bore symbols and that it left no witness. Both are corrected here.
+
+`tools/corpus-harness/measure.js` recorded this field *and* `astChecked`, so every corpus run
+carried the same column twice under two names, and any comparison of the two agreed by
+construction.
+
 ### The two counts never had to agree, and both directions are real
 
 `extractSymbols` is regexes over `item.content` with **no language gate**. Validator coverage is
@@ -5241,7 +5257,9 @@ neither.
   validator, which removed Go from the population **without fixing the field** — the symptom moved,
   the defect did not.
 - **A validator without symbols.** Six of this repository's own `src/**/*.ts` files are barrels
-  that a validator covers and that yield no symbols at all. Those are precisely the files §28 and
+  that a validator covers and that yield no symbols at all — `src/index.ts`,
+`src/config/index.ts`, `src/core/model/index.ts`, `src/core/ledger/index.ts`,
+`src/bench/index.ts` and `src/bench/fixtures/index.ts`. Those are precisely the files §28 and
   §33 exist to protect, and the field asserted symbols were the witness standing behind them.
 
 ### Measured: 254 of 580 rows, one field, no output
@@ -5265,6 +5283,20 @@ The differing buckets name the cause: `tcl` (58), `c` (56), `shell` (30), `perl`
 one is this repository's own source: pathless TypeScript gets no validator (§29 declined a TS
 content probe because its positives overlap prose negatives), so the largest single bucket of the
 contradiction was the project's own primary language on its own second route.
+
+### Rename and delete were both considered
+
+**Make it count what its name says**, rather than rename it to `astCoveredItems`. Both options
+break the trace surface identically, so the rename buys nothing on the axis where it looks
+cheaper — and it would preserve a field provably duplicating the one beside it.
+
+Deleting it outright was rejected for the reason the next section gives: `symbolsBefore` is a
+total with no denominator, and cannot distinguish "every item carries symbols" from "one item
+carries all of them".
+
+**This is a breaking change to the trace surface** for anything parsing `driftCoverage` off
+stderr or out of the MCP trace. The number moves for every uncovered-but-symbol-bearing item —
+254 of 580 corpus rows, all upward.
 
 ### The count is a denominator, and it had to be free
 
