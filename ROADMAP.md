@@ -1,7 +1,10 @@
 # TokenDamper Product Roadmap — v1.1.0 → v2.0.0
 
-**Baseline:** **v1.6.1** (shipped 2026-08-30 — `oxaudit.md` Lane A closed and Lane B all but two
-held decisions: **§61** Go elides, **§62** two withdrawn dials, **§64** `debtScore` becomes a
+**Baseline:** **v1.7.0** (shipped 2026-09-01 — **`oxaudit.md` closed in full**: **§70** the last
+four findings, three of them decisions — bench stops executing dataset code, an exposed Gateway
+bind must be authenticated, Origin/Host validation, and two inert CLI dials documented), on top
+of **v1.6.1** (tagged 2026-08-30, GitHub release only, never published to npm — **§61** Go
+elides, **§62** two withdrawn dials, **§64** `debtScore` becomes a
 measurement, **§65–§68** four Gateway defects), on top of **v1.6.0** (shipped 2026-08-16 —
 `max_audit.md` closed in full: **§54** M7,
 **§55** the LOW table, **§57** the block-hash false positive), on top of **v1.5.0** (the
@@ -604,7 +607,8 @@ remediation track was inserted. Corrected below; the numbering now matches the c
 | v1.4.0 | Prior release | §50 — sub-region elision; the target adheres | rows >50%: 34 → 18, zero regressions | Shipped 2026-08-12 |
 | v1.5.0 | Prior release | §52 — a comment narrates as well as instructs | 4 fallbacks fixed, 0 new, 572/576 identical | Shipped 2026-08-12 |
 | v1.6.0 | Prior release | §54 M7 (wire bytes + wire metrics) · §55 the LOW table · §57 the block-hash false positive | 576/576 rows identical; 677 tests green | Shipped 2026-08-16 |
-| **v1.6.1** | **Baseline (shipped)** | §59–§61 Go elides · §62 two withdrawn dials · §64 `debtScore` measures · §65–§68 four Gateway defects · §63/§69 the float pool and the OX LOW table | 574/574 rows identical on the main corpus; application Go 27.46% | **Shipped 2026-08-30** |
+| v1.6.1 | Prior release | §59–§61 Go elides · §62 two withdrawn dials · §64 `debtScore` measures · §65–§68 four Gateway defects · §63/§69 the float pool and the OX LOW table | 574/574 rows identical on the main corpus; application Go 27.46% | Tagged 2026-08-30 — GitHub release only, never published to npm |
+| **v1.7.0** | **Baseline (shipped)** | §70 — the last four OX findings: bench stops executing dataset code (M15), an exposed bind must be authenticated (M8), Origin/Host validation (M9 + L13), two inert dials documented (M13) | `oxaudit.md` closed in full; 95 files / 859 tests green | **Shipped 2026-09-01** |
 | *unnumbered* | Selection quality | BM25 + graph hybrid scorer, dual-path MMR | `<10ms` pipeline selection | ⛔ **Both preconditions measured false** — holds no number |
 | *unnumbered* | Folding & cache | Fast (zero-dep) vs Deep (AST) mode, `cache_control` | `<1ms` Fast / `~15ms` Deep | ⛔ Fast largely shipped; cache needs an exact tokenizer — **holds no number** |
 | *unnumbered* | Retrieval | `rehydrate_context` with sub-query matching | Targeted line extraction | ✅ Unblocked (M5b shipped); response shape still to design |

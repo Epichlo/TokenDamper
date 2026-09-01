@@ -9,10 +9,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > rewriting it would falsify that. See `docs/retired-documents.md` for where each conclusion
 > lives now and how to read the original out of git.
 
-## [Unreleased]
+## [v1.7.0] - 2026-09-01
 
-**`oxaudit.md` is closed in full.** The last four findings, three of which were decisions
-rather than defects — DECISIONS §70.
+**`oxaudit.md` is closed in full** — a second independent audit, closed across two releases.
+The last four findings land here, and three of them were decisions rather than defects
+(DECISIONS §70).
+
+**Two things change under you, and both are the point rather than side effects:**
+
+- **An exposed Gateway bind with no token now refuses to start.** If you run the Gateway on
+  `0.0.0.0` (or any LAN address) without `gatewayToken`, `start()` throws instead of listening.
+  That configuration was an unauthenticated relay forwarding request bodies to upstream
+  providers. Set a token, bind loopback, or set `allowUnauthenticatedNonLoopback: true` if an
+  open relay is genuinely what you want. `tokendamper exec` is unaffected — it binds loopback
+  *and* generates a token — and loopback trust (audit C3) is untouched.
+- **Plain `tokendamper bench` no longer executes fixture code through `python`.** It reports a
+  different quantity under the same field names: `syntaxPassRate` and `passAt1Rate` now come
+  from validation, measured **0.6** against the execution-derived **1.0** on the bundled
+  fixtures. Pass `--evaluate-quality` for the previous numbers.
+
+**1.6.1 was tagged and released on GitHub but never published to npm.** Everything in its notes
+is in this release; if you are coming from 1.6.0, read that section too — it carries Go elision,
+the withdrawn `--trace-output`, and four Gateway fixes.
+
+Minor rather than major on this project's standing rule: nothing that worked was removed. The
+exposed-bind refusal is the closest call, and it lands here rather than at major because what
+stops working is a configuration that was silently unsafe, not a capability.
 
 ### Changed
 - **`tokendamper bench` no longer executes dataset code (audit OX-M15).**

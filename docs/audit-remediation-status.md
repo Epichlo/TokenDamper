@@ -3,8 +3,10 @@
 Working state for the `max_audit.md` remediation. **Read this before picking up audit work**;
 it records what is done, what is measured, and what the next batch actually requires.
 
-Last updated 2026-08-30. **Unreleased on `main` since v1.6.1:** the last four `oxaudit.md`
-findings — M15, M8, M9 (with L13) and M13 — DECISIONS §70, §1 below. **Shipped as v1.6.1:** a pruned-file warning (§7.8),
+Last updated 2026-09-01. **Shipped as v1.7.0:** the last four `oxaudit.md` findings — M15, M8,
+M9 (with L13) and M13 — DECISIONS §70, §1 below, which **closes `oxaudit.md` in full**. Note
+v1.7.0 is the first npm release since 1.6.0: **1.6.1 was tagged and released on GitHub but never
+published**, so its contents ship here. **Shipped as v1.6.1 (tag only):** a pruned-file warning (§7.8),
 `--keep-docstrings` (DECISIONS §58, §7.9) — both found by dogfooding, not the audit — **widening
 elision to Go, all three steps** (DECISIONS §59, §60 and §61, §7.3, §9), and the `oxaudit.md`
 remediation itself: §62 (two withdrawn dials), §63 and §69 (the float pool and the OX LOW table),

@@ -207,8 +207,13 @@ with **zero** new fallbacks and **zero** files that stopped reducing; 522 rows a
 because subdivision is confined to the ceiling path. Current measured baseline: python file
 **17.95%**, typescript file **18.52%** — status doc §2, not the figures a prior session may quote.
 
-**Unreleased on `main` since v1.6.1: `oxaudit.md` is closed in full (DECISIONS §70).** The last
-four findings, three of which were decisions rather than defects.
+**v1.7.0 shipped 2026-09-01 — `oxaudit.md` is closed in full (DECISIONS §70).** The last four
+findings, three of which were decisions rather than defects.
+
+**v1.7.0 is the first npm release since 1.6.0.** 1.6.1 was tagged and released on GitHub but
+never published — the audit work landed before the publish, and shipping different bytes under
+an already-tagged number is the hazard the `release` skill exists to prevent. Anything citing
+1.6.1 as "the current release" means the tag, not the registry.
 
 - **M15** — plain `tokendamper bench` no longer runs fixture code through `python`.
   `--evaluate-quality` asks for it. Plain `bench` writes **0** `python-subprocess` evaluations
