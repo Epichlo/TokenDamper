@@ -50,7 +50,24 @@ export interface GatewayConfig {
   readonly sessionTtlMs: number;
   readonly maxSessions: number;
   readonly maxContentEntriesPerSession?: number | undefined;
+  /**
+   * Cap on the per-session set of block hashes seen in earlier turns. Default 1000.
+   *
+   * Configurable because its neighbours are (audit OX-L6): it was a bare local constant inside
+   * `capSeenBlockHashes` while `sessionTtlMs`, `maxSessions` and `maxContentEntriesPerSession`
+   * were all settable, so the one bound that grows with conversation length was the one nobody
+   * could tune. Eviction is insertion-ordered, so lowering it discards the oldest hashes first.
+   */
+  readonly maxSeenBlockHashesPerSession?: number | undefined;
   readonly gatewayToken?: string | undefined;
+  /**
+   * How long the upstream has to produce **response headers**, in milliseconds. Default 30000.
+   *
+   * Time-to-first-byte only. It deliberately does not bound how long the response *body* may
+   * take, because an LLM completion routinely streams for minutes and a budget that governed
+   * the body would truncate it mid-generation (audit OX-H2).
+   */
+  readonly upstreamTtfbTimeoutMs?: number | undefined;
   /**
    * Test seams, forwarded to `ProxyHandlerOptions`. See the fields of the same names there —
    * both replace ambient environment reads that used to sit inside the request path (audit M8),
@@ -58,6 +75,15 @@ export interface GatewayConfig {
    */
   readonly mockUpstream?: boolean | undefined;
   readonly allowMissingUpstreamCredentials?: boolean | undefined;
+  /**
+   * Permit binding a non-loopback host with no `gatewayToken`. Default false, and `start()`
+   * throws rather than listening — audit OX-M8.
+   *
+   * This is not a test seam. It is the deliberate escape hatch for someone who genuinely wants
+   * an open relay on a trusted network, and it is a separate field rather than a magic token
+   * value so that the intent is legible in a config file and greppable in a deployment.
+   */
+  readonly allowUnauthenticatedNonLoopback?: boolean | undefined;
 }
 
 /**
@@ -68,6 +94,8 @@ export interface ProxyHandlerOptions {
   readonly upstreamOpenAiUrl?: string | undefined;
   readonly upstreamAnthropicUrl?: string | undefined;
   readonly abortSignal?: AbortSignal | undefined;
+  /** Header budget in milliseconds; see `GatewayConfig.upstreamTtfbTimeoutMs`. Default 30000. */
+  readonly upstreamTtfbTimeoutMs?: number | undefined;
   /**
    * The request body exactly as it arrived on the socket.
    *

@@ -26,7 +26,7 @@ import { GatewayServer } from '../../src/gateway/server';
  */
 describe('what the Gateway saves, measured', () => {
   let server: GatewayServer;
-  let port: number;
+  let port: number;
   const BLOCK = Array.from(
     { length: 30 },
     (_, i) => `export function helper${i}(input) {\n  const scaled = input * ${i};\n  return scaled + ${i};\n}`,
@@ -112,5 +112,49 @@ describe('what the Gateway saves, measured', () => {
     });
 
     expect(turn2.forwarded).toBeLessThan(turn2.sent);
+  });
+
+  it('saves on within-payload repetition on the very first turn, with no history at all', async () => {
+    // Audit OX-M1. Within-payload dedup used to be a *side condition* of cross-turn matching: the
+    // whole branch was gated on `previousBlockHashes.has(hash)`, and the stage returned early
+    // unless that set was non-empty. So on turn 1 three identical blocks all survived, and the
+    // README's "same block repeated within one payload → saves" was true only from turn 2.
+    //
+    // The gate was doing no safety work here. `recoverable: true` requires an intact copy in the
+    // *same outbound payload*, which rule 3 guarantees by preserving the first occurrence — and
+    // that claim is verifiable without any history. DECISIONS §16/§41 are about a **sole** copy
+    // elided across turns, which is a different case and is still refused above.
+    const session = `sess-first-turn-${Date.now()}`;
+
+    const turn1 = await post(session, {
+      model: 'm',
+      messages: [
+        { role: 'user', content: BLOCK },
+        { role: 'assistant', content: 'ok' },
+        { role: 'user', content: BLOCK },
+        { role: 'assistant', content: 'still ok' },
+        { role: 'user', content: BLOCK },
+      ],
+    });
+
+    expect(turn1.forwarded).toBeLessThan(turn1.sent);
+  });
+
+  it('still saves nothing on a first turn whose blocks are all distinct', async () => {
+    // The control that keeps the case above honest: turn 1 is not simply "always saves now".
+    // Without repetition there is no intact copy to reference, so nothing is recoverable to elide
+    // and the payload goes out whole.
+    const session = `sess-first-distinct-${Date.now()}`;
+
+    const turn1 = await post(session, {
+      model: 'm',
+      messages: [
+        { role: 'user', content: BLOCK },
+        { role: 'assistant', content: 'ok' },
+        { role: 'user', content: `${BLOCK}\n\nexport const tail = 1;` },
+      ],
+    });
+
+    expect(turn1.forwarded).toBe(turn1.sent);
   });
 });

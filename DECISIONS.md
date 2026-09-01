@@ -4642,3 +4642,580 @@ determinism is invariant 1. Documented at `normalizeGitPath` and the scorer's ca
 `npm run typecheck`, `npm run lint` and `npm test` clean; the suite pins each disposition
 (`model.test.ts` for L2, `content-classification.test.ts` for L11, `declared-language.test.ts`
 for L3). L5 changes no code path, so no corpus run applies; nothing here touches engine output.
+
+---
+
+## 64. The Debt Score Was a Constant, and the Corpus Could Not See the Other Half
+
+**Audit OX-M6 and OX-M7**, both in `computeDebtBreakdown` / `attemptAutomatedRehydration`
+(`src/core/engine/index.ts`). Measured over a corpus frozen at `8b447ce`, 289 files, 578 rows
+(both CLI routes), target ratio 0.3.
+
+### M7: `debtScore` reported 35.00 on every file that reduced
+
+`computeDebtBreakdown` added `metadata.originalBytes` to `elidedBytes` for any item carrying
+`elided: true`. `originalBytes` is the item's **entire** pre-transform length — every stage that
+sets it does so from `item.content.length` — and `elided` is a boolean on the whole item. So an
+item that lost 5% of its bytes contributed 100% of its size to the numerator.
+
+On the CLI a single file is a single-item bundle, which makes `elidedBytes === totalBytes` whenever
+anything was elided at all. The ratio was 1.0 by construction.
+
+**Measured, baseline arm:** of 578 rows, 317 carried any debt at all, and **317 of 317 scored
+`debtScore` exactly 35.00** — the `weightElisionRatio * 100` ceiling — whether the file lost 4.7%
+or 66.8% of its bytes. `Math.min(1.0, …)` in `calculateDebt` was clamping a ratio with no business
+exceeding 1, which is why nothing ever looked wrong. The number was a constant wearing the name of
+a measurement, and `--max-debt` was a dial against a value that never moved.
+
+The fix counts bytes actually removed, `originalBytes - content.length`.
+
+**Measured, candidate arm:** 0 of 317 pinned at the ceiling; the distribution runs 1.31 → 34.99
+with a median of 33.08. Over the 101 rows that reduce, the implied ratio (`debtScore / 35`) against
+the measured byte cut has **correlation 1.0000** — 0.047 against 0.047, 0.198 against 0.198, 0.429
+against 0.429. It is now the quantity it claims to be.
+
+**Output did not move.** Per-row over 578 rows the only field that changed is `debtScore`;
+`outputSha`, `byteIdentical`, `tokenBefore`, `tokenAfter`, `reduction`, `fallbackUsed`,
+`driftScore`, `planMode` and `stageCount` are identical. Debt gates nothing on the CLI, because
+`shouldRehydrate` needs 75 and the elision term alone caps at 35.
+
+**The audit's stated mechanism was wrong and the finding was right.** It described a denominator
+mixing pre- and post-transform sizes. That does not happen: every stage setting `elided` also sets
+`originalBytes`, and untouched items are unchanged, so `totalBytes` was already a clean sum of
+original sizes. The numerator was the defect, and it was worse than "skewed" — it was saturated.
+
+### M6: an empty candidate set meant "restore everything"
+
+`attemptAutomatedRehydration` guarded with `candidates && candidates.size > 0 &&
+!candidates.has(item.id)`. The `size > 0` clause exists for the *missing* ledger case, where no
+statement has been made about which items matter. It also swallowed the case where a ledger exists
+and reports **zero** items below the confidence threshold, turning "nothing needs restoring" into
+"restore every elision in the bundle".
+
+**Reachability, checked rather than assumed.** None of the three bundled entry points reaches it:
+the CLI passes neither hasher nor ledger and returns at the first guard; MCP and `bench` pass a
+hasher but no ledger, so `candidates` is `null` and the intended fall-through applies; the Gateway
+passes a ledger but no hasher and plans only `cleanup:session-dedup`, so nothing it elides could be
+rehydrated. It **is** reachable through the public API — `optimize` is exported, and an embedder
+supplying both a `tokenHasher` and a `confidenceLedger` lands on it.
+
+Reproduced there: a 1,481-byte item came back at exactly 1,481 bytes, every elision undone, with
+`debtScore` then recomputed to 0 on the restored bundle so the trace reported no debt either.
+
+**The corpus is silent on this, and silence is not agreement.** The `m7 -> m6m7` arm differs on
+**0 of 578 rows**, which is exactly what the structure predicts and is *not* evidence the fix is
+correct — the corpus runs CLI routes, which supply no ledger, so the instrument cannot see the
+shape at all. This is §56's lesson with the sign reversed: byte-identical is not inert, and here it
+is not even informative.
+
+**The test had to be rebuilt twice.** The first version passed against the unfixed code, because
+the default `maxDebtThreshold` of 75 is unreachable on turn 1 — confidence penalty 0, turn age 0,
+elision term capped at 35 — so the branch it claimed to exercise never ran. The committed version
+carries two controls: one proving the setup elides at all, and one proving the branch *is* entered
+under `maxDebtThreshold: 1` via the no-ledger path, where a full restore is the intended behaviour
+rather than the bug.
+
+### What this does not establish
+
+- **Nothing about the Gateway.** Both findings are engine-level; the Gateway supplies a ledger but
+  no hasher, and its plan cannot produce a rehydratable elision. Neither fix changes Gateway
+  behaviour, and neither was measured there.
+- **Nothing about multi-item CLI bundles.** The harness runs one file per invocation. M7's
+  correction is larger on multi-item bundles — a partially-elided item over-contributes there too —
+  but that is reasoned, not measured.
+- **No absolute figure here is comparable to §2.** This corpus is 289 files at `8b447ce`; the
+  recipe expected 62 TypeScript and 17 prose files and selected 63 and 18, because the repository
+  has grown since the recipe was written. Only the per-row A/B over this one frozen corpus means
+  anything, which is the standing rule.
+- **`--max-debt` still gates nothing on the CLI.** Debt is now a real number, but the default
+  threshold of 75 remains unreachable without a ledger, so no CLI run can trip it. Whether the
+  threshold or the weights should change is a separate question and was not touched.
+
+---
+
+## 65. One `content: null` Turn Zeroed the Whole Request, So Egress Anchors on Positions Now
+
+**Audit OX-H4**, the highest-value finding in `oxaudit.md` and the first Lane B item taken.
+
+### The mechanism
+
+Egress splices replacements into the caller's raw bytes rather than re-serializing the payload
+(invariant 9, §54). It located each message by searching the raw body for `JSON.stringify(text)`,
+where `text` came from `flattenMessageContent` — which sends every **non-string** content through
+`JSON.stringify`. For `content: null` that yields the four-character string `null`, so the search
+string became `"null"` *with quotes*, which does not occur where the body holds a bare `null`.
+
+`spliceIntoRawBody` returns `undefined` on the **first** miss, and `forwardableBody` maps that back
+to the untouched `rawBody`. So the failure was all-or-nothing: one unmatchable message discarded
+the replacements for every other message in the payload.
+
+`content: null` is the standard OpenAI shape for an assistant turn that calls a tool. Essentially
+every agentic OpenAI conversation carries one.
+
+### Measured, on a payload the Gateway does save on
+
+A three-times-repeated block with a turn 1 to seed the session store:
+
+| payload | bytes sent | bytes forwarded |
+|---|---|---|
+| all-string content (control) | 8,685 | **less than sent** — the saving lands |
+| one `content: null` tool-call turn | 8,685 | **8,685** — entire saving gone |
+| one array (multimodal) content part | 8,530 | **8,530** — entire saving gone |
+
+**The array row is why this is a span scan and not the `null` special-case the audit proposed as
+an alternative.** That would have fixed one shape and left the other, and the two share a cause:
+`JSON.stringify` of a *parsed* value is not the caller's bytes. It is not even reliably so for
+strings — a pretty-printed body defeats the search for the same reason.
+
+### The fix
+
+`scanContentSpans` walks the raw body structurally and returns the `[start, end)` span of each
+spliceable slot, in the order entries are built (`system` first for Anthropic, then messages).
+`spliceBySpans` overwrites those ranges directly.
+
+A span is *where the value is*, so it is correct for every content shape, and repeated blocks — the
+case `session-dedup` exists for — need no forward cursor to disambiguate. The cursor requirement
+the audit said "must survive any rewrite" survives by becoming unnecessary, not by being dropped.
+
+**Kept: the old value search, as a fallback.** `forwardableBody` tries spans first and falls back to
+`spliceIntoRawBody`. A payload the scanner declines behaves exactly as it did before, so this change
+can only add savings.
+
+**Kept: declining as the failure direction.** The scanner returns `undefined` on anything it does
+not fully understand — a non-object root, absent or non-array `messages`, a message with no
+`content` key, a truncated body, an expected `system` that is missing. `spliceBySpans` additionally
+refuses when spans do not ascend across the entries it is replacing, which is the case where a
+backwards splice would corrupt.
+
+### Why the tests are shaped the way they are
+
+This is the code that decides which bytes of a caller's request get overwritten. A wrong span does
+not lose a saving, it corrupts a field being sent to a provider — the one direction invariant 3
+forbids. So `test/unit/gateway-content-span-scan.test.ts` is mostly about refusal, every span it
+accepts is checked by slicing the input and parsing the result, and the adversarial cases are the
+ones a naive scan gets wrong: `"content"` appearing inside a string value, a `meta: { content: … }`
+decoy preceding the real key, escaped quotes and backslashes, braces and brackets inside strings,
+and a pretty-printed body.
+
+`test/integration/gateway-null-content-splice.test.ts` adds the property that matters more than the
+saving: the forwarded body still parses, message count and roles are unchanged, and the tool-call
+turn comes back exactly as sent, `null` included. That assertion would have passed before the fix
+too — declining is safe — and it is here to stay true afterwards, which is the harder half.
+
+### What this does not establish
+
+- **Nothing about the corpus.** The harness measures CLI routes; the Gateway is not in it. The
+  instrument for this change is the Gateway integration suite, and the numbers above come from it.
+- **Nothing about cross-turn saving.** Invariant 8 is untouched: the Gateway still plans only
+  `cleanup:session-dedup`, and a sole cross-turn copy is still refused (§41). What was recovered is
+  the *within-payload* saving, on payloads that happen to contain a non-string content.
+- **The `system`-after-`messages` ordering is still a partial decline.** Entries list `system`
+  first, so such a payload yields non-ascending spans; the splice proceeds when `system` itself has
+  no replacement and declines when it does. Ordering entries by span position would close that and
+  was not attempted.
+- **`flattenMessageContent` is unchanged.** Structured content is still tagged `'structured'` and
+  `core/elision` still refuses to elide it. This change lets other messages be elided *despite* one,
+  not that one be elided.
+
+---
+
+## 66. The Upstream Budget Is Time-to-First-Byte, Because a Fetch Signal Outlives the Fetch
+
+**Audit OX-H2.** `forwardUpstreamRequest` armed `AbortSignal.timeout(30000)` and handed it to
+`fetch`. That is the whole defect: **a fetch signal does not stop applying when the promise
+resolves — it governs the response body stream too.**
+
+So for `"stream": true` payloads the body reader rejected roughly 30 seconds in, and the pump in
+`server.ts` called `res.destroy(...)`, truncating the answer mid-generation. LLM completions
+routinely run longer than 30 seconds, long-form Anthropic streams especially, so this broke exactly
+the traffic the Gateway intercepts by default. From the client's side it is indistinguishable from
+the model stopping.
+
+### The fix, and the one line that is the fix
+
+An owned `AbortController` replaces `AbortSignal.timeout`, and the timer is cleared in a `finally`
+on the header phase:
+
+```ts
+} finally {
+  clearTimeout(ttfbTimer);
+}
+```
+
+`AbortSignal.timeout` cannot be used here because it cannot be *un*-fired. Only a controller you own
+can be left permanently unaborted, which is what makes the budget time-to-first-byte: once `fetch`
+settles — resolved, timed out, or failed — nothing can fire it again, and the body phase is governed
+solely by the caller-disconnect signal.
+
+The 504 mapping is preserved by aborting with `new DOMException(…, 'TimeoutError')`, because the
+catch matches on `error.name` and that is exactly the reason `AbortSignal.timeout` used to produce.
+
+### The half that a careless fix removes
+
+`params.options.abortSignal` — the client-hangup signal, raised by `res.on('close')` in
+`server.ts` — stays combined into the fetch signal via `AbortSignal.any`. Disarming the *timeout*
+must not disarm the *disconnect*, or a client that walks away leaves the Gateway pulling a response
+nobody will read and paying the provider for it.
+
+That is asserted, and the assertion was mutation-checked: replacing the combined signal with
+`ttfbController.signal` alone fails that test and only that test.
+
+It also needed a second pass to be worth anything. The first version read the upstream's flag
+*after* `withGateway` returned — but that helper stops the server on the way out, which closes the
+upstream socket too, so the test would have passed whether or not the hangup propagated. The value
+is now sampled inside the gateway's lifetime.
+
+### Configurable, and why that is not scope creep
+
+`upstreamTtfbTimeoutMs` is now a `GatewayConfig` / `ProxyHandlerOptions` field defaulting to 30000.
+The audit suggested it, and it is what makes the defect testable at all: the reason no test caught
+a 30-second bug is that catching it required a 30-second upstream. This suite runs in about a
+second against a real socket, with budgets in the tens of milliseconds.
+
+The tests drive a real local upstream rather than `mockUpstream`, because `mockUpstream`
+short-circuits before `fetch` and the defect lives entirely in `fetch`'s signal handling.
+
+### Measured
+
+Against a real upstream, budget 120 ms, body streaming for ~300 ms:
+
+| case | before | after |
+|---|---|---|
+| headers fast, body outlives budget | truncated mid-stream | full body, `[DONE]`, all 5 chunks |
+| body an order of magnitude past budget (40 ms budget, ~400 ms body) | truncated | full body, all 8 chunks |
+| headers slower than budget | 504 | 504 (unchanged) |
+| client hangs up mid-stream | upstream aborted | upstream aborted (unchanged) |
+
+### What this does not establish
+
+- **Nothing about how long a body may take.** There is now no bound on it at all, deliberately. If
+  a stalled-mid-stream upstream ever needs bounding, that wants an idle timer on the pump — reset
+  per chunk — not a total-duration budget, and it is a different change.
+- **Nothing about the 10 MB body cap or the session store.** Untouched.
+- **Nothing about savings.** This path runs after optimization; it changes what reaches the client,
+  not what the Gateway elides.
+
+---
+
+## 67. Within-Payload Deduplication Never Needed History, and Was Gated on It Anyway
+
+**Audit OX-M1.** `runSessionDedupStage` treated within-payload repetition as a *side condition* of
+cross-turn matching. The whole dedup branch was gated on
+`sessionContext.previousBlockHashes.has(item.contentHash)`, and the stage returned early unless that
+set was non-empty — so on turn 1, three identical blocks in one payload all survived.
+
+The README's savings table said "the same block repeated **within one payload** → saves", with no
+qualifier. It was true from turn 2.
+
+### Why the gate was wrong rather than merely conservative
+
+`recoverable: true` means **an intact copy survives elsewhere in the same outbound payload**. Rule 3
+guarantees that by preserving the first occurrence and eliding the ones after it. That claim is
+verifiable from the payload alone: the model has seen the content, in this request, so the marker
+resolves.
+
+Nothing in it refers to previous turns. The `previousBlockHashes` check was answering a different
+question — *is this content old?* — and using the answer to decide something it does not bear on.
+
+**DECISIONS §16 and §41 are untouched.** They concern a **sole** copy elided across turns, where the
+consumer is a stateless provider API with no rehydration mechanism, so the marker is deletion rather
+than reference. That case is still elided with `recoverable: false`, still scored in full by
+`DriftTracker`, and still fails the gate. It is pinned by the first test in
+`gateway-dedup-reality.test.ts`, which is unchanged.
+
+### The change
+
+Two gates, both relaxed by the same reasoning:
+
+- `shouldAttemptDedup` is now `previousBlockHashes.size > 0 || hasRepeatedContent`. The occurrence
+  map moved above the early return, since within-payload repetition is by itself a reason to run.
+- The per-item branch fires on `seenInEarlierTurn || repeatsInThisPayload`.
+
+Rule 3 and the `isRecoverable = survivingHashes.has(hash)` computation are unchanged, which is what
+keeps sole-copy elision out of the new path: the first occurrence is always preserved, so anything
+elided under `repeatsInThisPayload` is recoverable by construction.
+
+### Measured
+
+Real sockets, a block repeated three times in one payload:
+
+| | before | after |
+|---|---|---|
+| turn 1, block ×3 | 8,459 sent, **8,459 forwarded** | saves |
+| turn 2, block ×3 (already worked) | saves | saves |
+| cross-turn sole copy | 0 bytes, falls back | 0 bytes, falls back |
+| turn 1, all blocks distinct | no saving | no saving |
+
+The last row is the control that keeps the first honest — turn 1 did not become "always saves". The
+third is §41 still holding.
+
+### What this does not establish
+
+- **Nothing about cross-turn saving.** Invariant 8 stands; the Gateway still plans only
+  `cleanup:session-dedup`, and the ordinary conversational shape — one copy per payload, seen
+  before — still saves nothing and still falls back. That is the number the README leads with and
+  it has not moved.
+- **Nothing about the corpus.** This stage never runs on the CLI or MCP paths, which execute
+  `plan.stageIds` and do not include it. The instrument is the Gateway integration suite.
+- **No claim that this is a large win.** It closes the gap between what the README says and what
+  the code does. Whether real agent traffic repeats a block inside a single payload often enough to
+  matter was not measured, and the honest framing stays the one in the README notice: use Gateway
+  mode for interception, validation and metrics, not for compression.
+
+---
+
+## 68. Pricing a Region Registered It, So the Store Grew With Candidates Instead of Elisions
+
+**Audit OX-M5.** `trimRegionsToCeiling` renders a marker for **every** candidate span in order to
+price it — correctly, because the marker is variable-length and self-describing and a saving
+estimated without it would overstate every region. The renderer it was handed, `markerFor`, also
+called `hasher.registerBlock(...)`. So every span the ceiling considered and then discarded was
+written into the store anyway.
+
+### Measured
+
+A 12-region TypeScript file, run through the stage with a `TokenHasher`:
+
+| target ratio | blocks registered | markers actually emitted |
+|---|---|---|
+| 0.10 | **12** | 5 |
+| 0.05 | **12** | 3 |
+
+The store held one block per *candidate*, not per elision. Memory therefore grows with how much the
+scanner finds, not with how much is removed — and `hasHash` / `expandBlockHash` answer for
+placeholders that appear in no output anywhere.
+
+Invisible on the CLI, which supplies no hasher at all. It matters on **MCP**, where the server
+instance is long-lived and the hasher *is* the reversibility store.
+
+### The fix, and the constraint that governed it
+
+`priceMarker` renders the same bytes without registering; `trimRegionsToCeiling` takes it instead of
+`markerFor`, and registration now happens only on the two paths that actually elide.
+
+The binding constraint was that **pricing and emission must render identical bytes** — otherwise the
+ceiling is computed against a different string from the one written, and `--target-reduction-ratio`
+adherence shifts. That holds by construction rather than by care: `renderElisionMarker` is a pure
+function of the text, its noun and its hash, and `hashContent` is pure. Registration never
+contributed to the output.
+
+### Corpus A/B: 578 of 578 rows byte-identical
+
+Corpus frozen at `48ac6c8`, 289 files, 578 rows, both CLI routes, ratio 0.3. Comparison engines
+built with an src-only tsconfig; `dist` hashes `7a3bad0f515f` (baseline) and `83e544289dc4`
+(candidate), so neither arm was compared against itself.
+
+**Zero rows differ, on any of the ten compared fields** — `outputSha`, `byteIdentical`,
+`tokenBefore`, `tokenAfter`, `reduction`, `fallbackUsed`, `driftScore`, `debtScore`, `planMode`,
+`stageCount`. That is the constraint above, verified end to end.
+
+**And it is not a vacuous result: 101 of those rows actually reduced**, so markers were genuinely
+priced and emitted. The corpus contains the shape the change touches, which is the check §56 exists
+to demand.
+
+### What this does not establish
+
+- **The corpus cannot see the defect itself.** It runs CLI routes, and the CLI supplies no
+  `TokenHasher`, so `markerFor`'s registration branch was already a no-op there. The A/B proves
+  *output-neutrality* — the constraint — and nothing about the leak. The leak is measured by
+  `token-hashing-store-pollution.test.ts`, which supplies a hasher directly.
+- **Nothing about MCP memory in practice.** The counts above are from a 12-region fixture. How much
+  a real long-lived MCP session accumulated was not measured, only that the growth was proportional
+  to candidates rather than elisions.
+- **Nothing about `bench`.** It supplies a hasher too, and was equally affected, but its runs are
+  short-lived so the accumulation had nowhere to build up.
+
+---
+
+## 69. The OX LOW Table, Closed Against Its Own List
+
+**Audit OX-L1 through OX-L19**, minus the four the float pool took in §63 (L2, L3, L5, L11) and
+L4, recorded at its site when the ingestion work landed.
+
+`max_audit.md`'s LOW table went unscheduled and was found open weeks later (§55). The lesson
+recorded then was *close a document against its own list of findings, not against the list of work
+that was done*, so every row is dispositioned here — including the ones not fixed, which is the half
+that goes missing.
+
+### Fixed
+
+| id | what |
+|---|---|
+| **L6** | `MAX_SEEN_BLOCK_HASHES = 1000` was a bare local inside `capSeenBlockHashes` while `sessionTtlMs`, `maxSessions` and `maxContentEntriesPerSession` were all settable. The one bound that grows with conversation length was the one nobody could tune. Now `GatewayConfig.maxSeenBlockHashesPerSession`, default 1000. |
+| **L7** | The MCP overflow check ran *before* `processBuffer` and then cleared the whole buffer, so a chunk carrying complete requests followed by one oversized partial discarded the complete ones too. They were well-formed, already received, and answerable. Draining first leaves exactly the un-terminated remainder for the limit to judge — which is what the limit is about. |
+| **L9** | The `limits` merge in the bench loader could never fire: `ResolvedConfig` has no such field, which is *why* it needed two `as unknown as Record<string, unknown>` casts. Deleting it also removed the `as unknown as ResolvedConfig` laundering that was disabling type checking for every other key in that literal. |
+| **L10** | Dataset routing tested `includes('humaneval')` **before** checking whether the argument was a real path, so `./fixtures/humaneval-comparison-2026.jsonl` was silently answered with the bundled dataset. Order is now exact name, then path, then substring as a last resort — so the guess can only help an argument nothing else resolves. |
+| **L12** | `package.json` and `src/version.ts` are hand-synced. Not restructured — `src/version.ts` stays the single source every adapter derives from, per the release procedure — but a test now pins them equal, which closes the drift class rather than the duplication. |
+| **L19** | `.gitignore` was the full GitHub Python template: 245 lines, ~111 entries, covering Django, Flask, Scrapy, PyBuilder, Celery, SageMath, Spyder, Rope, pyenv, pipenv, poetry and pdm, none of which this repository uses, with the dozen entries that work buried at the bottom. Now 44 lines and 25 entries, keeping a real Python block for `tokendamper-benchmark/`. Verified by diffing `git status --porcelain` across the change: nothing became newly visible. |
+
+L6, L7, L10 and L12 are pinned by `test/unit/audit-ox-low-findings.test.ts`. L6 and L7 were
+mutation-checked — reverting either source file fails its test and only its test.
+
+### Recorded at their sites, not fixed
+
+- **L1 — `expectedSavings: 0.45`.** Nothing in `src/` reads it, and the number is not a
+  measurement: the same corpus reduces ~20% on TypeScript and ~16% on Python (§64's baseline).
+  Left in place on the precedent H4 set and OX-H5 followed — `OptimizationPlan` is frozen, and a
+  field awaiting an implementation is not the same defect as a dial that reports success. Nobody
+  can *set* it, so it misleads no caller. Wiring it means deriving a real estimate from the selected
+  stages, which is a planner change.
+- **L8 — the MCP shutdown flush race.** `process.exit(0)` can truncate a stdout frame just written.
+  The fix is to stop forcing the exit and let the loop drain, but `stop()` only removes the `data`
+  listener — it does not pause or unref stdin — so whether the process then exits depends on stream
+  state that file does not control, and getting it wrong hangs `tokendamper mcp` on Ctrl+C.
+  Delivering SIGINT to exercise that is not something this suite can do. Shipping an unverified
+  change to a shutdown path to fix a rare truncated final frame is the wrong trade, and it is the
+  same call made for L4.
+- **L13 — `/health` reports `sessionCount` without authorization.** On a loopback bind that is not
+  a leak; the peer is already trusted enough to proxy through the process. It becomes one on an
+  exposed bind, which is precisely what **M8 and M9** are about. Deferred to them, because "should
+  this endpoint require a token on a loopback peer" is the same question those answer, and
+  answering it twice in two places is how two answers drift apart.
+- **L17 — architecture import rules unpoliced** and **L18 — no coverage tooling.** Both require a
+  new devDependency (`eslint-plugin-boundaries` or dependency-cruiser; `@vitest/coverage-v8`).
+  The audit calls both optional. Adding dependencies to someone's package on the strength of a LOW
+  finding is not a call to make unasked; both are one command away when wanted.
+- **L14, L15, L16** were "no action" in the audit itself and remain so: the elision post-condition
+  comment is correct and instructs its own maintenance, the DriftTracker regex noise is an accepted
+  tradeoff, and deep-freeze cost is fine at current scales.
+
+### What this does not establish
+
+- **Nothing about M8, M9 or M15**, which are decisions rather than work and are still open.
+- **L19's prune is verified only against the current tree.** `git status` showed nothing newly
+  visible, which proves no *existing* file lost its ignore. A file type that does not happen to
+  exist right now and was covered by a removed template line would not have been caught.
+
+## 70. The Last Four OX Findings: Three Decisions and One Paragraph
+
+Closes `oxaudit.md`. Three of these were held open because they are choices about the product
+rather than defects with an obvious fix, and one needed no decision at all.
+
+### OX-M15 — `bench` stops executing dataset code
+
+`BenchmarkRunner.run` read `config.evaluateQuality !== false`, which defaults **on**, and
+`BenchmarkEvaluator.evaluateFixture` runs each fixture's code and its dataset checks through
+`python -c`. So a harness `ARCHITECTURE.md` describes as offline and deterministic spawned an
+interpreter because someone typed `bench`, and the only escape was
+`TOKENDAMPER_BENCH_DISABLE_PYTHON`, documented nowhere.
+
+**Decided: default off, opt-in by name.** The default is `=== true`, and `--evaluate-quality`
+asks for it — command-scoped per §30, a parse error naming `bench` anywhere else.
+
+Verified on the built artifact rather than in-process, because that is what a user runs: plain
+`bench humaneval --report-json` writes a report containing **0** occurrences of
+`python-subprocess`; the same command with `--evaluate-quality` writes **5**.
+
+The accepted cost is that plain `bench` reports a different quantity under the same field names.
+`syntaxPassRate` and `passAt1Rate` fall back to validation outcomes, which is a weaker signal —
+measured, 0.6 against the execution-derived 1.0 on the bundled fixtures. Two regression suites
+assert on the execution figure and now request it by name (bench.test.ts Test 5 and Test 6); that
+half is what keeps this from being a silent loss of coverage, and each site says so.
+
+### OX-M8 — an exposed bind must be authenticated
+
+The token gate reads `if (this.config.gatewayToken && !isLoopbackPeer(req))`: enforced only *if
+one was configured*. `host: '0.0.0.0'` with no token was therefore an unauthenticated relay
+forwarding arbitrary bodies to upstream providers, and nothing warned. README:154 already stated
+the intended rule — "enforced only on a non-loopback bind" — so the documentation described the
+intent and the code implemented "enforced only if provided".
+
+**Decided: refuse to start**, with `allowUnauthenticatedNonLoopback` as an explicit opt-in.
+
+Refusing rather than warning, because the configuration this protects is a server nobody is
+watching: a warning on stderr reaches the person who starts it in a terminal and no one who
+starts it from a unit file. Auto-generating a token was the other candidate and is worse in a
+specific way — startup succeeds, and every existing client of that bind begins failing with 401,
+which is a subtler break than a refusal that names itself.
+
+The check lives in `start()`, not the constructor, so constructing a server stays free of side
+effects; the exposure begins at `listen`, which is where it is refused. `isLoopbackHost` is the
+configuration-time counterpart of `isLoopbackPeer`, and treats `0.0.0.0` and `::` as **not**
+loopback — they include the loopback interface, which is what makes them easy to mistake for it,
+and every other interface besides.
+
+Loopback trust (C3) and the constant-time compare are untouched, and both are asserted, so a
+later change cannot quietly buy this guarantee by revoking C3. `tokendamper exec` is unaffected
+on two counts: it binds the default loopback host *and* generates a token.
+
+### OX-M9 — Origin and Host validation, not token-on-loopback
+
+**Decided: validate `Origin` and `Host`.** Requiring `x-tokendamper-token` even on loopback
+splits browsers from local clients more cleanly — browsers cannot set custom headers on a simple
+request — but it taxes every existing local client to close a browser-only hole. Declined for that
+reason.
+
+**The audit's stated fix direction was partly aimed at the wrong control, and this is the third
+time an OX reachability claim has needed measuring.** It proposed answering OPTIONS with a
+restrictive CORS policy. Measured before writing anything: this server *already* answers OPTIONS
+with `405` and no `Access-Control-*` headers, which is that policy. Adding a handler would have
+been ceremony. Preflight was never the gap — the threat is a **simple** `text/plain` POST, which
+skips preflight entirely, so the check has to be on requests that never preflight.
+
+**And the decision as recorded overstated one half.** It said non-browser clients "send neither
+header". True of `Origin`; false of `Host`, which every HTTP/1.1 client must send. The local
+client contract is preserved by *what is accepted*, not by the header being absent:
+
+- `Origin` present and not this gateway's own origin → 403, on every bind. Non-browser clients do
+  not send it, so nothing local changes. Same-host different-port is still foreign, which is the
+  shape a malicious local page actually has.
+- `Host` naming somewhere else → 403, **on a loopback bind only**. That is where DNS rebinding is
+  the threat: an attacker's name resolving to 127.0.0.1. Accepted are `localhost`, any `127.x`,
+  `::1`, and the configured bind. On an exposed bind hostnames are legitimately varied and the
+  token M8 now requires is the real control, so the rule would cost more than it buys.
+
+The policy runs **before** `/health`. A check the health endpoint sat in front of would be a
+check with a documented way around it.
+
+**OX-L13 is folded in, as intended.** `/health` now returns `{"status":"ok"}` and nothing else.
+`activeSessions` told an unauthenticated caller how much conversation traffic flows through the
+machine; on a loopback bind that is a small leak to a peer already trusted to proxy, and the
+reason to drop it anyway is that `/health` is the one endpoint deployments expose deliberately.
+`server.ts` had carried a comment deferring this to M8/M9 precisely so the two answers could not
+drift, and this is that answer.
+
+### OX-M13 — documented, not fixed
+
+`--minimum-confidence` and `--max-debt` are parsed, range-validated, and threaded into
+`optimize()`. Neither can change what the CLI emits.
+
+- Validation confidence is binary: `validate()` returns `passed ? 1 : 0`. Both engine gates read
+  `validation.confidence < minimumConfidence` — `1 < x` on a passing run, false for everything
+  the schema admits since §OX-M10 validates it into [0, 1]; `0 < x` on a failing one, where
+  `!validation.passed` has already decided the same line. The other arm reads a
+  `ConfidenceLedger` and is a literal `1.0` when none is supplied. The CLI supplies none.
+- `--max-debt` can flip `shouldRehydrate` and enter the rehydration branch, but
+  `attemptAutomatedRehydration` returns on its first line without a hasher or a ledger, and the
+  CLI supplies neither.
+
+**That second reason is stronger than the one §64 gave.** §64 said debt gates nothing on the CLI
+"because `shouldRehydrate` needs 75 and the elision term alone caps at 35". That explains the
+*default* threshold — but `--max-debt` is precisely the flag that lowers it, so the default is not
+what makes the flag inert. §64 was right about the outcome by an argument that does not carry.
+
+Documented rather than made live, because the machinery is real and reachable through the
+exported `optimize()`; only the CLI supplies neither input. Both dials are live for an embedder
+passing a `tokenHasher` and/or `confidenceLedger`, and `--minimum-confidence` is live on the
+Gateway, which builds a ledger per request.
+
+`test/unit/cli/inert-dials.test.ts` pins it in the shape of `validator-guarantee.test.ts`: a
+characterization test that passes against the tree that prompted it, and fails if either dial
+becomes live, so the README section has to be rewritten in the same commit rather than outliving
+the behaviour it describes.
+
+**Its control needed a second attempt, and the failure is worth keeping.** The first version used
+`--max-drift 0` against `--max-drift 1` to prove the harness could observe *any* flag. They emit
+identical bytes — drift on the fixture is already 0.0000, and the gate asks whether drift exceeds
+the threshold rather than reaches it. That is CLAUDE.md's note that 86% of elided Python function
+bodies contribute no symbols, arriving as a control that does not control. A budget flag replaced
+it: with none, the planner returns `pass_through` and reduction is guaranteed 0%.
+
+### What this does not establish
+
+The corpus was not run for any of the four. It cannot see them — bench, the flag-parse loop, and
+every Gateway path are all off the optimize route — so a byte-identical result would have been
+vacuous rather than reassuring. This is the §56 caution in its other direction: byte-identical is
+not evidence when the corpus does not contain the shape.
+
+M8 and M9 are both verified against real sockets rather than `mockUpstream`, because both live in
+header handling that a short-circuited upstream never exercises.

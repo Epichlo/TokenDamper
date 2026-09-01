@@ -54,6 +54,18 @@ export function plan(
     stageIds: Object.freeze(stageIds),
     revalidationPoints: Object.freeze(['end']),
     fallbackPolicy: 'original_input',
+    // **Unconsumed, and the number is wrong** — audit OX-L1.
+    //
+    // Nothing in `src/` reads `plan.expectedSavings`; `createOptimizationPlan` copies it and it
+    // stops there. The 0.45 is not a measurement either: over a frozen 289-file corpus at target
+    // 0.3 the TypeScript bucket reduces ~20% and Python ~16% (DECISIONS §64's baseline arm).
+    //
+    // Left in place rather than deleted, on the precedent audit H4 set and OX-H5 followed:
+    // `OptimizationPlan` is part of the frozen model, and a field awaiting an implementation is
+    // not the same defect as a dial that reports success. Nobody can *set* this, so it misleads
+    // no caller. Wiring it would mean deriving a real estimate from the selected stages, which
+    // is a planner change; deleting it would edit the frozen model for a field a test asserts.
+    // Recorded here so the next reader knows the constant is a placeholder, not a finding.
     expectedSavings: isKnapsackMode ? 0.45 : 0,
   };
 }

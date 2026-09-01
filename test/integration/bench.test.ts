@@ -250,6 +250,11 @@ describe('TokenDamper Regression Test Suite & Performance Baseline (R5)', () => 
           budget: baseConfig.budget,
         },
       ],
+      // Asked for by name, because this test asserts on the *execution*-derived pass rate.
+      // The runner defaults it off since audit OX-M15 — without this line the assertion below
+      // reads 0.6, the validation-derived figure, and would be pinning a different quantity
+      // under the same name.
+      evaluateQuality: true,
     };
 
     const report = BenchmarkRunner.run(fixtures, runnerConfig);
@@ -299,8 +304,10 @@ describe('TokenDamper Regression Test Suite & Performance Baseline (R5)', () => 
       } as never,
     };
 
+    // `--evaluate-quality` for the same reason as Test 5: the thresholds below are
+    // execution-derived, and plain `bench` no longer executes fixture code (audit OX-M15).
     const exitCode = runCli(
-      ['bench', 'test/fixtures/bench', '--report-json', tempReportPath],
+      ['bench', 'test/fixtures/bench', '--report-json', tempReportPath, '--evaluate-quality'],
       mockIo,
       process.cwd(),
     );

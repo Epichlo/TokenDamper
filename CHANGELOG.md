@@ -11,6 +11,138 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+**`oxaudit.md` is closed in full.** The last four findings, three of which were decisions
+rather than defects — DECISIONS §70.
+
+### Changed
+- **`tokendamper bench` no longer executes dataset code (audit OX-M15).**
+  `BenchmarkRunner.run` read `config.evaluateQuality !== false`, so quality evaluation
+  defaulted **on**, and the evaluator runs each fixture's code and its dataset checks through
+  `python -c`. A harness `ARCHITECTURE.md` calls offline and deterministic reached for an
+  interpreter because someone typed `bench`, and the only way out was
+  `TOKENDAMPER_BENCH_DISABLE_PYTHON`, documented nowhere.
+
+  `--evaluate-quality` now asks for it, command-scoped per DECISIONS §30. Verified on the
+  built artifact rather than in-process: plain `bench humaneval --report-json` writes a report
+  containing **0** occurrences of `python-subprocess`; with `--evaluate-quality`, **5**.
+
+  **What changes for you:** plain `bench` reports a different quantity under the same field
+  names. `syntaxPassRate` and `passAt1Rate` fall back to validation outcomes — measured, 0.6
+  against the execution-derived 1.0 on the bundled fixtures. Pass `--evaluate-quality` to get
+  the old numbers. The two regression suites that assert on them now request it by name.
+
+- **A non-loopback Gateway bind with no token refuses to start (audit OX-M8).** The token gate
+  read `if (this.config.gatewayToken && !isLoopbackPeer(req))` — enforced only *if one was
+  configured*. Binding `0.0.0.0` and setting none served an unauthenticated relay that
+  forwarded arbitrary request bodies to upstream providers, with no warning. The README already
+  described the intended rule; the code implemented "enforced only if provided".
+
+  `start()` now throws, naming the host and the ways out. `allowUnauthenticatedNonLoopback` is
+  the explicit opt-in for someone who genuinely wants an open relay — a separate field rather
+  than a magic token value, so the intent is legible in a config file.
+
+  Refusing rather than warning, because the configuration this protects is a server nobody is
+  watching: stderr reaches the person starting it in a terminal and no one starting it from a
+  unit file. Auto-generating a token was considered and is worse in a specific way — startup
+  succeeds and every existing client begins failing 401, a subtler break than a named refusal.
+
+  **What changes for you:** an existing exposed-bind config breaks loudly. That is the
+  decision, not a side effect. `tokendamper exec` is unaffected — it binds loopback *and*
+  generates a token. Loopback trust (audit C3) and the constant-time compare are untouched,
+  and both are asserted so a later change cannot buy this guarantee by revoking C3.
+
+- **The Gateway rejects browser-initiated requests (audit OX-M9, and OX-L13 folded in).** A page
+  the user visits can issue a **simple** cross-origin `POST` (`text/plain`) to
+  `http://127.0.0.1:<port>/v1/chat/completions` with no preflight. It cannot read the response
+  and must supply its own credentials, so what it gains is the victim's machine as a relay.
+
+  A request whose `Origin` is present and foreign now gets `403` on every bind; a `Host` naming
+  somewhere else gets `403` on a **loopback** bind, which is where DNS rebinding is the threat.
+  `localhost`, any `127.x`, `::1` and the configured bind are accepted, so local clients are
+  unaffected. The policy runs before `/health` — a check that endpoint sat in front of would be
+  a check with a documented way around it.
+
+  **Two corrections to the finding, both from measuring before fixing.** The audit proposed an
+  OPTIONS handler with a restrictive CORS policy; measured, the server already answers OPTIONS
+  with `405` and no `Access-Control-*` headers, which *is* that policy — and preflight was
+  never the gap, since a simple request skips it. And the recorded decision said non-browser
+  clients "send neither header": true of `Origin`, false of `Host`, which every HTTP/1.1 client
+  must send. The local client contract is preserved by what is accepted, not by absence.
+
+  **`GET /health` now returns `{"status":"ok"}` and nothing else** (audit OX-L13).
+  `activeSessions` told an unauthenticated caller how much conversation traffic flows through
+  the machine, and `/health` is the one endpoint deployments expose deliberately.
+
+### Documentation
+- **`--minimum-confidence` and `--max-debt` documented as inert on the CLI (audit OX-M13).**
+  Both are parsed, range-validated and threaded into `optimize()`, and neither can change what
+  `tokendamper optimize` emits. Validation confidence is binary (`passed ? 1 : 0`), so the gate
+  reads `1 < x` on a passing run and `0 < x` on a failing one where `!validation.passed` has
+  already decided; the ledger arm is a literal `1.0` with no ledger, and the CLI supplies none.
+  `--max-debt` can enter the rehydration branch, but `attemptAutomatedRehydration` returns on
+  its first line without a hasher or ledger — and the CLI supplies neither.
+
+  That last reason is **stronger than the one DECISIONS §64 gave** ("`shouldRehydrate` needs 75
+  and the elision term caps at 35"), which explains the *default* threshold — and `--max-debt`
+  is precisely the flag that lowers it. Right outcome, argument that does not carry.
+
+  Documented rather than made live because the machinery is real and reachable through the
+  exported `optimize()`. Both are live for an embedder passing a `tokenHasher` and/or
+  `confidenceLedger`; `--minimum-confidence` is live on the Gateway, which builds a ledger per
+  request. `test/unit/cli/inert-dials.test.ts` pins the CLI behaviour as a characterization
+  test, so a change making either dial live fails it and forces the README to be rewritten.
+
+## [v1.6.1] - 2026-08-30
+
+**Four languages reduce instead of three, and four Gateway defects that reached provider
+traffic are fixed.** This release closes Lane A of `oxaudit.md` and all of Lane B except two
+items held open for a decision — a second, independent audit against `79aedef`, unrelated to
+`max_audit.md`’s wave structure.
+
+**The one thing that can break a script:** `--trace-output` is now `Unknown argument`, and
+`explain` is rejected rather than ignored from `--mode`, `TOKENDAMPER_APP_MODE` and the config
+file. Nothing that took effect stops taking effect — neither dial was ever read — but a wrapper
+passing `--trace-output stderr` will now exit non-zero. A config file still carrying a
+`traceOutput` key keeps loading, and the trace itself has not moved: stderr, as always.
+
+**Numbered as a patch.** Two changes here do alter what the same command emits for the same
+input — Go now elides, and `debtScore` reports a measurement rather than a constant pinned at
+its clamp — so pin exactly if your tooling depends on byte-stable output or parses `debtScore`
+out of the trace.
+
+### Removed
+- **`--trace-output` / `TOKENDAMPER_TRACE_OUTPUT`, and the `explain` value of `--mode` /
+  `TOKENDAMPER_APP_MODE` (audit OX-H5, DECISIONS §62).** Both were parsed, validated against an
+  enum, threaded through the file → env → CLI precedence chain, frozen onto `ResolvedConfig` — and
+  read by nothing. `traceOutput` appears at ten sites in `src/`; every one is a write or a type
+  declaration. The trace is emitted by a literal `io.stderr.write(...)`, so `--trace-output stdout`
+  reported success and changed nothing, and a caller redirecting it to capture a trace in a pipe
+  concluded the tool had ignored them. It had. Nothing branched on `explain` at all.
+
+  This is the defect audit H4 already removed three flags for; these two survived that sweep only
+  because they sit on `ResolvedConfig` rather than `OptimizationBudget`. Withdrawn on H4's terms:
+  **the surfaces go, the model fields stay**, documented as unconsumed, because `ARCHITECTURE.md`
+  pins the model as frozen and a field awaiting an implementation is not the same defect as a dial
+  that reports success.
+
+  Implementing `--trace-output` would have been two lines. The evidence against it is that the only
+  caller in this repository which passed it — `tools/corpus-harness/measure.js`, with
+  `--trace-output stderr` — has been reading stderr correctly the whole time *while passing a flag
+  that did nothing*. The sole user asked for the default.
+
+  **`--mode` is narrowed by value, not removed.** `--mode bench` rewrites the command, which is a
+  live effect; it lives in the parser rather than in anything that reads `appMode`, and that
+  distinction is why the flag survives.
+
+  What changes for existing setups: `--trace-output` is now `Unknown argument`, and `explain` is
+  rejected rather than ignored from all three surfaces — the rule 1.6.0 set for the
+  `TOKENDAMPER_*` enums. Nothing that took effect stops taking effect, because none of it ever did.
+  A config file still carrying a `traceOutput` key keeps loading: the key is no longer validated or
+  read, and withdrawing a knob must not turn a file that loaded yesterday into a hard error.
+  `tools/corpus-harness/measure.js` was updated in the same change, since leaving it would have
+  turned the measurement harness into a parse error. **The trace itself has not moved** — stderr,
+  as always.
+
 ### Added
 - **The CLI says when whole files were dropped to meet the budget.** `pruning:topology-pruner`
   removes entire items rather than eliding them, so the file is simply absent from stdout with no
@@ -91,73 +223,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `// Should never happen, but we`). §56 expected Go's lower comment density to make that gate
   fire less; measured, it dominates exactly as it does for TypeScript, at the same rate. The
   largest remaining gain on Go is in that gate, not in the scanner.
-
-### Fixed
-- **Content hashing no longer collapses `undefined` onto `null`** (DECISIONS §63). The
-  serialization fallback in `stableSerialize` turned an explicit `undefined` into `null`'s
-  bytes, so two different values shared one hash. No live constructor reaches the branch —
-  which is why it sat unnoticed — and no hash of any real object changes.
-- **The content-classifier's extension test reads the basename, not the whole path**
-  (DECISIONS §63). A dotted directory (`my.dir/file`) used to leak directory text into the
-  extension match. Measured before changing anything: every possible leak already fell through
-  to the content probes exactly as an absent extension would, so **no classification changes**;
-  the new tests pin the dotted-directory cases so a future edit cannot make the leak reachable
-  silently.
-
-### Documentation
-- **Two LOW findings recorded at their sites rather than fixed** (DECISIONS §63). The `h → c`
-  language alias stays: removing it would make `--language h` an error while `foo.h` stayed
-  accepted, which is the two-routes drift the alias table exists to prevent. Git path matching
-  stays case-sensitive: case-folding one side would make topology scores depend on the
-  platform's filesystem semantics, and determinism is invariant 1; the effect of the open case
-  is a lower score, never a wrong output byte.
-
-## [v1.6.0] - 2026-08-16
-
-**Two defects that reached provider traffic, and an audit closed in full.** `max_audit.md` had
-been declared closed twice while findings were open; this release ships the work that actually
-closed it, plus a defect found by pointing an MCP client at this repository's own source.
-
-**The one thing that can break a startup:** an unrecognized `TOKENDAMPER_*` enum value is now a
-hard error instead of being silently ignored. Nothing that worked stops working — the setting
-never took effect — but a stale or typo'd `TOKENDAMPER_LOG_LEVEL=verbose` that used to fall back
-to the default now fails at startup. See the L1 entry below.
-
-Minor rather than major on this project's standing rule: nothing removed, but the same command
-over the same input emits different bytes. Minor rather than patch for the same reason.
-
-### Removed
-- **`--trace-output` / `TOKENDAMPER_TRACE_OUTPUT`, and the `explain` value of `--mode` /
-  `TOKENDAMPER_APP_MODE` (audit OX-H5, DECISIONS §62).** Both were parsed, validated against an
-  enum, threaded through the file → env → CLI precedence chain, frozen onto `ResolvedConfig` — and
-  read by nothing. `traceOutput` appears at ten sites in `src/`; every one is a write or a type
-  declaration. The trace is emitted by a literal `io.stderr.write(...)`, so `--trace-output stdout`
-  reported success and changed nothing, and a caller redirecting it to capture a trace in a pipe
-  concluded the tool had ignored them. It had. Nothing branched on `explain` at all.
-
-  This is the defect audit H4 already removed three flags for; these two survived that sweep only
-  because they sit on `ResolvedConfig` rather than `OptimizationBudget`. Withdrawn on H4's terms:
-  **the surfaces go, the model fields stay**, documented as unconsumed, because `ARCHITECTURE.md`
-  pins the model as frozen and a field awaiting an implementation is not the same defect as a dial
-  that reports success.
-
-  Implementing `--trace-output` would have been two lines. The evidence against it is that the only
-  caller in this repository which passed it — `tools/corpus-harness/measure.js`, with
-  `--trace-output stderr` — has been reading stderr correctly the whole time *while passing a flag
-  that did nothing*. The sole user asked for the default.
-
-  **`--mode` is narrowed by value, not removed.** `--mode bench` rewrites the command, which is a
-  live effect; it lives in the parser rather than in anything that reads `appMode`, and that
-  distinction is why the flag survives.
-
-  What changes for existing setups: `--trace-output` is now `Unknown argument`, and `explain` is
-  rejected rather than ignored from all three surfaces — the rule 1.6.0 set for the
-  `TOKENDAMPER_*` enums. Nothing that took effect stops taking effect, because none of it ever did.
-  A config file still carrying a `traceOutput` key keeps loading: the key is no longer validated or
-  read, and withdrawing a knob must not turn a file that loaded yesterday into a hard error.
-  `tools/corpus-harness/measure.js` was updated in the same change, since leaving it would have
-  turned the measurement harness into a parse error. **The trace itself has not moved** — stderr,
-  as always.
 
 ### Fixed
 - **A comment claimed `--target-reduction-ratio` is "nearly as inert — the planner reads it only as
@@ -303,6 +368,217 @@ over the same input emits different bytes. Minor rather than patch for the same 
   `.claude` from exclude, deleting the config, and planting a suite outside `test/` each fail it.
   `npm run lint` needed no equivalent guard; it is already path-scoped as `eslint src test`.
 
+- **The `oxaudit.md` LOW table, closed against its own list (DECISIONS §69).** Six fixed, five
+  recorded at their sites with the reason, three already "no action" in the audit itself.
+
+  - **L6** — the per-session seen-hash cap was a bare `1000` inside `capSeenBlockHashes` while every
+    neighbouring bound was configurable. Now `GatewayConfig.maxSeenBlockHashesPerSession`, same
+    default.
+  - **L7** — the MCP buffer-overflow check ran *before* `processBuffer` and then cleared the whole
+    buffer, so a chunk carrying complete requests followed by one oversized partial discarded the
+    complete ones too. Draining first leaves only the un-terminated remainder for the limit to
+    judge.
+  - **L9** — the bench loader's `limits` merge could never fire (`ResolvedConfig` has no such
+    field, which is why it needed two `as unknown as Record<string, unknown>` casts). Deleting it
+    also removed an `as unknown as ResolvedConfig` that was disabling type checking for every other
+    key in that literal.
+  - **L10** — dataset routing matched `includes('humaneval')` *before* checking for a real path, so
+    `./fixtures/humaneval-comparison-2026.jsonl` was silently answered with the bundled dataset.
+    Now exact name, then path, then substring as a last resort.
+  - **L12** — `package.json` and `src/version.ts` are hand-synced; a test now pins them equal.
+  - **L19** — `.gitignore` was the full GitHub Python template (245 lines, ~111 entries, Django
+    through pdm) with the dozen working entries buried at the bottom. Now 44 lines and 25 entries,
+    keeping a real Python block for `tokendamper-benchmark/`. Verified by diffing
+    `git status --porcelain` across the change: nothing became newly visible.
+
+  **Not fixed, and why:** **L1** (`expectedSavings: 0.45` is unconsumed and not a measurement — the
+  frozen-model precedent H4 set and OX-H5 followed), **L8** (the MCP shutdown flush race — the fix
+  depends on stream state the file does not control and getting it wrong hangs `mcp` on Ctrl+C,
+  which this suite cannot exercise), **L13** (`/health` exposing `sessionCount` is M8/M9's question,
+  and answering it twice is how two answers drift), **L17** and **L18** (both need a new
+  devDependency, which is not a call to make unasked on a LOW finding).
+
+- **Pricing a candidate region no longer registers it with the block store (audit OX-M5, DECISIONS
+  §68).** `trimRegionsToCeiling` renders a marker for **every** candidate span in order to price it
+  — correctly, since the marker is variable-length and self-describing and a saving estimated
+  without it would overstate every region. But the renderer it was handed also called
+  `hasher.registerBlock(...)`, so every span the ceiling considered and then *discarded* was written
+  into the store anyway.
+
+  Measured on a 12-region file: **12 blocks registered against 5 actually emitted** at target 0.1,
+  and 12 against 3 at 0.05. The store held one block per candidate rather than per elision, so
+  memory grew with how much the scanner found rather than with how much was removed, and
+  `hasHash` / `expandBlockHash` answered for placeholders present in no output. Invisible on the
+  CLI, which supplies no hasher; it matters on **MCP**, where the server is long-lived and the
+  hasher *is* the reversibility store.
+
+  The binding constraint was that pricing and emission must render **identical bytes**, or the
+  ceiling is computed against a different string from the one written and
+  `--target-reduction-ratio` adherence shifts. Corpus A/B over 289 files / 578 rows frozen at
+  `48ac6c8`: **zero rows differ on any of ten compared fields**, with 101 rows genuinely reducing —
+  so the corpus contains the shape and the result is not vacuous. The A/B proves output-neutrality;
+  it cannot see the leak itself, because CLI routes supply no hasher. That is what the new unit test
+  is for.
+
+- **Within-payload deduplication works on the first turn (audit OX-M1, DECISIONS §67).** It was
+  treated as a side condition of cross-turn matching: the dedup branch was gated on
+  `previousBlockHashes.has(hash)` and the stage returned early unless that set was non-empty, so a
+  first turn carrying the same block three times went out whole. The README's savings table said
+  "the same block repeated **within one payload** → saves" with no qualifier; it was true from turn
+  two.
+
+  The gate was doing no safety work there. `recoverable: true` means an intact copy survives in the
+  *same outbound payload*, which rule 3 guarantees by preserving the first occurrence — a claim
+  checkable without knowing anything about earlier turns. `previousBlockHashes` answers a different
+  question (*is this content old?*) and was deciding something it does not bear on.
+
+  **DECISIONS §16/§41 are untouched.** A **sole** copy elided across turns is still elided with
+  `recoverable: false`, still scored in full by `DriftTracker`, and still fails the gate — so the
+  ordinary conversational shape still saves 0 bytes and still falls back, which is the number the
+  README leads with.
+
+  Measured over real sockets with a block repeated three times: turn 1 went from **8,459 sent /
+  8,459 forwarded** to a real saving, while a turn 1 of all-distinct blocks still saves nothing —
+  the control that keeps "turn 1 saves now" from meaning "turn 1 always saves".
+
+- **The Gateway no longer truncates streaming responses after 30 seconds (audit OX-H2, DECISIONS
+  §66).** `forwardUpstreamRequest` armed `AbortSignal.timeout(30000)` and handed it to `fetch` —
+  and a fetch signal does not stop applying when the promise resolves: **it governs the response
+  body stream too.** For `"stream": true` payloads the body reader rejected ~30 s in and the pump
+  destroyed the client response, truncating the answer mid-generation. LLM completions routinely
+  run longer than that, so this broke precisely the traffic the Gateway intercepts by default, and
+  from the client's side it was indistinguishable from the model stopping.
+
+  The budget is now time-to-first-byte and is disarmed in a `finally` the moment `fetch` settles.
+  An owned `AbortController` replaces `AbortSignal.timeout` because only a controller you own can
+  be left permanently *un*-fired; the 504 mapping survives by aborting with a `TimeoutError`
+  `DOMException`, which is the reason `AbortSignal.timeout` produced.
+
+  **Client-hangup abort is unchanged and asserted.** The caller-disconnect signal stays combined
+  into the fetch signal, so a client that walks away still aborts the upstream request — the half a
+  careless timeout fix removes. That test was mutation-checked, and it needed a second pass: the
+  first version sampled the upstream's state after the helper had already stopped the server, which
+  closes the upstream socket anyway, so it would have passed either way.
+
+  `upstreamTtfbTimeoutMs` is a new `GatewayConfig` field defaulting to 30000. It is also what makes
+  the defect testable: catching a 30-second bug previously required a 30-second upstream, which is
+  why no test caught it. The suite now runs against a real socket in about a second.
+
+  Measured against a real upstream at a 120 ms budget with a ~300 ms body: truncated mid-stream
+  before, full body after. A 40 ms budget against a ~400 ms body likewise. Slow *headers* still
+  return 504, unchanged.
+
+- **One `content: null` message no longer zeroes the whole request's Gateway saving (audit OX-H4,
+  DECISIONS §65).** Egress splices replacements into the caller's raw bytes rather than
+  re-serializing (invariant 9), and located each message by searching for `JSON.stringify(text)` —
+  where `text` came from `flattenMessageContent`, which sends every **non-string** content through
+  `JSON.stringify`. For `content: null` that produced the four-character string `null`, so the
+  search string was `"null"` *with quotes*, absent where the body holds a bare `null`.
+  `spliceIntoRawBody` returns `undefined` on the **first** miss, so one unmatchable message
+  discarded the replacements for every other message in the payload.
+
+  `content: null` is the standard OpenAI shape for an assistant turn that calls a tool, so
+  essentially every agentic OpenAI conversation carried one. Measured on a three-times-repeated
+  block the Gateway does save on: with such a message present, **8,685 bytes sent and 8,685
+  forwarded** — the entire saving gone. Array (multimodal) content failed identically at
+  **8,530 / 8,530**, which is why this is a structural span scan rather than the `null`
+  special-case the audit offered as an alternative: that would have fixed one shape and left the
+  other. Both share a cause — `JSON.stringify` of a *parsed* value is not the caller's bytes, and
+  a pretty-printed body defeats the search even for plain strings.
+
+  `scanContentSpans` now walks the raw body and returns each spliceable slot's `[start, end)` span,
+  and `spliceBySpans` overwrites those ranges directly. A span is where the value *is*, so it is
+  correct for every content shape, and repeated blocks need no forward cursor to disambiguate — the
+  cursor requirement survives by becoming unnecessary rather than by being dropped.
+
+  **The old value search is kept as a fallback**, so a payload the scanner declines behaves exactly
+  as before and this change can only add savings. **Declining remains the failure direction:** the
+  scanner refuses a non-object root, absent or non-array `messages`, a message with no `content`
+  key, a truncated body, or a missing expected `system`, and the splice refuses when spans do not
+  ascend across the entries it replaces.
+
+  Invariant 8 is untouched — the Gateway still plans only `cleanup:session-dedup`, and a sole
+  cross-turn copy is still refused. What this recovers is the *within-payload* saving on payloads
+  that happen to carry a non-string content.
+
+- **`debtScore` reported 35.00 on every file that reduced, and now measures something (audit
+  OX-M7, DECISIONS §64).** `computeDebtBreakdown` added `metadata.originalBytes` to `elidedBytes`
+  for any item flagged `elided`. But `originalBytes` is the item's **entire** pre-transform length
+  and `elided` is a boolean on the whole item, so an item that lost 5% of its bytes contributed
+  100% of its size to the numerator. On the CLI a single file is a single-item bundle, which makes
+  `elidedBytes === totalBytes` whenever anything is elided at all — the ratio was 1.0 by
+  construction, and `Math.min(1.0, …)` in `calculateDebt` was quietly clamping a value with no
+  business exceeding 1.
+
+  Measured over a corpus frozen at `8b447ce` — 289 files, 578 rows, ratio 0.3 — **317 of the 317
+  rows carrying any debt scored exactly 35.00**, the `weightElisionRatio * 100` ceiling, whether
+  the file lost 4.7% or 66.8%. After the fix (bytes actually removed, `originalBytes -
+  content.length`): **0 of 317** at the ceiling, distribution 1.31 → 34.99, and over the 101
+  reducing rows the implied ratio tracks the measured byte cut with **correlation 1.0000**.
+
+  **No output moved.** Per-row across 578 rows the only field that changed is `debtScore` —
+  `outputSha`, `byteIdentical`, `tokenBefore`, `tokenAfter`, `reduction`, `fallbackUsed`,
+  `driftScore`, `planMode` and `stageCount` are identical. Debt gates nothing on the CLI, because
+  `shouldRehydrate` needs 75 and the elision term alone caps at 35 — so `--max-debt` still cannot
+  trip on a CLI run. It is now a real number, not yet a live gate.
+
+  The audit described this as a denominator mixing pre- and post-transform sizes. That is not what
+  happened — every stage setting `elided` also sets `originalBytes`, so the denominator was already
+  clean. The numerator was the defect, and it was saturated rather than skewed.
+
+- **An empty rehydration-candidate set no longer means "restore everything" (audit OX-M6,
+  DECISIONS §64).** `attemptAutomatedRehydration` guarded with `candidates && candidates.size > 0
+  && !candidates.has(item.id)`. The `size > 0` clause is there for the *missing* ledger case; it
+  also swallowed the case where a ledger exists and reports **zero** items below the confidence
+  threshold, turning "nothing needs restoring" into "restore every elision in the bundle".
+
+  None of the three bundled entry points reaches it — the CLI supplies neither hasher nor ledger,
+  MCP and `bench` supply a hasher but no ledger, and the Gateway supplies a ledger but no hasher
+  and plans only `cleanup:session-dedup`. It is reachable through the **public API**: `optimize` is
+  exported, and an embedder passing both a `tokenHasher` and a `confidenceLedger` lands on it.
+  Reproduced there, a 1,481-byte item came back at exactly 1,481 bytes with every elision undone,
+  and `debtScore` recomputed to 0 on the restored bundle so the trace reported no debt either.
+
+  The corpus arm for this change differs on **0 of 578 rows**, which is what the structure predicts
+  and is *not* evidence of correctness — the harness runs CLI routes, which supply no ledger, so it
+  cannot see the shape. The test carries two controls for the same reason: the first version passed
+  against the unfixed code, because the default `maxDebtThreshold` of 75 is unreachable on turn 1
+  and the branch it claimed to exercise never ran.
+
+- **Content hashing no longer collapses `undefined` onto `null`** (DECISIONS §63). The
+  serialization fallback in `stableSerialize` turned an explicit `undefined` into `null`'s
+  bytes, so two different values shared one hash. No live constructor reaches the branch —
+  which is why it sat unnoticed — and no hash of any real object changes.
+- **The content-classifier's extension test reads the basename, not the whole path**
+  (DECISIONS §63). A dotted directory (`my.dir/file`) used to leak directory text into the
+  extension match. Measured before changing anything: every possible leak already fell through
+  to the content probes exactly as an absent extension would, so **no classification changes**;
+  the new tests pin the dotted-directory cases so a future edit cannot make the leak reachable
+  silently.
+
+### Documentation
+- **Two LOW findings recorded at their sites rather than fixed** (DECISIONS §63). The `h → c`
+  language alias stays: removing it would make `--language h` an error while `foo.h` stayed
+  accepted, which is the two-routes drift the alias table exists to prevent. Git path matching
+  stays case-sensitive: case-folding one side would make topology scores depend on the
+  platform's filesystem semantics, and determinism is invariant 1; the effect of the open case
+  is a lower score, never a wrong output byte.
+
+## [v1.6.0] - 2026-08-16
+
+**Two defects that reached provider traffic, and an audit closed in full.** `max_audit.md` had
+been declared closed twice while findings were open; this release ships the work that actually
+closed it, plus a defect found by pointing an MCP client at this repository's own source.
+
+**The one thing that can break a startup:** an unrecognized `TOKENDAMPER_*` enum value is now a
+hard error instead of being silently ignored. Nothing that worked stops working — the setting
+never took effect — but a stale or typo'd `TOKENDAMPER_LOG_LEVEL=verbose` that used to fall back
+to the default now fails at startup. See the L1 entry below.
+
+Minor rather than major on this project's standing rule: nothing removed, but the same command
+over the same input emits different bytes. Minor rather than patch for the same reason.
+
+### Fixed
 - **A file that documents the block-hash placeholder format is no longer mistaken for a corrupted
   one — DECISIONS §57.** `detectCorruptedPlaceholders` scanned for `<BLOCK_HASH:([^>]+)>`, matching
   any text up to the next `>`. This repository's own `src/core/elision/regions.ts` contains the

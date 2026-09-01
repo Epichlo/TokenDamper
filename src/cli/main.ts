@@ -53,6 +53,17 @@ export function runCli(
         config,
       });
 
+      // `process.exit(0)` below can truncate a stdout frame the server has just written, because
+      // it does not wait for pending writes to flush — audit OX-L8.
+      //
+      // Recorded rather than fixed, and the reason is verifiability, not size. The fix is to stop
+      // forcing the exit — `server.stop(); process.stdin.pause(); process.exitCode = 0;` — and let
+      // the loop drain. But `stop()` only removes the `data` listener; it does not pause or unref
+      // stdin, so whether the process then exits at all depends on stream state this file does not
+      // control, and the failure mode of getting it wrong is `tokendamper mcp` hanging on Ctrl+C.
+      // Delivering SIGINT to exercise that is not something the suite can do here, and shipping an
+      // unverified change to a shutdown path to fix a rare truncated final frame is the wrong
+      // trade. See `docs/audit-remediation-status.md`.
       const shutdown = () => {
         server.stop();
         process.removeListener('SIGINT', shutdown);
@@ -113,6 +124,9 @@ export function runCli(
             budget: config.budget,
           },
         ],
+        // Absent unless `--evaluate-quality` was passed. The runner defaults it off (audit
+        // OX-M15), so plain `bench` never reaches for an interpreter.
+        ...(parsed.evaluateQuality ? { evaluateQuality: true } : {}),
       };
 
       const report = BenchmarkRunner.run(fixtures, runnerConfig);
@@ -425,6 +439,11 @@ export interface ParsedArguments {
   readonly extraInputPaths?: readonly string[];
   readonly datasetPath?: string;
   readonly reportJsonPath?: string;
+  /**
+   * `--evaluate-quality`: run the fixture-execution evaluator, which shells out to `python`.
+   * Off unless asked for by name — audit OX-M15.
+   */
+  readonly evaluateQuality?: boolean;
   readonly quiet?: boolean;
   readonly execArgs: readonly string[];
   readonly configPath?: string;
@@ -502,7 +521,7 @@ export const SUPPORTED_FLAGS: Readonly<Record<'optimize' | 'bench' | 'mcp', Read
     '--language',
     '--input-name',
   ]),
-  bench: new Set([...COMMON_FLAGS, '--report-json', '--quiet']),
+  bench: new Set([...COMMON_FLAGS, '--report-json', '--quiet', '--evaluate-quality']),
   mcp: new Set(COMMON_FLAGS),
 };
 
@@ -587,6 +606,7 @@ export function parseArguments(argv: readonly string[], cwd: string): ParsedArgu
   let maxDrift: number | undefined;
   let keepDocstrings = false;
   let reportJsonPath: string | undefined;
+  let evaluateQuality = false;
   let quiet = false;
   let language: string | undefined;
   let inputName: string | undefined;
@@ -632,6 +652,11 @@ export function parseArguments(argv: readonly string[], cwd: string): ParsedArgu
 
     if (flag === '--quiet') {
       quiet = true;
+      continue;
+    }
+
+    if (flag === '--evaluate-quality') {
+      evaluateQuality = true;
       continue;
     }
 
@@ -813,6 +838,7 @@ export function parseArguments(argv: readonly string[], cwd: string): ParsedArgu
       inputPath: inputPath || datasetPath || '',
       ...(datasetPath || inputPath ? { datasetPath: datasetPath || inputPath } : {}),
       ...(reportJsonPath ? { reportJsonPath } : {}),
+      ...(evaluateQuality ? { evaluateQuality } : {}),
       ...(quiet ? { quiet } : {}),
       execArgs: [],
       ...(configPath ? { configPath } : {}),

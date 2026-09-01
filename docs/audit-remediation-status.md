@@ -3,16 +3,24 @@
 Working state for the `max_audit.md` remediation. **Read this before picking up audit work**;
 it records what is done, what is measured, and what the next batch actually requires.
 
-Last updated 2026-08-23. **Unreleased on `main` since v1.6.0:** a pruned-file warning (§7.8),
-`--keep-docstrings` (DECISIONS §58, §7.9) — both found by dogfooding, not the audit — and **widening elision
-to Go, all three steps** (DECISIONS §59, §60 and §61, §7.3, §9). **Go reduces** — application Go
-27.46% and stdlib 19.42% at target 0.3, against this repo's TypeScript at 21.22%. The main
-287-file corpus is 574/574 byte-identical, because every Go path is gated on the language. **Shipped as
-v1.6.0** — §54 (M7), §55 (the LOW table), §56 (the measured precondition for widening elision, §9)
-and §57 (the block-hash false positive), on top of **v1.5.0** (§52, the constraint gate stops
-firing on narrative comments), v1.4.0 (§50) and v1.3.0 (§48, §49). Suite: **737 passing**,
-typecheck, lint and build clean. `npm run format` no longer exists; `lint` is the enforced style
-gate.
+Last updated 2026-08-30. **Unreleased on `main` since v1.6.1:** the last four `oxaudit.md`
+findings — M15, M8, M9 (with L13) and M13 — DECISIONS §70, §1 below. **Shipped as v1.6.1:** a pruned-file warning (§7.8),
+`--keep-docstrings` (DECISIONS §58, §7.9) — both found by dogfooding, not the audit — **widening
+elision to Go, all three steps** (DECISIONS §59, §60 and §61, §7.3, §9), and the `oxaudit.md`
+remediation itself: §62 (two withdrawn dials), §63 and §69 (the float pool and the OX LOW table),
+§64 (`debtScore` becomes a measurement) and §65–§68 (four Gateway defects that reached provider
+traffic). **Go reduces** — application Go 27.46% and stdlib 19.42% at target 0.3, against this
+repo's TypeScript at 21.22%. The main 287-file corpus is 574/574 byte-identical, because every Go
+path is gated on the language. On top of **v1.6.0** — §54 (M7), §55 (the LOW table), §56 (the
+measured precondition for widening elision, §9) and §57 (the block-hash false positive), itself on
+**v1.5.0** (§52, the constraint gate stops firing on narrative comments), v1.4.0 (§50) and v1.3.0
+(§48, §49). Suite: **826 passing across 91 files**, typecheck, lint and build clean.
+`npm run format` no longer exists; `lint` is the enforced style gate.
+
+**v1.6.1 is numbered a patch even though output moved.** Go elision and §64 both change what the
+same command emits for the same input, which is normally this project's threshold for a minor
+(§53). The number was an explicit call at ship time; the rule is unchanged for the next release.
+Do not read the patch digit as evidence that nothing moved.
 
 **`max_audit.md` is closed in full — every severity band, verified against source 2026-08-15.**
 §54 and §55 are what closed it, and both were items this document had already declared done. Read
@@ -53,10 +61,10 @@ and the reasoning.
 
 | Lane | Scope | State |
 |---|---|---|
-| **A** | `src/cli/**`, `src/config/**`, `src/core/engine/`, `planner/`, `topology/`, `src/bench/runner.ts`, `src/gateway/exec.ts`, repo hygiene | partially closed — see below |
-| **B** | `src/gateway/{proxy,server,session-store,types}.ts`, `stages/cleanup/session-dedup.ts`, `stages/compression/token-hashing.ts`, `adapters/mcp/server.ts`, `bench/fixtures/loader.ts` | **entirely open** (H2, H4, M1, M5, M8, M9, L6, L7, L9, L10, L13) — M8 and M9 decided, none implemented |
+| **A** | `src/cli/**`, `src/config/**`, `src/core/engine/`, `planner/`, `topology/`, `src/bench/runner.ts`, `src/gateway/exec.ts`, repo hygiene | ✅ **closed** — the last two, M15 and M13, in §70 |
+| **B** | `src/gateway/{proxy,server,session-store,types}.ts`, `stages/cleanup/session-dedup.ts`, `stages/compression/token-hashing.ts`, `adapters/mcp/server.ts`, `bench/fixtures/loader.ts` | ✅ **closed** — H2, H4, M1, M5, lows (§69), and **M8, M9 + L13 decided and implemented (§70)** |
 
-**Closed (Lane A):** H1, H3, **H5**, M2, M3, M4, M10, M11, M12, M14, M16.
+**Closed (Lane A):** H1, H3, **H5**, M2, M3, M4, **M6**, **M7**, M10, M11, M12, **M13**, M14, **M15**, M16.
 
 **H5 was decided as *withdraw*** — DECISIONS §62. `--trace-output`, `TOKENDAMPER_TRACE_OUTPUT` and
 the `explain` value of `--mode` / `TOKENDAMPER_APP_MODE` are gone from every input surface; the
@@ -65,28 +73,84 @@ untouched — it rewrites the command, which is a live effect. Note the flag's o
 repo, `tools/corpus-harness/measure.js`, was passing `--trace-output stderr` while reading stderr
 correctly all along; it was updated in the same change and re-verified.
 
-**Open (Lane A):** M15 is decided (below) and awaits implementation. M6 and M7 change engine
-output and need the freeze → pin → vary-only-`dist/` loop (§4), not just tests. M13 and six lows
-(L1, L8, L12, L17, L18, L19) are unstarted; L2, L3, L5 and L11 sit on the **unmerged**
-`audit/float-pool` branch (fixed or recorded there, DECISIONS §63 on that branch).
+**M6 and M7 are closed — DECISIONS §64, and the measurement is the point of the entry.** M7 was
+larger than the audit stated: `debtScore` read exactly **35.00 on 317 of the 317 rows that carried
+any debt**, the clamp ceiling, regardless of whether a file lost 4.7% or 66.8%. It was a constant
+wearing the name of a measurement. After the fix, 0 of 317 sit at the ceiling and the implied ratio
+tracks the measured byte cut with correlation **1.0000**, with all 578 rows byte-identical. M6 is
+reachable only through the exported `optimize` API, not through any of the three bundled entry
+points, so its corpus arm differs on **0 of 578 rows** — which is a fact about the instrument, not
+evidence of correctness.
 
-**Three decisions were taken 2026-08-23 — none implemented yet:**
+**H4 is closed — DECISIONS §65, the first Lane B item taken.** Egress located each message by
+searching the raw body for `JSON.stringify(text)`, so a `content: null` tool-call turn — the
+standard OpenAI shape — produced the search string `"null"` *with quotes*, missed, and because
+`spliceIntoRawBody` declines on the **first** miss, discarded the replacements for every other
+message. Measured: **8,685 bytes sent, 8,685 forwarded**, the entire saving gone. Array content
+failed identically at 8,530/8,530, which is why the fix is a structural span scan rather than the
+`null` special-case the audit suggested. The old value search is kept as a fallback, so a declined
+payload behaves exactly as before. Invariant 8 untouched: still only `cleanup:session-dedup`, still
+no cross-turn saving.
 
-- **OX-M15 — default off.** Plain `tokendamper bench` stops executing dataset code through
-  `python`; quality evaluation becomes opt-in, and the regression suites that want it ask for it
-  by name. This aligns the CLI surface with ARCHITECTURE.md's offline-and-deterministic claim.
-  The accepted cost: what plain `bench` reports out of the box changes.
-- **OX-M8 — refuse to start.** Binding a non-loopback host with no `gatewayToken` becomes a
-  startup error naming the exposure, with an explicit opt-in for a caller who truly wants an open
-  relay. Loopback trust (audit C3) and the constant-time compare stay untouched. An existing
-  exposed-bind config breaks loudly instead of relaying silently — that is the point of the
-  decision.
-- **OX-M9 — Origin/Host validation, not token-on-loopback.** POSTs whose `Host` does not name the
-  bind address, or whose `Origin` is present and foreign, are rejected; OPTIONS is answered
-  without permissive CORS headers. Non-browser clients send neither header, so the local client
-  contract is unchanged, while browsers can no longer fire useful simple requests at the gateway.
-  Requiring `x-tokendamper-token` even on loopback was considered and declined: it splits browsers
-  more cleanly, but taxes every existing local client to close a browser-only hole.
+**H2 is closed — DECISIONS §66.** `AbortSignal.timeout(30000)` was handed to `fetch`, and a fetch
+signal keeps governing the **response body stream** after the promise resolves — so streaming
+answers were truncated ~30 s in, on the traffic the Gateway intercepts by default. The budget is now
+time-to-first-byte, disarmed in a `finally` once `fetch` settles. Client-hangup abort is unchanged
+and mutation-checked. `upstreamTtfbTimeoutMs` (default 30000) is configurable, which is also what
+made the defect testable: catching a 30-second bug used to need a 30-second upstream, which is why
+no test caught it.
+
+**M1 is closed — DECISIONS §67.** Within-payload dedup was gated on the block also having been seen
+in a *previous* turn, so a first turn carrying the same block three times went out whole (8,459
+sent, 8,459 forwarded) while the README claimed it saved. The gate did no safety work there:
+`recoverable: true` means an intact copy survives in the same outbound payload, checkable without
+history. §16/§41 untouched — a sole copy across turns is still refused, and the ordinary
+conversational shape still saves 0 and still falls back.
+
+**M5 is closed — DECISIONS §68.** `trimRegionsToCeiling` priced every candidate span by rendering
+its marker, and the renderer it was handed also registered the block — so discarded candidates were
+stored anyway. Measured on a 12-region file: **12 registered against 5 emitted** at target 0.1, 12
+against 3 at 0.05. The store grew with candidates rather than elisions. Corpus A/B at `48ac6c8`:
+**0 of 578 rows differ**, with 101 genuinely reducing, which verifies the binding constraint that
+pricing and emission render identical bytes. The corpus cannot see the leak itself — CLI routes
+supply no hasher — so that half is covered by a unit test.
+
+**The LOW table is closed against its own list — DECISIONS §69.** L6, L7, L9, L10, L12 and L19
+fixed; **L1, L8, L13, L17 and L18 recorded at their sites with the reason they are acceptable rather
+than correct**; L14–L16 were "no action" in the audit itself; L2, L3, L5 and L11 went with the float
+pool (§63) and L4 was recorded when the ingestion work landed. Every row is dispositioned, including
+the ones not fixed — which is the half that went missing when `max_audit.md`'s LOW table was
+declared closed (§55).
+
+**`oxaudit.md` is closed in full — every finding, verified against source 2026-08-30.** The
+last four are DECISIONS §70: three were decisions rather than work, and one was a paragraph.
+
+- **M15 (Lane A) — decided *default off*.** Plain `tokendamper bench` no longer executes fixture
+  code through `python`; `--evaluate-quality` asks for it, and the two regression suites that
+  assert on execution results now request it by name. Verified on the built artifact: plain
+  `bench` writes **0** `python-subprocess` evaluations, `--evaluate-quality` writes **5**.
+- **M8 (Lane B) — decided *refuse to start*.** A non-loopback bind with no `gatewayToken` is a
+  startup error naming the exposure, with `allowUnauthenticatedNonLoopback` as the explicit
+  opt-in. Loopback trust (C3) and the constant-time compare are untouched and asserted. `exec` is
+  unaffected — it binds loopback *and* generates a token.
+- **M9 (Lane B) — decided *Origin/Host validation*.** A foreign `Origin` is refused on every
+  bind; a foreign `Host` is refused on a loopback bind, where DNS rebinding is the threat.
+  **L13 folded in**: `/health` returns `{"status":"ok"}` and no longer reports `sessionCount`.
+  Two corrections went with it — the audit's proposed OPTIONS/CORS handler was measured
+  unnecessary (OPTIONS already answers `405` with no CORS headers, and the threat is a *simple*
+  request that skips preflight), and the recorded decision's claim that non-browser clients "send
+  neither header" is false of `Host`, which every HTTP/1.1 client sends.
+- **M13 (Lane A) — documented, not fixed.** `--minimum-confidence` gates ledger confidence only
+  (validation confidence is binary 0/1) and `--max-debt` cannot trip on a CLI run either, because
+  `attemptAutomatedRehydration` returns immediately without a hasher or ledger and the CLI
+  supplies neither. That reason is stronger than §64's — §64 explained the *default* threshold,
+  and `--max-debt` is the flag that lowers it. `test/unit/cli/inert-dials.test.ts` pins both as a
+  characterization test.
+
+**The corpus was not run for any of the four, deliberately.** Bench, the flag-parse loop and every
+Gateway path are off the optimize route, so a byte-identical result would have been vacuous. This
+is §56's caution in the other direction: byte-identical is not evidence when the corpus cannot
+contain the shape.
 
 **Recorded rather than fixed:** **L4** (a symlink is skipped inside a directory walk but followed
 when named directly). The fix is small, but creating a symlink on the machine it was written on
