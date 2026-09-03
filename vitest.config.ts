@@ -32,9 +32,14 @@ export default defineConfig({
     // Redundant against the anchored `include` above, and kept anyway: `exclude` is what a
     // future widening of `include` would be checked against, and this is the list that names the
     // directory the defect actually came from. Note that specifying `exclude` *replaces*
-    // vitest's default rather than extending it, so `node_modules` and `dist` are restated here
-    // — `dist` matters because `tsc -p tsconfig.json` compiles `test/` as well as `src/`, which
-    // puts a second copy of every suite in `dist/test/` after any build.
+    // vitest's default rather than extending it, so `node_modules` and `dist` are restated here.
+    //
+    // `dist` no longer fills with suites on an ordinary `npm run build` — that now runs
+    // `tsc -p tsconfig.build.json`, whose `include` is `src/**` only (security review F-08). It
+    // stays on this list because `tsconfig.json` still compiles `test/`, so anyone invoking
+    // `tsc -p tsconfig.json` **without** `--noEmit` still produces `dist/test/**`, and because
+    // an exclude that only holds while a sibling config keeps its current shape is worth
+    // asserting rather than assuming.
     exclude: ['**/node_modules/**', '**/dist/**', '**/.claude/**'],
 
     // `tsconfig.json` already declares `types: ["node", "vitest/globals"]`. Nothing in the suite

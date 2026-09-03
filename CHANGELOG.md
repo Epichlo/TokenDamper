@@ -93,6 +93,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   largest remaining gain on Go is in that gate, not in the scanner.
 
 ### Fixed
+- **The published package no longer ships the compiled test suite** (security review F-08).
+  `tsconfig.json` compiles `["src/**/*.ts","test/**/*.ts"]` into `outDir: dist` and
+  `package.json`'s `files` publishes `dist` wholesale, so `dist/test/**` reached every installer:
+  **252 of the tarball's 475 files and 1.87 MB of its 3.4 MB** were test code they cannot run.
+  `npm run build` now uses a new `tsconfig.build.json` whose `include` is `src/**` only. Measured:
+  **475 → 223 files, 730.2 kB → 469.0 kB packed, 3.0 MB → 1.6 MB unpacked.**
+
+  Nothing sensitive was shipping and this is not a disclosure fix: `sourceMap` emits no
+  `sourcesContent`, so no TypeScript source went with it, and a credential sweep of the tarball
+  matches only `sk-tolerance` — a substring of `--risk-tolerance`. The cost was install size and
+  the publication of internal test code.
+
+  `typecheck` still runs against `tsconfig.json`, so `test/**` is still typechecked (verified by
+  planting a type error in a suite and confirming `npm run typecheck` fails). `rootDir: "."` in
+  `tsconfig.json` is what keeps the emitted paths at `dist/src/**` rather than collapsing to
+  `dist/**` once `test/` leaves the include — `main`, `types` and `bin` all depend on it, and the
+  new config documents that at its site.
+
 - **Content hashing no longer collapses `undefined` onto `null`** (DECISIONS §63). The
   serialization fallback in `stableSerialize` turned an explicit `undefined` into `null`'s
   bytes, so two different values shared one hash. No live constructor reaches the branch —

@@ -1,0 +1,25 @@
+// Build configuration — what `npm run build` emits, and therefore what `npm publish` ships.
+//
+// Separate from `tsconfig.json` because that file has a second job: it is the *typecheck* config,
+// and typechecking has to cover `test/**` or the suite goes unchecked. Emitting from that same
+// config put the entire compiled suite into `dist/test/**`, and `package.json`'s `files` publishes
+// `dist` wholesale — so every installer of `tokendamper` received 252 of the tarball's 475 files
+// and 1.87 MB of its 3.4 MB as test code they cannot run. Measured in the 2026-08-30 security
+// review, finding F-08.
+//
+// Nothing sensitive was shipping: `sourceMap` emits no `sourcesContent`, so no TypeScript source
+// went with it, and the tarball carries no credential. The cost was install size and the
+// publication of internal test code, including the adversarial fixtures.
+//
+// **`rootDir` is inherited and load-bearing.** `tsconfig.json` pins it to `"."`, which is why
+// narrowing `include` to `src/**` here does not move the output: without an explicit `rootDir`,
+// tsc infers it from the common directory of the included files, that common directory would
+// become `src/`, and every emitted path would lose its `src/` segment — breaking `main`
+// (`dist/src/index.js`), `types` and `bin`. Do not "simplify" `rootDir` out of `tsconfig.json`.
+//
+// `typecheck` deliberately still runs against `tsconfig.json`, so tests keep being typechecked;
+// it passes `--noEmit`, so it writes nothing.
+{
+  "extends": "./tsconfig.json",
+  "include": ["src/**/*.ts"]
+}

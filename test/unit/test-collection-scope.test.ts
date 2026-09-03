@@ -56,8 +56,9 @@ describe('test collection scope', () => {
 
     expect(exclude.some((p) => p.includes('.claude'))).toBe(true);
     // `exclude` replaces vitest's default rather than extending it, so these have to be restated.
-    // `dist` is not hypothetical: `tsc -p tsconfig.json` compiles `test/` too, so any build puts a
-    // second copy of every suite in `dist/test/`.
+    // `dist` is not hypothetical: `tsconfig.json` still compiles `test/`, so `tsc -p tsconfig.json`
+    // without `--noEmit` puts a second copy of every suite in `dist/test/`. `npm run build` no
+    // longer does — it uses `tsconfig.build.json`, whose `include` is `src/**` only (F-08).
     expect(exclude.some((p) => p.includes('node_modules'))).toBe(true);
     expect(exclude.some((p) => p.includes('dist'))).toBe(true);
   });
