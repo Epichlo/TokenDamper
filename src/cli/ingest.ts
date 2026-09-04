@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
@@ -124,6 +125,57 @@ export function expandPath(argPath: string, cwd: string): string[] {
     return ka < kb ? -1 : ka > kb ? 1 : 0;
   });
   return found;
+}
+
+/**
+ * Which of these paths git is being told to ignore (security review F-03).
+ *
+ * Ingestion is an extension allowlist and nothing else — `.gitignore` is never consulted — so
+ * `tokendamper optimize .` on a repository containing `secrets.yaml`, `serviceAccount.json` or
+ * `config/credentials.yaml` reads them and writes them to stdout, which is the stream the caller
+ * then pipes into a model. Reproduced: three secret-bearing files, all three named in
+ * `.gitignore`, all three ingested and emitted verbatim.
+ *
+ * **This reports; it does not filter.** Skipping ignored files would change which bytes the
+ * pipeline sees, and `.gitignore` covers plenty a caller may legitimately mean to optimize —
+ * build output, vendored sources, generated code. Naming them costs nothing and leaves the
+ * decision where it belongs. A file named directly on the command line is still taken, unchanged:
+ * naming a path is a statement that you want it.
+ *
+ * `execFile` with an argument array and the paths on **stdin**, so no filename is ever interpolated
+ * into a command line — a path beginning with `-` cannot become a flag, and `git check-ignore`'s
+ * `--stdin` form is what makes that possible. Any failure is silent by design: no git, no
+ * repository, or a git too old for these flags all mean "cannot answer", and a warning system that
+ * errors is worse than one that says nothing.
+ */
+export function gitIgnoredAmong(paths: readonly string[], cwd: string): string[] {
+  if (paths.length === 0) return [];
+
+  // `-z` on both sides. Without it git applies `core.quotePath` C-style quoting to any path it
+  // considers unusual — which includes every Windows path, because of the backslashes — and the
+  // warning would print `"C:\\Users\\..."` instead of the path the caller can act on. NUL
+  // separation also removes the last ambiguity a newline in a filename could introduce here.
+  const entries = (text: string): string[] => text.split('\0').filter((line) => line.length > 0);
+
+  try {
+    const out = execFileSync('git', ['check-ignore', '--no-index', '--stdin', '-z'], {
+      cwd,
+      input: paths.join('\0'),
+      encoding: 'utf8',
+      timeout: 2000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    return entries(out);
+  } catch (error) {
+    // `check-ignore` exits 1 when *nothing* matched, which is a successful answer of "none" and
+    // arrives here as a thrown error. Its stdout is still the (empty) match list, so read it
+    // rather than assuming; any other failure yields no stdout and reports nothing.
+    const stdout = (error as { stdout?: string | Buffer }).stdout;
+    if (typeof stdout === 'string' || Buffer.isBuffer(stdout)) {
+      return entries(stdout.toString());
+    }
+    return [];
+  }
 }
 
 /**

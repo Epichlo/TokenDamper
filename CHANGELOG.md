@@ -31,6 +31,49 @@ sessions including an independent falsification pass. Findings are cited by thei
   No entry mode reached this today — the MCP session store is never populated — so it was filed as
   latent. It becomes live for any embedder that hands a populated Gateway store to
   `createMcpServer({ sessionStore })`, which the option exists to invite.
+- **Gateway clients that name no session no longer share one (security review F-01).**
+  `getSessionIdFromHeaders` fell back to the literal `'default-session'`, so every client that set
+  no session header landed in one session object — the *common* case, because the third-party tools
+  `exec` exists to wrap generally set none. Two unrelated local processes then wrote into each
+  other's dedup state, and a third could flush it: one request carrying 130 blocks drives
+  `contentByHash` to its 100-entry cap and evicts everything already there.
+
+  The fallback is now minted per connection and keyed on the socket, which is the only thing here a
+  caller cannot choose — every peer is `127.0.0.1`, so the address discriminates nothing. Keep-alive
+  keeps one client's turns in one session, so cross-turn dedup is unaffected. Measured: two
+  connections now produce two sessions where they produced one, and a client's second turn on the
+  same connection still lands in its own.
+
+  **This narrows a default; it does not authenticate anything.** A client naming an explicit
+  `x-session-id` can still bind to any id, including another client's — unchanged, and the
+  documented `exec` trust boundary, since the peer is already trusted enough to proxy provider
+  traffic through this process. What it removes is the collision nobody opted into. Also note
+  session state is still mutated *before* any credential check, so a request that ends in 401 has
+  already written to the store; that is recorded, not fixed.
+- **`optimize <dir>` warns when it ingests files git is ignoring (security review F-03).**
+  Ingestion is an extension allowlist and never consults `.gitignore`, so pointing it at a
+  repository containing `secrets.yaml`, `serviceAccount.json` or `config/credentials.yaml` read all
+  three and wrote them to stdout — the stream the caller then pipes into a model. It now names them
+  on stderr.
+
+  **It reports; it does not filter.** Skipping them would change which bytes the pipeline sees, and
+  `.gitignore` covers plenty a caller may legitimately mean to optimize — build output, vendored
+  sources, generated code. The query runs `git check-ignore --stdin -z` via `execFile` with an
+  argument array and the paths on **stdin**, so no filename is ever interpolated into a command
+  line and a path beginning with `-` cannot become a flag; `-z` also avoids git's `core.quotePath`
+  C-quoting, which would otherwise print every Windows path escaped. Any failure — no git, no
+  repository — is silent, because a warning system that errors is worse than one that says nothing.
+  The query runs inside the tree being *read*, not the process's own: `git check-ignore` answers
+  according to the repository it runs in, and asking this one about another one's paths reports
+  nothing at all, silently.
+- **The README now states that output markers are unauthenticated (security review F-07).** The
+  `==> path <==` envelope and `[TokenDamper: … sha256:…]` marker are fixed, documented text shapes
+  with no signature, so a marker or header sitting in an ingested file is indistinguishable from one
+  the engine emitted — and the consumer is usually a model, which does not parse the envelope but
+  believes it. Documented rather than fixed with a per-run nonce, which would change emitted bytes
+  on every run and make output non-deterministic across runs, colliding with invariant 1. The note
+  also records the practical discriminator: every genuine header on every CLI route carries an
+  absolute path, so a header naming a bare or relative path did not come from the ingester.
 - **A dropped constraint directive is no longer quoted verbatim into the trace (security review
   F-05).** `CONSTRAINT_DIRECTIVE_LOST` embedded the directive itself — an unbounded clause taken
   straight from the input — and that message becomes `trace.fallbackReason`, which is written to

@@ -1,4 +1,4 @@
-import { timingSafeEqual } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { once } from 'node:events';
 import { createServer, IncomingMessage, Server, ServerResponse } from 'node:http';
 import { handleProxyRequest } from './proxy';
@@ -64,6 +64,28 @@ function timingSafeEqualString(provided: string | string[] | undefined, expected
 export class GatewayServer {
   private readonly server: Server;
   private readonly sessionStore: GatewaySessionStore;
+
+  /**
+   * A per-connection identity for callers that name no session (security review F-01).
+   *
+   * `getSessionIdFromHeaders` used to fall back to the literal `'default-session'`, so **every**
+   * client that set no session header shared one session object by construction — which is the
+   * common case, because the third-party tools `exec` exists to wrap generally do not set one.
+   * Two unrelated processes then wrote into each other's dedup state, and a third could flush it:
+   * one request carrying 130 blocks drives `contentByHash` to its 100-entry cap, evicting
+   * everything the first two had stored.
+   *
+   * Keyed on the socket, so HTTP keep-alive keeps one client's turns together while separate
+   * connections stay apart. The socket is the only thing here a caller cannot choose — every peer
+   * is `127.0.0.1`, so the address discriminates nothing, and the port is per-connection anyway.
+   *
+   * **This narrows the default, and does not authenticate anything.** A client that sets an
+   * explicit `x-session-id` can still bind to any id it names, including another client's; that
+   * is unchanged, and is the documented `exec` trust boundary — the peer is already trusted
+   * enough to proxy provider traffic through this process. What it removes is the collision
+   * nobody opted into.
+   */
+  private readonly connectionSessionIds = new WeakMap<object, string>();
   private readonly config: GatewayConfig;
   private listeningPort?: number;
 
@@ -143,6 +165,18 @@ export class GatewayServer {
 
       this.server.on('error', (err) => rej(err));
     });
+  }
+
+  /** Mints, and then reuses, one identity per connection. See `connectionSessionIds`. */
+  private defaultSessionIdFor(req: IncomingMessage): string {
+    const socket: object | undefined = req.socket;
+    if (!socket) return `conn-${randomBytes(8).toString('hex')}`;
+    let id = this.connectionSessionIds.get(socket);
+    if (id === undefined) {
+      id = `conn-${randomBytes(8).toString('hex')}`;
+      this.connectionSessionIds.set(socket, id);
+    }
+    return id;
   }
 
   public async stop(): Promise<void> {
@@ -340,6 +374,8 @@ export class GatewayServer {
           // it does not make a body that was never valid UTF-8 representable. The CLI applies
           // the same round-trip test for the same reason (`main.ts`, `inputSurvivesDecoding`).
           rawBodyBytes: rawBuffer,
+          // Used only when the caller names no session of its own (F-01).
+          defaultSessionId: this.defaultSessionIdFor(req),
           // Explicitly plumbed rather than read from `process.env` down in the request path.
           // Both default to absent, so a server nobody deliberately configured this way calls
           // real upstreams and enforces the credential check (audit M8).

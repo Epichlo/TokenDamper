@@ -2,6 +2,8 @@ import { describe, expect, it, afterEach } from 'vitest';
 import { chmodSync, existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Agent, request } from 'node:http';
+import { GatewayServer } from '../../src/gateway/server';
 import { GatewaySessionStore } from '../../src/gateway/session-store';
 import { generateHtmlReport } from '../../src/cli/html-reporter';
 import { ELISION_HASH_PREFIX_LENGTH } from '../../src/core/elision';
@@ -83,6 +85,78 @@ describe('security review 2026-08-30 — findings', () => {
 
     it('keeps content scoped by session — the negative result R-01 also recorded', () => {
       expect(seeded().getContent('other', FULL_HASH)).toBeUndefined();
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // F-01 — every header-less client shared the literal 'default-session'
+  // --------------------------------------------------------------------------
+  describe('F-01: clients that name no session do not share one', () => {
+    const post = (port: number, content: string, agent: Agent, sessionId?: string): Promise<void> =>
+      new Promise((resolve, reject) => {
+        const body = JSON.stringify({ model: 'gpt-4', messages: [{ role: 'user', content }] });
+        const headers: Record<string, string | number> = {
+          'content-type': 'application/json',
+          authorization: 'Bearer sk-test',
+          'content-length': Buffer.byteLength(body),
+        };
+        if (sessionId) headers['x-session-id'] = sessionId;
+        const req = request(
+          { host: '127.0.0.1', port, path: '/v1/chat/completions', method: 'POST', agent, headers },
+          (res) => {
+            res.resume();
+            res.on('end', () => resolve());
+          },
+        );
+        req.on('error', reject);
+        req.end(body);
+      });
+
+    it('gives two connections two sessions, and keeps one connection on one', async () => {
+      const server = new GatewayServer({ port: 0, mockUpstream: true });
+      const port = await server.start();
+      const store = server.getSessionStore();
+      const a = new Agent({ keepAlive: true });
+      const b = new Agent({ keepAlive: true });
+      try {
+        await post(port, 'CLIENT-A-CONTENT', a);
+        expect(store.sessionCount).toBe(1);
+
+        // A second, unrelated client. Before the fix both landed in 'default-session', so this
+        // stayed at 1 and each could read, evict and overwrite the other's dedup state.
+        await post(port, 'CLIENT-B-CONTENT', b);
+        expect(store.sessionCount).toBe(2);
+
+        // Keep-alive: the same client's next turn must stay in its own session, or cross-turn
+        // dedup would be dead for every header-less caller.
+        await post(port, 'CLIENT-A-SECOND-TURN', a);
+        expect(store.sessionCount).toBe(2);
+
+        expect(store.getSession('default-session')).toBeUndefined();
+      } finally {
+        a.destroy();
+        b.destroy();
+        await server.stop();
+      }
+    });
+
+    it('leaves an explicitly named session working, which is the documented contract', async () => {
+      const server = new GatewayServer({ port: 0, mockUpstream: true });
+      const port = await server.start();
+      const store = server.getSessionStore();
+      const a = new Agent({ keepAlive: true });
+      const b = new Agent({ keepAlive: true });
+      try {
+        // Two different connections naming the same id still share it. That is deliberate: `exec`
+        // wraps a tool that may fan out, and the peer is already trusted enough to proxy through.
+        await post(port, 'TURN-1', a, 'team-shared');
+        await post(port, 'TURN-2', b, 'team-shared');
+        expect(store.getSession('team-shared')?.turnCount).toBe(2);
+      } finally {
+        a.destroy();
+        b.destroy();
+        await server.stop();
+      }
     });
   });
 

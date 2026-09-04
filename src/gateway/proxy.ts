@@ -37,7 +37,7 @@ export async function handleProxyRequest(
 ): Promise<ProxyRequestResult> {
   const requestUrl = new URL(urlPath, 'http://tokendamper.local');
   const routePath = requestUrl.pathname;
-  const sessionId = getSessionIdFromHeaders(headers, rawBody);
+  const sessionId = getSessionIdFromHeaders(headers, rawBody, options.defaultSessionId);
   const session = options.sessionStore.getOrCreateSession(sessionId);
 
   // Can the string model represent what the caller actually sent?
@@ -370,7 +370,20 @@ function copyResponseHeaders(headers: Headers): Record<string, string> {
   return copied;
 }
 
-function getSessionIdFromHeaders(headers: IncomingHttpHeaders, body: string): string {
+/**
+ * The session this request belongs to: whatever the caller named, else a caller-independent
+ * default supplied by the server.
+ *
+ * The fallback used to be the literal `'default-session'` (security review F-01), so every client
+ * that set no session header shared one session object. `defaultSessionId` is per-connection; see
+ * `GatewayServer.connectionSessionIds` for why the socket is the granularity and what this does
+ * not claim to fix.
+ */
+function getSessionIdFromHeaders(
+  headers: IncomingHttpHeaders,
+  body: string,
+  defaultSessionId?: string,
+): string {
   const headerSessionId = headers['x-session-id'] || headers['x-tokendamper-session-id'];
   if (headerSessionId) {
     if (Array.isArray(headerSessionId)) {
@@ -396,7 +409,8 @@ function getSessionIdFromHeaders(headers: IncomingHttpHeaders, body: string): st
     // Ignore JSON parse error in session ID extraction
   }
 
-  return 'default-session';
+  // Only reached by an in-process caller that supplied none — the HTTP path always does.
+  return defaultSessionId ?? 'default-session';
 }
 
 /**
