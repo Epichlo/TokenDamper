@@ -1661,16 +1661,9 @@ not, and an operator patching by line number would edit the wrong code:
 
 ### 8.5 What Session 4 did not establish
 
-- **Most of Session 3 has had no adversarial pass — this is the largest open item.** Session 3 was
-  unrun when this pass began and was committed (`55edffa`) while it was in flight. F-08 was reached
-  (§8.2, and it is closed); **R-12 and clean-list entries 29–36 were not.** Session 3 named the best
-  target itself: **R-12 is a substitute for `gitleaks`, not an equal** — no entropy scoring, so a
-  high-entropy secret in an unrecognised format is missed, and disagreement with it is a legitimate
-  result. Its sweep also covered history as of `55edffa`; the commits added since, this report among
-  them, are outside it. Entries 32 and 33 (the `npm audit` advisories and the single install-time
-  lifecycle script) were measured against a dependency tree that `npm install` re-resolves, so both
-  are worth one re-run rather than a re-derivation. **A short Session 4b over R-12 and 29–36 is the
-  cheapest remaining work on this report.**
+- ~~**Most of Session 3 has had no adversarial pass.**~~ **Closed by Session 4b — see §8.6.** R-12
+  and clean-list entries 29–36 were falsified in a follow-up pass; all eight hold, four on stronger
+  evidence than Session 3 gave them.
 - **Only two things were re-scored on a POSIX host.** F-06's ingestion half and F-04's file mode ran
   under WSL2, which is a real Linux kernel on ext4 and is sufficient for both. Everything else ran on
   Windows, as in Sessions 1–2.
@@ -1685,11 +1678,103 @@ not, and an operator patching by line number would edit the wrong code:
   where a finding touched them. **A tree with this much new gateway and drift code deserves its own
   Pass 1 and Pass 5**, and this session is not that.
 
+### 8.6 Session 4b — falsifying Session 3 (R-12 and clean-list 29–36)
+
+- **Date:** 2026-09-03, immediately after the Session 1 branch was merged in. Same tree, `445b3ed`
+  plus the merge, **v1.7.3**.
+- **Why it exists:** §8.5 recorded that Session 3's own work had never been attacked. This closes
+  that. **All eight items hold. Four now rest on stronger evidence than Session 3 gave them, and one
+  of Session 3's stated method limits is closed by measurement rather than left open.**
+
+**R-12 and entry 36 — the history sweep. Confirmed, and its one admitted gap is now closed.**
+Session 3 was explicit that its sweep "does not do" Shannon-entropy scoring, "so a high-entropy
+secret in an unrecognised format is missed," and invited disagreement. Re-run and extended:
+
+- *The issuer-pattern half reproduces*, at a larger scale than Session 3 measured: **198 commits and
+  1,050 blobs** (29.5 MB) against its 194 / 1,040 — the growth is this review's own commits. Hits
+  are `AKIAIOSFODNN7EXAMPLE` ×16, `-----BEGIN PRIVATE KEY-----` ×13, `https://x:tok@example.com` ×8.
+  The counts rose only because the report now exists in more blob versions. **Every hit in the whole
+  of history resolves to one path** — `docs/security-review-2026-08-30.md` — introduced by exactly
+  three commits: `4d9f8cd` (Sessions 1–2), `55edffa` (Session 3), `954b144` (Session 4). Checked per
+  pattern with `git log --all -S… --name-only`; no other path has ever contained any of them.
+  Session 4 has since added its own fixtures (`sk-attacker`, `sk-victim`) to the same file, so the
+  report is now the sole source of credential *patterns* in the repository, across three sessions.
+- *The entropy half is new work, and it finds nothing.* Every token of ≥24 characters over the whole
+  history dump was scored: **25,512 candidates, 1,975 unique, 288 above H > 4.0, 217 of those
+  mixed-case with digits.** Classified, **214 are npm lockfile integrity hashes** (`sha512-…` in
+  `package-lock.json`) and **3 are unexplained** — and all three are benign on inspection:
+  `toolu_01ABCDEFGHIJKLMNOPQRST` (a placeholder ID, literally sequential A–T), the identifier
+  `V2_nonHashRequiredFixedList`, and a Windows `site-packages` path. **Zero credentials.** So the
+  limitation Session 3 flagged is real as a *method* limit and produces **no missed finding here**.
+  That is the useful outcome: the gap is closed by measurement, not conceded.
+- *One coverage hypothesis of my own was tested and disproven.* R-12 filters blobs to `< 2000000`
+  bytes, so a large blob would be invisible to it. Counted: **0 blobs in this repository are ≥ 2 MB**,
+  so the filter excludes nothing. The method is sound here, though the filter would matter in a repo
+  carrying binaries and is worth stating rather than inheriting.
+- *One incidental note, not a finding.* The `site-packages` token is a developer's absolute path in
+  `tools/corpus-harness/recipe.json`, which discloses the account name in the repository. It is
+  **not** in the published tarball, and the same name is already in every commit's author field.
+
+**Entry 29 — the `files` allowlist is enforced. Confirmed, re-measured at v1.7.3.** A real
+`npm pack` produces **223 entries**. Subtracting `dist/` and `test/fixtures/bench/` leaves exactly
+ARCHITECTURE, CHANGELOG, CODE_OF_CONDUCT, CONTRIBUTING, DECISIONS, LICENSE, README, ROADMAP,
+SECURITY and `package.json` — the nine declared docs plus the manifest npm always adds. Nothing
+outside the allowlist. Note Session 3's figure was 475 entries at v1.6.0; the drop is F-08's fix.
+
+**Entry 30 — no `sourcesContent`. Confirmed, and generalized from a sample of one.** R-11 checked a
+single map, `dist/src/gateway/proxy.js.map`. Checked here across **all 70** `.js.map` files in the
+tarball: **0 have a `sourcesContent` key at all**, let alone a non-null one. Independently, the
+tarball contains **no `.ts` file that is not a `.d.ts`**. The entry was right; it was one file's
+worth of evidence for a 70-file claim, and is now the claim it was making.
+
+**Entry 31 — no credential in the tarball. Confirmed, and strengthened.** The issuer-pattern sweep
+over the unpacked v1.7.3 tarball returns **zero** matches — Session 3's lone `sk-tolerance` hit is
+gone, because that string is a substring of `--risk-tolerance` and does not survive a length-bounded
+pattern. The entropy sweep over the tarball returns **0 high-entropy mixed-case tokens from 876
+candidates**. Nothing ships.
+
+**Entry 32 — both advisories dev-only. Confirmed, unchanged at v1.7.3.** `npm audit` still reports
+exactly **two high, zero critical**: `brace-expansion` and `nanoid`, both `isDirect: false`. The
+load-bearing fact is structural rather than a version count — `package.json` has **no
+`dependencies` key at all**, and the tarball contains **zero `node_modules` entries**, so an
+installer of `tokendamper` installs no transitive package and neither advisory can reach one.
+
+**Entry 33 — one install-time lifecycle script. Confirmed.** Walking every installed
+`package.json`: **135 packages, exactly 1** install-time script — `esbuild postinstall: node
+install.js`. This package itself declares only `prepublishOnly`; no `preinstall`, `install` or
+`postinstall`. Session 3 said 136 packages; the one-package difference is a tree-walk counting
+detail, not a disagreement.
+
+**Entry 34 — no telemetry, no phone-home. Confirmed, on much wider evidence than the original
+grep.** Session 3 established this with `grep -rn "fetch(" src/`, one hit. That is the same narrow
+shape that failed for clean-list item 22, so it was redone two ways. A sweep for every other egress
+primitive — `http.request`, `https.get`, `net.connect`, `net.Socket`, `tls.connect`, `dgram`,
+`WebSocket`, `sendBeacon`, `XMLHttpRequest`, `axios`, `got`, `node-fetch`, `undici` — returns
+**nothing**. And the census of *every* Node builtin imported anywhere in `src/` is:
+`child_process`, `crypto`, `events`, `fs`, `http`, `path`, `stream`. **There is no `net`, no `tls`,
+no `dgram`, no `https`, no `dns`.** The only network-capable surface in the product is `node:http`
+in the gateway and the one global `fetch` at `proxy.ts:204`. The conclusion is right and now rests
+on an exhaustive import census rather than one string.
+
+**Entry 35 — the MCP server binds nothing. Confirmed.** `createServer` appears exactly once
+(`gateway/server.ts:96`) and `listen` exactly once (`gateway/server.ts:134`). Every other
+`…Server(` hit is the class name `McpStdioServer`, which is stdio, not a socket. **Citation drift:**
+Session 3 cites the `listen()` at `gateway/server.ts:71`; at v1.7.3 it is **line 134** — the same
+v1.6.0-coordinates problem §8.4 records for the Session 1–2 findings, now reaching Session 3's.
+
+**Net for Session 4b: eight items examined, eight confirmed, none retracted or downgraded.** The
+value is not the verdicts — it is that entries 30, 31, 34 and R-12 were each resting on a sample of
+one or on a narrow pattern, and each now rests on the full population. Session 3's work survives
+scrutiny better than Sessions 1–2's did, which is worth saying plainly: it made fewer claims than it
+could support, and the one limit it did flag turned out to cost nothing.
+
 **Standing at the close of Session 4:** F-01 Medium, F-02 Medium *pending the §6.3 placement
 decision*, F-03 Low, F-04 Low, F-05 Low (population widened), F-06 **Low** (downgraded from Medium),
 F-07 Low, **F-08 closed — fixed in v1.7.2**. Still no Critical and no High. Of the seven findings
 this pass set out to break, **seven survive**; the eighth, inherited mid-pass, is already fixed on
-the current tree. But two of the three claims Session 2 offered as already-hardened (§8's opening
+the current tree. Session 4b (§8.6) then examined Session 3's eight remaining claims — R-12 and
+clean-list 29–36 — and **all eight hold**, four of them now on the full population rather than a
+sample of one. But two of the three claims Session 2 offered as already-hardened (§8's opening
 defence) did not survive contact:
 F-05's narrowing was wrong in the direction of under-reporting, and F-06's indistinguishability was
 wrong in the direction of over-reporting. F-01's retraction of the membership oracle is the one that
