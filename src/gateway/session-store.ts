@@ -1,3 +1,4 @@
+import { ELISION_HASH_PREFIX_LENGTH } from '../core/elision';
 import type { GatewaySession, SessionContentEntry, SessionTurn } from './types';
 
 /**
@@ -134,6 +135,20 @@ export class GatewaySessionStore {
 
   /**
    * Retrieves original raw content by full content hash, short ref, or elision marker.
+   *
+   * **A prefix shorter than a marker's own ref is refused** (security review F-02). The prefix
+   * scan below returns the content whenever exactly one stored hash starts with the ref, and it
+   * had no minimum length — so `ref=a` recovered the content of any block whose digest began `a`,
+   * in ~16 guesses per hex digit, and `ref=` (empty) recovered it in **none** whenever the session
+   * held a single block, because `startsWith('')` is true for every hash. Both forms were
+   * reachable from a string rather than only from an API call: `normalizeHashOrRef` extracts
+   * `ref=` out of a marker-shaped argument, and one character is a well-formed marker.
+   *
+   * The bound is `ELISION_HASH_PREFIX_LENGTH` because that is what the only producer emits —
+   * `session-dedup.ts` renders `item.contentHash.slice(0, 12)` — so no legitimate lookup is
+   * narrowed. This mirrors `TokenHasher.resolve`, which had the guard from the start; the two
+   * stores held the same class of data under different rules, which is why F-02 read as an
+   * oversight rather than a design choice.
    */
   public getContent(sessionId: string, hashOrRef: string): string | undefined {
     const session = this.sessions.get(sessionId);
@@ -145,6 +160,12 @@ export class GatewaySessionStore {
       session.contentByHash.delete(normalizedRef);
       session.contentByHash.set(normalizedRef, exactMatch);
       return exactMatch;
+    }
+
+    // Checked after the exact-match branch, not before it: a full digest is a complete identifier
+    // and is always allowed, whatever its length relative to the prefix bound.
+    if (normalizedRef.length < ELISION_HASH_PREFIX_LENGTH) {
+      return undefined;
     }
 
     const prefixMatches: Array<{ hash: string; content: string }> = [];

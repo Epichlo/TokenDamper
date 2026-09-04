@@ -111,6 +111,14 @@ export interface ProxyHandlerOptions {
    */
   readonly rawBodyBytes?: Buffer | undefined;
   /**
+   * Session identity for a request that names none of its own (security review F-01).
+   *
+   * The server supplies one per connection. Absent — an in-process caller — the old
+   * `'default-session'` literal still applies, which keeps direct `handleProxyRequest` callers
+   * behaving as they did.
+   */
+  readonly defaultSessionId?: string | undefined;
+  /**
    * Answer locally with the optimized request body instead of calling a provider.
    *
    * A test seam, and the only way to reach that behaviour. It was previously triggered by

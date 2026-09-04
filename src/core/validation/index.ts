@@ -11,6 +11,8 @@ import type {
   ValidationReport,
 } from '../model';
 import { extractConstraintDirectives } from '../../stages/cleanup/constraint-preservation';
+import { ELISION_HASH_PREFIX_LENGTH } from '../elision';
+import { hashContent } from '../model/constructors';
 import { DriftTracker } from '../ledger/drift-tracker';
 import { validateBundleAst } from './ast';
 import { describeLanguageSupport } from './language-support';
@@ -80,7 +82,7 @@ export function validate(
       if (!afterItem.content.includes(directive)) {
         issues.push({
           code: 'CONSTRAINT_DIRECTIVE_LOST',
-          message: `Imperative constraint directive dropped from item [${item.id}]: "${directive}"`,
+          message: `Imperative constraint directive dropped from item [${item.id}]: ${describeDirective(item, directive)}`,
           severity: 'error',
           itemId: item.id,
         });
@@ -258,6 +260,32 @@ export function validate(
  * there. Both paths now scan **prose regions only** (`extractProseRegions`, audit H6), so the
  * two agree; before that, the fallback scan and the stage could disagree about what counted.
  */
+/**
+ * Describes a dropped directive **without reproducing it** (security review F-05).
+ *
+ * This string reaches two places that outlive the process: `trace.fallbackReason`, written to
+ * stderr on every CLI run, and the full trace returned to an MCP client by
+ * `get_optimization_trace`. It used to embed the directive verbatim — an unbounded clause taken
+ * straight from the input — so a line like `# CRITICAL: rotate token=sk-live-abc123 before Friday.`
+ * was copied out of the payload into the diagnostic channel, where shell redirection and CI log
+ * capture take it somewhere the source never was.
+ *
+ * Truncation was the other candidate and was rejected on the reproduction's own numbers: the
+ * secret in R-02 begins at character 24 of a 53-character line, so any cap generous enough to stay
+ * readable still emits it, and any cap tight enough to suppress it is no longer diagnostic.
+ *
+ * Offset, length and a digest prefix identify the directive exactly for anyone holding the input —
+ * which is who the message is for — and identify it to no one else. The digest is over the
+ * directive text, so the same directive reports the same value across runs, keeping the message
+ * deterministic (invariant 1).
+ */
+function describeDirective(item: ContextItem, directive: string): string {
+  const offset = item.content.indexOf(directive);
+  const digest = hashContent(directive).slice(0, ELISION_HASH_PREFIX_LENGTH);
+  const where = offset >= 0 ? `offset ${offset}` : 'offset unknown (directive came from metadata)';
+  return `${directive.length} bytes at ${where}, sha256:${digest}`;
+}
+
 function collectItemDirectives(item: ContextItem): string[] {
   if (typeof item.metadata.constraintDirectives === 'string') {
     try {

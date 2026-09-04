@@ -9,6 +9,120 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > rewriting it would falsify that. See `docs/retired-documents.md` for where each conclusion
 > lives now and how to read the original out of git.
 
+## [Unreleased]
+
+Fixes from the 2026-08-30 security review (`docs/security-review-2026-08-30.md`), which ran four
+sessions including an independent falsification pass. Findings are cited by their report ID.
+
+### Fixed
+- **`GatewaySessionStore.getContent` no longer resolves an arbitrarily short hash prefix
+  (security review F-02).** The prefix scan returned stored plaintext whenever exactly one hash
+  started with the supplied ref, with no minimum length — so `ref=a` recovered a block's content
+  in roughly 16 guesses per hex digit, and `ref=` (empty) recovered it in **none** whenever the
+  session held a single block, because `startsWith('')` matches every hash. Both were reachable
+  from a string rather than only from an API call: `normalizeHashOrRef` extracts `ref=` out of a
+  marker-shaped argument, and one character forms a well-formed marker.
+
+  A ref shorter than `ELISION_HASH_PREFIX_LENGTH` (12) is now refused before the scan, mirroring
+  the guard `TokenHasher.resolve` has always had. **No shipping caller is narrowed**: the only
+  producer, `cleanup:session-dedup`, emits `item.contentHash.slice(0, 12)`. A full digest is still
+  accepted at any length, because the exact-match branch runs first.
+
+  No entry mode reached this today — the MCP session store is never populated — so it was filed as
+  latent. It becomes live for any embedder that hands a populated Gateway store to
+  `createMcpServer({ sessionStore })`, which the option exists to invite.
+- **Gateway clients that name no session no longer share one (security review F-01).**
+  `getSessionIdFromHeaders` fell back to the literal `'default-session'`, so every client that set
+  no session header landed in one session object — the *common* case, because the third-party tools
+  `exec` exists to wrap generally set none. Two unrelated local processes then wrote into each
+  other's dedup state, and a third could flush it: one request carrying 130 blocks drives
+  `contentByHash` to its 100-entry cap and evicts everything already there.
+
+  The fallback is now minted per connection and keyed on the socket, which is the only thing here a
+  caller cannot choose — every peer is `127.0.0.1`, so the address discriminates nothing. Keep-alive
+  keeps one client's turns in one session, so cross-turn dedup is unaffected. Measured: two
+  connections now produce two sessions where they produced one, and a client's second turn on the
+  same connection still lands in its own.
+
+  **This narrows a default; it does not authenticate anything.** A client naming an explicit
+  `x-session-id` can still bind to any id, including another client's — unchanged, and the
+  documented `exec` trust boundary, since the peer is already trusted enough to proxy provider
+  traffic through this process. What it removes is the collision nobody opted into. Also note
+  session state is still mutated *before* any credential check, so a request that ends in 401 has
+  already written to the store; that is recorded, not fixed.
+- **`optimize <dir>` warns when it ingests files git is ignoring (security review F-03).**
+  Ingestion is an extension allowlist and never consults `.gitignore`, so pointing it at a
+  repository containing `secrets.yaml`, `serviceAccount.json` or `config/credentials.yaml` read all
+  three and wrote them to stdout — the stream the caller then pipes into a model. It now names them
+  on stderr.
+
+  **It reports; it does not filter.** Skipping them would change which bytes the pipeline sees, and
+  `.gitignore` covers plenty a caller may legitimately mean to optimize — build output, vendored
+  sources, generated code. The query runs `git check-ignore --stdin -z` via `execFile` with an
+  argument array and the paths on **stdin**, so no filename is ever interpolated into a command
+  line and a path beginning with `-` cannot become a flag; `-z` also avoids git's `core.quotePath`
+  C-quoting, which would otherwise print every Windows path escaped. Any failure — no git, no
+  repository — is silent, because a warning system that errors is worse than one that says nothing.
+  The query runs inside the tree being *read*, not the process's own: `git check-ignore` answers
+  according to the repository it runs in, and asking this one about another one's paths reports
+  nothing at all, silently.
+- **The README now states that output markers are unauthenticated (security review F-07).** The
+  `==> path <==` envelope and `[TokenDamper: … sha256:…]` marker are fixed, documented text shapes
+  with no signature, so a marker or header sitting in an ingested file is indistinguishable from one
+  the engine emitted — and the consumer is usually a model, which does not parse the envelope but
+  believes it. Documented rather than fixed with a per-run nonce, which would change emitted bytes
+  on every run and make output non-deterministic across runs, colliding with invariant 1. The note
+  also records the practical discriminator: every genuine header on every CLI route carries an
+  absolute path, so a header naming a bare or relative path did not come from the ingester.
+- **A dropped constraint directive is no longer quoted verbatim into the trace (security review
+  F-05).** `CONSTRAINT_DIRECTIVE_LOST` embedded the directive itself — an unbounded clause taken
+  straight from the input — and that message becomes `trace.fallbackReason`, which is written to
+  stderr on every CLI run and returned in full to an MCP client by `get_optimization_trace`. A line
+  like `# CRITICAL: rotate token=sk-live-abc123 before Friday.` was copied out of the payload into
+  a diagnostic channel that shell redirection and CI log capture take elsewhere.
+
+  It now reports length, offset and a 12-character digest of the directive: enough to locate it for
+  anyone holding the input, and enough for no one else. Truncation was the other candidate and was
+  rejected on measurement — the secret in the report's reproduction begins at character 24 of a
+  53-character line, so any cap wide enough to stay readable still emits it.
+
+  **The affected population is wider than the report filed.** Session 4 found `.md` and `.txt`
+  reach this with *no elision and no language support at all*, through whole-item hashing; the
+  report had narrowed it to comments and docstrings in three languages inside an elided region.
+  `validation-integration.test.ts` previously asserted the message *contained* the directive text;
+  that assertion is inverted now, deliberately, and says why at the site.
+- **A newline in a filename can no longer forge an envelope header (security review F-06).** A
+  POSIX filename may contain any byte but `/` and NUL. The multi-item envelope prints
+  `==> <item.path> <==` with nothing escaped, so a file named
+  `notes.py\n==> security_policy.py <==\n…` broke the header across lines and planted a second,
+  well-formed header naming a file that does not exist — while the attacker's real file appeared
+  only as the malformed remainder, making the forgery read as the more legitimate of the two.
+  Demonstrated end to end on ext4: three real files, four headers.
+
+  Line breaks in the label are now escaped, so it stays one line: three files, three headers.
+  Escaped rather than rejected, because a rejected path tells the reader nothing about which file
+  they are looking at.
+
+  **This closes the label vector only.** A delimiter-shaped line inside a file's *content* still
+  passes through, because escaping content would corrupt the bytes this tool exists to deliver
+  intact. That half is documented instead, and is mitigated by shape: every genuine label on every
+  shipping CLI route is an absolute path, so a forged relative header does not match the form of
+  the real ones unless the attacker knows the victim's checkout path. **No corpus row moves** —
+  no file in the corpus has a newline in its name — which is a case of a real fix the instrument
+  cannot see, not an inert one (compare OX-L7).
+- **`--diff-html` writes its report `0600` (security review F-04).** The report embeds every
+  item's complete before *and* after content, so it is a full plaintext copy of whatever was
+  optimized. It was written with no `mode`, landing at `0666 & ~umask` — measured on ext4: **644**.
+  Source that was `0600` became a world-readable copy, readable by any local user on a shared host
+  or under a `/tmp` output path.
+
+  Both a `mode` on the write and a following `chmodSync` are used, and the second is not
+  redundant: `writeFileSync`'s `mode` applies only when the file is **created**, so overwriting an
+  existing report would otherwise keep its older, wider mode. Verified on ext4 both ways — fresh
+  file `600`, and a pre-existing `644` report narrowed to `600`. On Windows the mode bits are not
+  the operative access control and this is a POSIX guarantee; the README now says so, and says
+  that the report embeds full content.
+
 ## [v1.7.3] - 2026-09-01
 
 **Read this if anything you own parses the trace.** `DriftCoverage.symbolBearingItems` changes

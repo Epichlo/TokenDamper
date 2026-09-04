@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import { readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { CLI_ADAPTER_NAME, CLI_ADAPTER_VERSION, format as formatCliOutput, parse } from '../adapters/cli';
 import { createMultiItemRequest } from '../core/model/constructors';
 import { ITEM_DELIMITER_PREFIX, ITEM_DELIMITER_SUFFIX } from '../core/render';
-import { ingestPaths, type IngestedFile } from './ingest';
+import { gitIgnoredAmong, ingestPaths, type IngestedFile } from './ingest';
 import { loadConfig } from '../config';
 import { declarableLanguages, normalizeLanguage } from '../core/model';
 import type { ContextBundle } from '../core/model/types';
@@ -339,6 +339,7 @@ function runMultiFileOptimize(
     io.stdout.write(result.emittedOutput);
   }
 
+  warnAboutIgnoredFiles(files, cwd, io.stderr);
   warnAboutDroppedFiles(request.bundle, result.finalBundle, io.stderr);
 
   if (parsed.diff) {
@@ -374,6 +375,42 @@ function runMultiFileOptimize(
  * is a count and the useful part is *which* files. The fallback path returns the original
  * bundle, so nothing is reported there — correctly, since nothing was dropped.
  */
+/**
+ * Names ingested files that git is being told to ignore (security review F-03).
+ *
+ * Written to stderr, so it cannot corrupt the optimized stream on stdout, and emitted even when
+ * the run succeeds — the point is that the caller is about to send these bytes to a model and may
+ * not know `secrets.yaml` was among them. See `gitIgnoredAmong` for why this reports rather than
+ * filters, and for why no filename reaches a command line.
+ */
+function warnAboutIgnoredFiles(
+  files: ReadonlyArray<IngestedFile>,
+  cwd: string,
+  stderr: NodeJS.WritableStream,
+): void {
+  // Run the query inside the tree being *read*, not the process's own. `optimize /other/repo`
+  // resolves to absolute paths, and `git check-ignore` answers according to the repository it is
+  // run in — asking this repository about another one's paths reports nothing at all, silently,
+  // which is the shape of failure this warning exists to prevent. A bundle spanning two
+  // repositories is checked against the first one's rules; that under-reports rather than
+  // misreports, and no realistic invocation does it.
+  const first = files[0];
+  const root = first ? dirname(first.path) : cwd;
+  const ignored = gitIgnoredAmong(
+    files.map((f) => f.path),
+    root,
+  );
+  if (ignored.length === 0) return;
+
+  stderr.write(
+    `Warning: ${ignored.length} of ${files.length} ingested file(s) are ignored by git, and their ` +
+      `contents are in the output:\n` +
+      ignored.map((name) => `  - ${name}\n`).join('') +
+      `They were read because ingestion selects by extension and does not consult .gitignore. ` +
+      `Name files individually, or point at a narrower directory, to exclude them.\n`,
+  );
+}
+
 function warnAboutDroppedFiles(
   before: ContextBundle,
   after: ContextBundle,
