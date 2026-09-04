@@ -31,6 +31,42 @@ sessions including an independent falsification pass. Findings are cited by thei
   No entry mode reached this today — the MCP session store is never populated — so it was filed as
   latent. It becomes live for any embedder that hands a populated Gateway store to
   `createMcpServer({ sessionStore })`, which the option exists to invite.
+- **A dropped constraint directive is no longer quoted verbatim into the trace (security review
+  F-05).** `CONSTRAINT_DIRECTIVE_LOST` embedded the directive itself — an unbounded clause taken
+  straight from the input — and that message becomes `trace.fallbackReason`, which is written to
+  stderr on every CLI run and returned in full to an MCP client by `get_optimization_trace`. A line
+  like `# CRITICAL: rotate token=sk-live-abc123 before Friday.` was copied out of the payload into
+  a diagnostic channel that shell redirection and CI log capture take elsewhere.
+
+  It now reports length, offset and a 12-character digest of the directive: enough to locate it for
+  anyone holding the input, and enough for no one else. Truncation was the other candidate and was
+  rejected on measurement — the secret in the report's reproduction begins at character 24 of a
+  53-character line, so any cap wide enough to stay readable still emits it.
+
+  **The affected population is wider than the report filed.** Session 4 found `.md` and `.txt`
+  reach this with *no elision and no language support at all*, through whole-item hashing; the
+  report had narrowed it to comments and docstrings in three languages inside an elided region.
+  `validation-integration.test.ts` previously asserted the message *contained* the directive text;
+  that assertion is inverted now, deliberately, and says why at the site.
+- **A newline in a filename can no longer forge an envelope header (security review F-06).** A
+  POSIX filename may contain any byte but `/` and NUL. The multi-item envelope prints
+  `==> <item.path> <==` with nothing escaped, so a file named
+  `notes.py\n==> security_policy.py <==\n…` broke the header across lines and planted a second,
+  well-formed header naming a file that does not exist — while the attacker's real file appeared
+  only as the malformed remainder, making the forgery read as the more legitimate of the two.
+  Demonstrated end to end on ext4: three real files, four headers.
+
+  Line breaks in the label are now escaped, so it stays one line: three files, three headers.
+  Escaped rather than rejected, because a rejected path tells the reader nothing about which file
+  they are looking at.
+
+  **This closes the label vector only.** A delimiter-shaped line inside a file's *content* still
+  passes through, because escaping content would corrupt the bytes this tool exists to deliver
+  intact. That half is documented instead, and is mitigated by shape: every genuine label on every
+  shipping CLI route is an absolute path, so a forged relative header does not match the form of
+  the real ones unless the attacker knows the victim's checkout path. **No corpus row moves** —
+  no file in the corpus has a newline in its name — which is a case of a real fix the instrument
+  cannot see, not an inert one (compare OX-L7).
 - **`--diff-html` writes its report `0600` (security review F-04).** The report embeds every
   item's complete before *and* after content, so it is a full plaintext copy of whatever was
   optimized. It was written with no `mode`, landing at `0666 & ~umask` — measured on ext4: **644**.

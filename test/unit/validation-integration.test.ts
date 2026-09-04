@@ -81,7 +81,15 @@ describe('Validation Integration (AST & Constraint Directive Retention)', () => 
     expect(report.passed).toBe(false);
     expect(report.shouldFallback).toBe(true);
     expect(report.issues.some((i) => i.code === 'CONSTRAINT_DIRECTIVE_LOST')).toBe(true);
-    expect(report.issues[0]?.message).toContain('MUST NOT');
+
+    // This used to assert the message contained `MUST NOT` — the directive's own text. Security
+    // review F-05: that message reaches stderr on every CLI run and the full trace returned to an
+    // MCP client, so quoting an unbounded clause out of the payload copied whatever it contained
+    // (`token=sk-live-…` in the report's reproduction) into a diagnostic channel. The message now
+    // identifies the directive by length, offset and digest instead, which is enough for anyone
+    // holding the input and enough for no one else.
+    expect(report.issues[0]?.message).not.toContain('MUST NOT');
+    expect(report.issues[0]?.message).toMatch(/\d+ bytes at offset \d+, sha256:[0-9a-f]{12}/);
   });
 
   it('detects missing constraints even if AST syntax is valid', () => {
