@@ -9,6 +9,41 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > rewriting it would falsify that. See `docs/retired-documents.md` for where each conclusion
 > lives now and how to read the original out of git.
 
+## [Unreleased]
+
+Fixes from the 2026-08-30 security review (`docs/security-review-2026-08-30.md`), which ran four
+sessions including an independent falsification pass. Findings are cited by their report ID.
+
+### Fixed
+- **`GatewaySessionStore.getContent` no longer resolves an arbitrarily short hash prefix
+  (security review F-02).** The prefix scan returned stored plaintext whenever exactly one hash
+  started with the supplied ref, with no minimum length — so `ref=a` recovered a block's content
+  in roughly 16 guesses per hex digit, and `ref=` (empty) recovered it in **none** whenever the
+  session held a single block, because `startsWith('')` matches every hash. Both were reachable
+  from a string rather than only from an API call: `normalizeHashOrRef` extracts `ref=` out of a
+  marker-shaped argument, and one character forms a well-formed marker.
+
+  A ref shorter than `ELISION_HASH_PREFIX_LENGTH` (12) is now refused before the scan, mirroring
+  the guard `TokenHasher.resolve` has always had. **No shipping caller is narrowed**: the only
+  producer, `cleanup:session-dedup`, emits `item.contentHash.slice(0, 12)`. A full digest is still
+  accepted at any length, because the exact-match branch runs first.
+
+  No entry mode reached this today — the MCP session store is never populated — so it was filed as
+  latent. It becomes live for any embedder that hands a populated Gateway store to
+  `createMcpServer({ sessionStore })`, which the option exists to invite.
+- **`--diff-html` writes its report `0600` (security review F-04).** The report embeds every
+  item's complete before *and* after content, so it is a full plaintext copy of whatever was
+  optimized. It was written with no `mode`, landing at `0666 & ~umask` — measured on ext4: **644**.
+  Source that was `0600` became a world-readable copy, readable by any local user on a shared host
+  or under a `/tmp` output path.
+
+  Both a `mode` on the write and a following `chmodSync` are used, and the second is not
+  redundant: `writeFileSync`'s `mode` applies only when the file is **created**, so overwriting an
+  existing report would otherwise keep its older, wider mode. Verified on ext4 both ways — fresh
+  file `600`, and a pre-existing `644` report narrowed to `600`. On Windows the mode bits are not
+  the operative access control and this is a POSIX guarantee; the README now says so, and says
+  that the report embeds full content.
+
 ## [v1.7.3] - 2026-09-01
 
 **Read this if anything you own parses the trace.** `DriftCoverage.symbolBearingItems` changes

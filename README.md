@@ -212,6 +212,10 @@ TokenDamper provides detailed explainability for how your context was optimized 
 
 - `--diff`: Prints a visual ANSI terminal diff comparing the raw input against the optimized output.
 - `--diff-html <path>`: Generates a beautiful HTML report visualizing exact token elisions and metrics.
+  **The report embeds every item's complete content, before and after** — it is a full plaintext
+  copy of whatever you optimized, not a summary. It is written `0600` (owner-only) for that reason;
+  on Windows the mode is not the operative access control, so the file inherits the directory's
+  ACLs. Point it somewhere private, and treat it as you would the source itself.
 - `--max-debt <0-100>`: Debt ceiling above which the engine attempts re-hydration. **It cannot
   change a CLI run** — see *Two dials that look live and are not*, below.
 - `--max-drift <0-1>`: Fails validation if semantic drift (structural deviation) exceeds this threshold.

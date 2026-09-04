@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs';
+import { chmodSync, writeFileSync } from 'node:fs';
 import type { ContextBundle, OptimizationResult } from '../core/model';
 import { computeLineDiff } from '../core/utils/myers-diff';
 
@@ -244,7 +244,19 @@ export function generateHtmlReport(
 </html>`;
 
   if (options?.outputPath) {
-    writeFileSync(options.outputPath, html, 'utf8');
+    // **Written 0600, and then narrowed again** (security review F-04). This report embeds every
+    // item's complete before *and* after content — `beforeText` / `afterText` above are the raw
+    // bytes — so it is a full plaintext copy of whatever was optimized. It used to be written with
+    // no `mode`, landing at `0666 & ~umask`, typically 0644: source that was 0600 became a
+    // world-readable copy, which on a shared host or under a `/tmp` output path any local user
+    // could read. Measured on ext4 before the fix: 644.
+    //
+    // Both calls are needed. `writeFileSync`'s `mode` applies **only when the file is created**,
+    // so overwriting an existing report would silently keep that file's older, wider mode; the
+    // `chmodSync` covers the rewrite case. On Windows neither is the operative access control —
+    // ACLs are — and `chmod` there only toggles the read-only bit, so this is a POSIX guarantee.
+    writeFileSync(options.outputPath, html, { encoding: 'utf8', mode: 0o600 });
+    chmodSync(options.outputPath, 0o600);
   }
 
   return html;
