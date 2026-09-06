@@ -45,5 +45,30 @@ export default defineConfig({
     // to make that declaration true rather than decorative, which is the same standard audit H4
     // and OX-H5 apply to CLI flags.
     globals: true,
+
+    /**
+     * Coverage reporting — audit OX-L18.
+     *
+     * Reporting only: `npm run coverage` produces it, `npm test` does not, and **no threshold
+     * fails a build**. That is deliberate. A number attached to a gate immediately becomes a
+     * target, and the failure mode is a suite that covers lines rather than behaviour — which is
+     * the opposite of what this repository's tests are for. Several of them exist to pin a
+     * *characterization*: `validator-guarantee.test.ts` asserts that prose passes the TypeScript
+     * validator, and a coverage gate would reward deleting it. The instrument is here to be read,
+     * not to be satisfied.
+     *
+     * Scoped to `src/` because that is what ships. `dist/` is build output, `tools/` is a
+     * measurement harness that is not in `package.json`'s `files`, and `bench/fixtures` is data.
+     */
+    coverage: {
+      provider: 'v8',
+      reporter: ['text-summary', 'html', 'lcov'],
+      reportsDirectory: 'coverage',
+      include: ['src/**/*.ts'],
+      exclude: ['src/**/*.d.ts', 'src/version.ts'],
+      // Absent on purpose — see the note above. Add one only with a reason that is not "the
+      // number should go up".
+      thresholds: undefined,
+    },
   },
 });

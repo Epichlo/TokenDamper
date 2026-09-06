@@ -51,11 +51,12 @@ and §48 closed H4's deferred half. §5 records what is left on the architectura
 
 **Two later audits are not in the wave table above, and both are closed.**
 
-- **`oxaudit.md`** — closed in full by DECISIONS §69 and §70, **except `L17`** (architecture import
-  rules) and **`L18`** (coverage tooling). Both are deferred rather than done: each needs a new
-  devDependency (`eslint-plugin-boundaries` or dependency-cruiser; `@vitest/coverage-v8`), the audit
-  itself calls both optional, and adding dependencies to someone's package on a LOW finding is not a
-  call to make unasked. The heading below still says "open" for the historical reason it was written;
+- **`oxaudit.md`** — **closed in full.** §69 and §70 closed everything but `L17` and `L18`, which
+  were deferred on the cost of a new devDependency; both landed in **DECISIONS §72**. L17 turned
+  out to need no dependency at all — `@typescript-eslint/no-restricted-imports` expresses both of
+  this repository's import rules — so the deferral reason, written for the pair, had only ever
+  applied to one of them. L18 adds `@vitest/coverage-v8` and is **reporting only**: no threshold
+  gates a build. The heading below still says "open" for the historical reason it was written;
   read it as history.
 - **`docs/security-review-2026-08-30.md`** — a four-session security review with its own protocol,
   unrelated to either wave or lane structure. **All eight findings fixed.** Its §3.1 is the
@@ -63,7 +64,7 @@ and §48 closed H4's deferred half. §5 records what is left on the architectura
   substantive item is that **v1.7.3's +859 new lines have never been audited**. See CLAUDE.md's
   section on it for the parts that change how you read this repository's other claims.
 
-### `oxaudit.md` is a second audit — **now closed but for L17/L18** — and the table above does not cover it
+### `oxaudit.md` is a second audit — **now closed in full (§72)** — and the table above does not cover it
 
 `oxaudit.md` (ox-alpha, 2026-08-23, against `79aedef`) is an independent review, unrelated to
 `max_audit.md`'s wave structure. It is committed at the repository root for the same reason
