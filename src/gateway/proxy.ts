@@ -796,7 +796,24 @@ function findMemberValue(source: string, objectStart: number, key: string): RawS
 
     const keyEnd = scanString(source, i);
     if (keyEnd === -1) return undefined;
-    const name = source.slice(i + 1, keyEnd - 1);
+
+    // **The name is decoded, not sliced** (security review V-03). It used to be the raw source
+    // between the quotes, which is not the name — `"content"` *is* `content` to `JSON.parse`,
+    // and comparing the undecoded slice missed it. That is V-01 all over again by another route:
+    // the parser resolved the duplicate to the escaped key's value while this function matched
+    // only the literal one, so the splice overwrote the wrong span. Demonstrated end to end after
+    // V-01 was fixed — the escaped form destroyed one value and deduplicated neither.
+    //
+    // `JSON.parse` on the key is the decoder that cannot disagree with the parser downstream,
+    // which is the entire property this function needs. The slice is a valid JSON string literal
+    // by construction, `scanString` having just found its bounds; the guard is for malformed input
+    // that reaches here anyway.
+    let name: string;
+    try {
+      name = JSON.parse(source.slice(i, keyEnd)) as string;
+    } catch {
+      return undefined;
+    }
 
     i = skipWs(source, keyEnd);
     if (source[i] !== ':') return undefined;

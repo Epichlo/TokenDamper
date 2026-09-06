@@ -180,6 +180,18 @@ describe('security review 2026-08-30 — findings', () => {
       expect(scanned).toBe('"BBBB"');
     });
 
+    it('V-03: resolves a key written with a unicode escape, as the parser does', () => {
+      // `"content"` *is* `content` to JSON.parse. Comparing the undecoded source slice missed
+      // it, so V-01 came straight back by another route: the parser resolved the duplicate to the
+      // escaped key's value while the scanner matched only the literal one. Found by falsifying
+      // the V-01 fix; the key is decoded with JSON.parse now, which cannot disagree.
+      const escaped = '"cont' + String.fromCharCode(92) + 'u0065nt"';
+      const body = '{"model":"m","messages":[{"role":"user","content":"AAAA",' + escaped + ':"BBBB"}]}';
+      expect(JSON.parse(body).messages[0].content).toBe('BBBB');
+      const spans = scanContentSpans(body, { includeSystem: false });
+      expect(body.slice(spans![0]!.start, spans![0]!.end)).toBe('"BBBB"');
+    });
+
     it('applies the same rule to Anthropic\'s system field', () => {
       const body = '{"model":"claude","system":"FIRST","system":"SECOND","messages":[{"role":"user","content":"hi"}]}';
       const spans = scanContentSpans(body, { includeSystem: true });
