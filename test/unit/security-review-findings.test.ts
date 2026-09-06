@@ -2,7 +2,8 @@ import { describe, expect, it, afterEach } from 'vitest';
 import { chmodSync, existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Agent, request } from 'node:http';
+import { Agent, createServer, request } from 'node:http';
+import { scanContentSpans } from '../../src/gateway/proxy';
 import { GatewayServer } from '../../src/gateway/server';
 import { GatewaySessionStore } from '../../src/gateway/session-store';
 import { generateHtmlReport } from '../../src/cli/html-reporter';
@@ -155,6 +156,183 @@ describe('security review 2026-08-30 — findings', () => {
       } finally {
         a.destroy();
         b.destroy();
+        await server.stop();
+      }
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // V-01 — the egress splice resolved duplicate JSON keys the opposite way to JSON.parse
+  // --------------------------------------------------------------------------
+  describe('V-01: duplicate JSON keys resolve the same way the parser resolves them', () => {
+    // RFC 8259 permits a repeated name; ECMA-262 builds the object in source order, so the last
+    // duplicate wins. The pipeline optimizes the value `JSON.parse` produced, and the span says
+    // where to write it back — so the two rules must agree or the splice overwrites the wrong text.
+    const bodyWithDuplicateContent = (first: string, second: string): string =>
+      `{"model":"gpt-4","messages":[{"role":"user","content":${JSON.stringify(first)},"content":${JSON.stringify(second)}}]}`;
+
+    it('returns the span of the value JSON.parse resolves to, not the first one written', () => {
+      const body = bodyWithDuplicateContent('AAAA', 'BBBB');
+      const spans = scanContentSpans(body, { includeSystem: false });
+      expect(spans).toBeDefined();
+      const scanned = body.slice(spans![0]!.start, spans![0]!.end);
+      expect(scanned).toBe(JSON.stringify(JSON.parse(body).messages[0].content));
+      expect(scanned).toBe('"BBBB"');
+    });
+
+    it('applies the same rule to Anthropic\'s system field', () => {
+      const body = '{"model":"claude","system":"FIRST","system":"SECOND","messages":[{"role":"user","content":"hi"}]}';
+      const spans = scanContentSpans(body, { includeSystem: true });
+      expect(body.slice(spans![0]!.start, spans![0]!.end)).toBe('"SECOND"');
+    });
+
+    it('is unchanged for the ordinary case of one key per object', () => {
+      const body = '{"model":"gpt-4","messages":[{"role":"user","content":"only"}]}';
+      const spans = scanContentSpans(body, { includeSystem: false });
+      expect(spans).toHaveLength(1);
+      expect(body.slice(spans![0]!.start, spans![0]!.end)).toBe('"only"');
+    });
+
+    it('end to end: the forwarded body keeps the shadowed value and elides the real duplicate', async () => {
+      // Before the fix this destroyed DECOY, left both copies of BLOCK, and saved nothing.
+      let forwarded: string | undefined;
+      const stub = createServer((req, res) => {
+        let b = '';
+        req.on('data', (c) => (b += c));
+        req.on('end', () => {
+          forwarded = b;
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ id: 'x', choices: [{ message: { role: 'assistant', content: 'ok' } }] }));
+        });
+      });
+      await new Promise<void>((r) => stub.listen(0, '127.0.0.1', () => r()));
+      const stubPort = (stub.address() as { port: number }).port;
+
+      const server = new GatewayServer({
+        port: 0,
+        upstreamOpenAiUrl: `http://127.0.0.1:${stubPort}`,
+        allowInsecureUpstream: true,
+      });
+      const port = await server.start();
+      try {
+        const BLOCK = 'REPEATED-BLOCK-' + 'z'.repeat(400);
+        const DECOY = 'DECOY-FIRST-VALUE-' + 'q'.repeat(400);
+        const body =
+          '{"model":"gpt-4","messages":[' +
+          JSON.stringify({ role: 'user', content: BLOCK }) +
+          ',{"role":"user","content":' +
+          JSON.stringify(DECOY) +
+          ',"content":' +
+          JSON.stringify(BLOCK) +
+          '}]}';
+
+        const r = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: 'Bearer sk-test', 'x-session-id': 'dup' },
+          body,
+        });
+        await r.text();
+
+        expect(forwarded).toBeDefined();
+        // The shadowed first value survives untouched — it is not what the parser saw.
+        expect(forwarded).toContain(DECOY);
+        // And the duplicate that JSON.parse *did* see is the one that got elided, so the block
+        // appears once rather than twice. Both halves matter: the old behaviour destroyed the
+        // first value and still failed to dedup the second.
+        expect(forwarded!.split(BLOCK).length - 1).toBe(1);
+      } finally {
+        await server.stop();
+        stub.close();
+      }
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // V-02 — Origin: null bypassed the browser-origin refusal
+  // --------------------------------------------------------------------------
+  describe('V-02: Origin: null is a foreign origin, not an absent one', () => {
+    const post = async (port: number, headers: Record<string, string>, sid: string) => {
+      const r = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-session-id': sid, ...headers },
+        body: JSON.stringify({ model: 'gpt-4', messages: [{ role: 'user', content: 'X' }] }),
+      });
+      await r.text();
+      return r.status;
+    };
+
+    it('refuses Origin: null — what a sandboxed iframe or data: URL sends', async () => {
+      const server = new GatewayServer({ port: 0, mockUpstream: true });
+      const port = await server.start();
+      try {
+        expect(await post(port, { origin: 'null' }, 'v02-null')).toBe(403);
+        expect(server.getSessionStore().getSession('v02-null')).toBeUndefined();
+      } finally {
+        await server.stop();
+      }
+    });
+
+    it('still refuses an ordinary foreign origin', async () => {
+      const server = new GatewayServer({ port: 0, mockUpstream: true });
+      const port = await server.start();
+      try {
+        expect(await post(port, { origin: 'https://evil.example' }, 'v02-evil')).toBe(403);
+      } finally {
+        await server.stop();
+      }
+    });
+
+    it('still allows a request with no Origin header — the non-browser client', async () => {
+      // The distinction the fix turns on: *absent* means "not a browser"; the literal string
+      // `null` means "a browser declining to name itself". Only the first is exempt.
+      const server = new GatewayServer({ port: 0, mockUpstream: true });
+      const port = await server.start();
+      try {
+        expect(await post(port, {}, 'v02-none')).toBe(200);
+      } finally {
+        await server.stop();
+      }
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // F-01 residual — credentials are now checked before a session exists
+  // --------------------------------------------------------------------------
+  describe('F-01 residual: an unauthenticated request creates no session', () => {
+    it('answers 401 without creating a session, so it cannot drive LRU eviction', async () => {
+      // Reachable by a browser through V-02's route, and a browser cannot supply `authorization`
+      // on a simple request — the header is not CORS-safelisted. That is why this check is a real
+      // control against that caller even though a local process passes it with any string.
+      const server = new GatewayServer({ port: 0 });
+      const port = await server.start();
+      const store = server.getSessionStore();
+      try {
+        for (let i = 0; i < 20; i++) {
+          const r = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', 'x-session-id': `flood-${i}` },
+            body: JSON.stringify({ model: 'gpt-4', messages: [{ role: 'user', content: 'y' }] }),
+          });
+          expect(r.status).toBe(401);
+          await r.text();
+        }
+        expect(store.sessionCount).toBe(0);
+      } finally {
+        await server.stop();
+      }
+    });
+
+    it('does not create a session for a rejected method either', async () => {
+      const server = new GatewayServer({ port: 0 });
+      const port = await server.start();
+      try {
+        const r = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+          method: 'GET',
+          headers: { 'x-session-id': 'getreq' },
+        });
+        await r.text();
+        expect(server.getSessionStore().getSession('getreq')).toBeUndefined();
+      } finally {
         await server.stop();
       }
     });

@@ -31,6 +31,34 @@ sessions including an independent falsification pass. Findings are cited by thei
   No entry mode reached this today — the MCP session store is never populated — so it was filed as
   latent. It becomes live for any embedder that hands a populated Gateway store to
   `createMcpServer({ sessionStore })`, which the option exists to invite.
+- **The egress splice no longer overwrites the wrong value when a message repeats a JSON key
+  (security review V-01).** `findMemberValue` returned the **first** match while `JSON.parse`
+  resolves a duplicate name to the **last** — and the pipeline optimizes what the parser produced,
+  while the span says where to write it back. Given `{"content":"A","content":"B"}` the engine
+  reasoned about `B` and the splice overwrote `A`: the forwarded body lost `A` outright, still
+  carried `B` unelided, and gained a marker the provider cannot resolve. `forwardableBody`'s
+  never-grow guard does not catch it, because the corruption makes the body shorter. Same
+  divergence on Anthropic's `system` field. Now last-match-wins, matching the parser.
+- **`Origin: null` is refused rather than exempted (security review V-02).** The browser-origin
+  guard read `originHeader !== 'null'`, so the one `Origin` value a browser sends when it is *most*
+  sandboxed — a sandboxed iframe, a `data:` URL, some redirect chains — was the one value that
+  walked past it. An absent `Origin` still passes, because that is the non-browser client; the
+  literal string `null` is a browser declining to name itself, which is not the same thing.
+- **An unauthenticated Gateway request no longer creates a session (security review F-01
+  residual).** The credential check ran *after* the stages, so a request ending in 401 had already
+  created a session, stored its blocks and advanced the turn counter — and an empty session still
+  occupies a slot under `maxSessions`, which is the whole eviction primitive.
+
+  **This fix was previously refused, and the reversal is the interesting part.** It was assessed as
+  vacuous because `hasAuthHeaders` tests presence rather than validity: a local process passes it
+  with `Bearer anything`. That held for one attacker and there are two — V-02 showed a browser
+  reaches this handler, and a browser cannot set `authorization` on a simple request at all, since
+  the header is not CORS-safelisted and asking for it forces a preflight this server refuses.
+  Measured after the fix: 20 unauthenticated requests leave `sessionCount` at 0. A rejected method
+  no longer creates one either.
+
+  `ProxyRequestResult.session` is optional as a consequence — a 401 or 405 now has no session to
+  report. No consumer reads that field off a result.
 - **The Gateway refuses an unsafe upstream base URL before it listens (security review §6.3).**
   `buildUpstreamUrl` trimmed a slash and concatenated with no validation of any kind, while
   `buildForwardHeaders` delivers the caller's `Authorization` / `x-api-key` to whatever came out —
