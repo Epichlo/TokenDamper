@@ -96,11 +96,30 @@ export async function handleProxyRequest(
     };
   }
 
-  const sessionId = getSessionIdFromHeaders(headers, rawBody, options.defaultSessionId);
-  const session = options.sessionStore.getOrCreateSession(sessionId);
+  // **A session is created only on a route that has one to use** (security review S-01).
+  //
+  // This used to run above the route dispatch, unconditionally, while the credential check above
+  // is gated on `isApiRoute`. The two disagreeing is the whole defect: `POST /v1/anything` and
+  // `GET /nope` answered 404 — and minted a session on the way there, with no credential of any
+  // kind. §10.1 recorded the hoist as removing the eviction primitive from the caller V-02
+  // reaches; it removed it from two routes.
+  //
+  // Measured with a real browser from a foreign origin, before this line moved: a no-cors GET
+  // carries no `Origin` header at all — the Fetch spec appends one only for CORS-tainted requests
+  // or non-GET/HEAD methods — so the origin gate never saw it, and 400 such requests opened 400
+  // connections, minted one session each, and drove the store to its 100-session `maxSessions`
+  // cap. A victim session seeded first was evicted along with its stored content.
+  //
+  // The 404 below no longer reports a session, which `ProxyRequestResult.session` already allows
+  // and which nothing reads: an unknown endpoint is not a conversation. Written as a call the two
+  // API branches make, rather than a nullable the 404 has to narrow away — the branches are
+  // mutually exclusive, so this still runs at most once per request.
+  const openSession = (): GatewaySession =>
+    options.sessionStore.getOrCreateSession(getSessionIdFromHeaders(headers, rawBody, options.defaultSessionId));
 
   // Handle OpenAI API endpoint
   if (routePath === '/v1/chat/completions') {
+    const session = openSession();
     const optimized = bodyIsLossless
       ? processOpenAiRequest(rawBody, session, options)
       : passThroughUnrepresentable(bodyBytes as Buffer, rawBody, session);
@@ -129,6 +148,7 @@ export async function handleProxyRequest(
 
   // Handle Anthropic API endpoint
   if (routePath === '/v1/messages') {
+    const session = openSession();
     const optimized = bodyIsLossless
       ? processAnthropicRequest(rawBody, session, options)
       : passThroughUnrepresentable(bodyBytes as Buffer, rawBody, session);
@@ -155,12 +175,11 @@ export async function handleProxyRequest(
     });
   }
 
-  // Fallback pass-through for unknown endpoints
+  // Fallback pass-through for unknown endpoints. No session: see `openSession` above.
   return {
     statusCode: 404,
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ error: `Unknown gateway endpoint: ${urlPath}` }),
-    session,
   };
 }
 

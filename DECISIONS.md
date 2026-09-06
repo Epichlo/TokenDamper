@@ -5399,3 +5399,138 @@ Neither rule says the architecture is *right*, only that it stopped drifting. Th
 clean before it existed and exists to keep it so, which means it has never actually caught
 anything — its value is entirely prospective, and a rule that has never fired in anger is a rule
 whose usefulness is still a hypothesis.
+
+---
+
+## 73. Two Fixes That Were Right About One Route Each
+
+Security review Session 7 (`docs/security-review-2026-08-30.md` §12) was the first falsification
+pass over the *remediation* run by an agent that did not write it. It confirmed eleven of the
+fourteen fixes, several against attacks materially harder than the ones the self-authored §11
+tried, and found four defects. This closes the two that were demonstrably broken rather than
+merely incomplete: **S-01** and **S-02**.
+
+They are recorded together because they are the same mistake. Each fix was written against the
+route where the finding was reproduced, and each left a sibling route — reachable by the same
+attacker, emitting or mutating the same thing — untouched. Neither is a subtle bug in the fix's
+logic; the logic is correct everywhere it runs.
+
+### S-01 — the credential hoist guarded two routes and `getOrCreateSession` guarded none
+
+Session 5 hoisted the gateway's credential check above `getOrCreateSession` so an unauthenticated
+request would leave no trace in the session store, and §10.1 recorded the result: "20
+unauthenticated requests leave `sessionCount` at **0**, so the eviction primitive is gone for the
+caller V-02 reaches."
+
+The check it hoisted is conditioned on `isApiRoute`. `getOrCreateSession` was not:
+
+```ts
+if (isApiRoute && !shouldUseMockUpstream(options) && … && !hasAuthHeaders(cleanHeaders)) {
+  return { statusCode: 401, … };
+}
+const sessionId = getSessionIdFromHeaders(headers, rawBody, options.defaultSessionId);
+const session = options.sessionStore.getOrCreateSession(sessionId);   // every route, always
+```
+
+So `POST /v1/anything` and `GET /nope` answered 404 and minted a session on the way there, with no
+credential of any kind. Measured: **20 unauthenticated POSTs to an unknown endpoint → 20 sessions;
+120 `GET /nope` naming chosen ids over a single keep-alive connection → 100**, the store's whole
+`maxSessions` cap.
+
+**The reason this matters is the attacker it is reachable by, and that took a browser to
+establish.** §10.2's chain is a web page reaching the loopback gateway; V-02 closed the
+`Origin: null` value that chain used. But a **no-cors GET carries no `Origin` header at all** — the
+Fetch specification appends one only for CORS-tainted requests or for methods other than GET and
+HEAD — so the origin gate never sees it, and the `Host` check passes because the browser genuinely
+is talking to `127.0.0.1`. A POST cannot do this; a POST always carries `Origin`. A GET to an
+unknown path can, and the unknown path is precisely what the hoist did not cover.
+
+Driven from a page on a different port, against a live gateway:
+
+```
+{ "sessions": 100, "requests": 400, "distinctSockets": 400,
+  "requestsCarryingOrigin": 0, "originValues": [] }
+```
+
+Four hundred requests, four hundred connections — the browser opens a fresh one per no-cors
+request, so the per-connection default session id F-01 introduced gives the page one session per
+request rather than one per page. With a victim session seeded first, its content was gone:
+
+```
+victimSessionBefore: { exists: true,  content: "the victim's previous-turn source code" }
+victimSessionAfter : { exists: false, content: null }
+```
+
+**The fix creates the session inside the two API branches**, so no other route can mint one, and
+the 404 reports none — `ProxyRequestResult.session` has been optional since the hoist, and nothing
+reads it. Written as a `openSession()` call the branches make rather than a nullable the 404 has to
+narrow away: the branches are mutually exclusive, so it still runs at most once per request, and
+there is no `undefined` for a later reader to wonder about. Same page, same 400 requests, after:
+**`sessionCount` 1**, and it is the victim's, still holding its content.
+
+**What this does not change.** A local process still passes `hasAuthHeaders` with `Bearer
+anything` and can still name any session id it likes. That is the `exec` trust boundary (audit C3)
+and §3.1's measurement of it stands — a loopback peer is trusted enough to proxy provider traffic
+through this process. The control is for the browser, which cannot set either header on a request
+that reaches this handler, and it is now a control on every route rather than on two.
+
+### S-02 — the escaping lived in `core/render`, and the CLI has a second renderer
+
+F-06's label vector: a POSIX filename may contain a newline, so `item.path` interpolated between
+`==> ` and ` <==` can break the header across lines and plant a second, well-formed header naming
+a file that does not exist. The fix escaped `\r` and `\n` in `itemLabel`.
+
+`itemLabel` is in `core/render`. `renderFallbackBytes` is in `cli/main.ts`, and it emits the same
+header:
+
+```ts
+parts.push(Buffer.from(`${ITEM_DELIMITER_PREFIX}${file.path}${ITEM_DELIMITER_SUFFIX}\n`, 'utf8'));
+```
+
+Its own comment said "under the header the renderer emits", which stopped being true the moment
+the renderer started escaping. It exists because fail-open must emit each file's **original
+bytes** rather than `emittedOutput` (DECISIONS §35), and it is reached on every fallback.
+
+Measured on ext4, one directory, two runs of the shipped binary:
+
+```
+success path : 3 headers, forged payload line absent
+fallback path: 4 headers, the extra one `==> security_policy.py <==`
+               followed by ALLOW_INSECURE_TLS = True
+```
+
+**The attacker controls the trigger as well as the payload.** One file of their own containing
+invalid UTF-8 forces the fallback through `inputNotRepresentable`; no drift threshold or budget
+guess is needed.
+
+**The fix moves the escaping into an exported `escapeDelimiterLabel` in `core/render`, next to the
+delimiters it protects, and both renderers call it.** That is the substance: a third renderer
+would now have to go out of its way to diverge, whereas duplicating a two-call `replace` chain was
+how this happened. Only the header is escaped — `file.bytes` is written through untouched, because
+emitting the caller's original bytes is the entire reason that path exists.
+
+**The README needed no edit, which is the point.** It already says "Line breaks in a filename are
+escaped, so a crafted name cannot introduce a header line either." Session 7 recorded that sentence
+as false on the fallback route. It is true again, on both.
+
+### The two the fix does not close, and why
+
+Session 7 filed four. **S-03** (V8's `JSON.parse` message still quoting roughly fifteen bytes of
+the payload into `trace.fallbackReason`, on the same field F-05 cleaned) and **S-04** (the §6.3
+upstream guard validating a base URL that `fetch` is then free to redirect away from, carrying
+`x-api-key` — undici strips `authorization` cross-origin and not this) are open. Both are real and
+both are Low; neither is a fix that fails to do what it claims, which is what separated S-01 and
+S-02 from them here.
+
+### What this does not establish
+
+The corpus was not run, deliberately. S-01 is off the optimize route entirely, and S-02 changes
+stdout only for a file whose *name* contains a newline — **0 of the corpus's files do**, so
+byte-identical would have measured nothing. That is OX-L7's shape and §56's caution: a real fix the
+instrument cannot see is not an inert one.
+
+And the general lesson is smaller than it looks. Neither fix was wrong about its finding; both were
+scoped to where the reproduction ran. The test for S-01 was titled "an unauthenticated request
+creates no session" and asserted it of one route — which is invariant 10 arriving at the
+remediation's own test names, and the reason §9.1 item 3 was worth closing with somebody else's
+agent rather than another self-authored pass.

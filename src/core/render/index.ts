@@ -17,6 +17,24 @@ export const ITEM_DELIMITER_PREFIX = '==> ';
 export const ITEM_DELIMITER_SUFFIX = ' <==';
 
 /**
+ * Makes a label safe to put between the delimiters: one line, whatever it was.
+ *
+ * **Exported because there are two renderers and only one of them used to escape** (security
+ * review S-02). `renderFallbackBytes` in `cli/main.ts` writes the same `==> … <==` header over
+ * each file's *original bytes* on the fail-open path, and it built that header by interpolating
+ * `file.path` directly — so the F-06 fix below held on the success path and did nothing on the
+ * fallback path, which an attacker can force with a single file of their own that is not valid
+ * UTF-8. Demonstrated on ext4: three real files and one crafted name produced 3 headers
+ * optimized and **4** on fallback, the extra one naming a file that does not exist.
+ *
+ * The escaping lives here, next to the delimiters it protects, so a third renderer cannot repeat
+ * the divergence by forgetting about it.
+ */
+export function escapeDelimiterLabel(raw: string): string {
+  return raw.replace(/\r/g, '\\r').replace(/\n/g, '\\n');
+}
+
+/**
  * The one-line name a header carries.
  *
  * **Line breaks are escaped, not passed through** (security review F-06). A POSIX filename may
@@ -41,8 +59,7 @@ export const ITEM_DELIMITER_SUFFIX = ' <==';
  * checkout path.
  */
 function itemLabel(item: ContextItem, index: number): string {
-  const raw = item.path ?? item.origin ?? `item-${index + 1}`;
-  return raw.replace(/\r/g, '\\r').replace(/\n/g, '\\n');
+  return escapeDelimiterLabel(item.path ?? item.origin ?? `item-${index + 1}`);
 }
 
 /**

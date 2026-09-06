@@ -11,10 +11,45 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-Fixes from the 2026-08-30 security review (`docs/security-review-2026-08-30.md`), which ran four
-sessions including an independent falsification pass. Findings are cited by their report ID.
+Fixes from the 2026-08-30 security review (`docs/security-review-2026-08-30.md`), which ran seven
+sessions including two independent falsification passes — one over the findings, one over the
+fixes. Findings are cited by their report ID.
 
 ### Fixed
+- **The gateway creates a session only on a route that uses one (security review S-01).** The
+  credential check hoisted in the previous round is conditioned on `isApiRoute`;
+  `getOrCreateSession` ran above the route dispatch and was not. So `POST /v1/anything` and
+  `GET /nope` answered 404 and minted a session on the way there, with **no credential of any
+  kind** — 20 unauthenticated POSTs to an unknown endpoint produced 20 sessions, and 120 `GET`s
+  naming chosen ids over one connection produced 100, the store's entire `maxSessions` cap.
+
+  **Reachable from a web page, which is the attacker the origin gate exists for.** A no-cors GET
+  carries no `Origin` header at all — the Fetch spec appends one only for CORS-tainted requests or
+  non-GET/HEAD methods — so V-02's refusal never sees it, and the `Host` check passes because the
+  browser really is talking to `127.0.0.1`. Driven from a page on another port against a live
+  gateway: 400 requests, 400 connections, **0 carrying `Origin`**, `sessionCount` 100, and a
+  victim session seeded beforehand evicted along with its stored content. The same page after the
+  fix leaves `sessionCount` at **1** — the victim's, content intact.
+
+  The session is now opened inside the two API branches, and the 404 reports none.
+  `ProxyRequestResult.session` has been optional since the hoist and nothing reads it. **Unchanged:
+  a local process still passes `hasAuthHeaders` with any string and may still name any session id**
+  — that is the `exec` trust boundary (audit C3), not something this closes.
+- **The CLI's fallback renderer escapes its envelope label too (security review S-02).** F-06
+  escaped `\r` and `\n` in `core/render`'s `itemLabel`; `renderFallbackBytes` in `cli/main.ts`
+  emits the same `==> … <==` header over each file's original bytes on the fail-open path, and
+  built it by interpolating `file.path` raw. A POSIX filename may contain a newline, so a crafted
+  name still broke the header across lines there and planted a second, well-formed header naming a
+  file that does not exist. Measured on ext4, one directory: **3 headers optimized, 4 on fallback**,
+  the extra one followed by the attacker's chosen line. The attacker forces the fallback with one
+  file of their own that is not valid UTF-8.
+
+  The escaping is now an exported `escapeDelimiterLabel` in `core/render`, next to the delimiters
+  it protects, and both renderers call it — duplicating the `replace` chain is how the two
+  diverged. Only the header is escaped; `file.bytes` still passes through untouched, because
+  emitting the caller's original bytes is why that path exists (DECISIONS §35). **No corpus row
+  moves**: no corpus file has a newline in its name. README needed no edit — its claim that "a
+  crafted name cannot introduce a header line" is simply true again, on both routes.
 - **`GatewaySessionStore.getContent` no longer resolves an arbitrarily short hash prefix
   (security review F-02).** The prefix scan returned stored plaintext whenever exactly one hash
   started with the supplied ref, with no minimum length — so `ref=a` recovered a block's content

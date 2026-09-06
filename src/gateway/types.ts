@@ -189,11 +189,13 @@ export interface ProxyRequestResult {
   /**
    * The session this request belongs to, when it reached session handling at all.
    *
-   * Optional since security review F-01/V-02: a `405` or a `401` is now answered *before*
+   * Optional since security review F-01/V-02: a `405` and a `401` are answered *before*
    * `getOrCreateSession`, so those results have no session to report — which is the point, because
-   * creating one is the mutation an unauthenticated caller was able to cause. No consumer reads
-   * this field off a result today; it is retained for in-process callers that thread the session
-   * through.
+   * creating one is the mutation an unauthenticated caller was able to cause. Since S-01 the
+   * unknown-endpoint `404` reports none either, and for the same reason: the credential check is
+   * gated on `isApiRoute`, so every other route was minting sessions for callers that had passed
+   * no check at all. No consumer reads this field off a result today; it is retained for
+   * in-process callers that thread the session through.
    */
   readonly session?: GatewaySession | undefined;
   readonly optimizationResult?: OptimizationResult | undefined;
