@@ -628,6 +628,7 @@ describe('Gateway HTTP & Proxy Interceptor', () => {
     server = new GatewayServer({
       port: 0,
       upstreamOpenAiUrl: `http://127.0.0.1:${upstreamPort}`,
+      allowInsecureUpstream: true,
     });
     port = await server.start();
 

@@ -161,6 +161,76 @@ describe('security review 2026-08-30 — findings', () => {
   });
 
   // --------------------------------------------------------------------------
+  // §6.3 — the unvalidated upstream base URL (SSRF), filed as a library hazard
+  // --------------------------------------------------------------------------
+  describe('§6.3: upstream base URL is validated before the server listens', () => {
+    const start = async (config: Record<string, unknown>): Promise<string | undefined> => {
+      const server = new GatewayServer({ port: 0, ...config } as never);
+      try {
+        await server.start();
+        await server.stop();
+        return undefined;
+      } catch (error) {
+        return (error as Error).message;
+      }
+    };
+
+    it('refuses the metadata service, which is the destination that makes SSRF worth doing', async () => {
+      const msg = await start({ upstreamOpenAiUrl: 'https://169.254.169.254' });
+      expect(msg).toContain('Refusing to start');
+      expect(msg).toContain('169.254.169.254');
+    });
+
+    it('refuses plaintext http, which is how R-06 delivered a live-looking token', async () => {
+      expect(await start({ upstreamOpenAiUrl: 'http://api.openai.com' })).toContain('must use https:');
+    });
+
+    it.each([
+      ['loopback', 'https://127.0.0.1'],
+      ['RFC1918 10/8', 'https://10.0.0.5'],
+      ['RFC1918 172.16/12', 'https://172.20.1.1'],
+      ['RFC1918 192.168/16', 'https://192.168.1.1'],
+      ['localhost by name', 'https://localhost'],
+      ['IPv6 loopback', 'https://[::1]'],
+      // `URL` normalises these to `[::ffff:7f00:1]` and `[::ffff:a9fe:a9fe]`, so the dotted form
+      // never reaches the check. A validator that only understood dotted notation would pass the
+      // metadata service itself.
+      ['IPv4-mapped IPv6 loopback', 'https://[::ffff:127.0.0.1]'],
+      ['IPv4-mapped IPv6 metadata service', 'https://[::ffff:169.254.169.254]'],
+      ['IPv6 link-local', 'https://[fe80::1]'],
+      ['IPv6 unique-local', 'https://[fc00::1]'],
+      ['unspecified', 'https://0.0.0.0'],
+    ])('refuses %s', async (_label, url) => {
+      expect(await start({ upstreamOpenAiUrl: url })).toContain('Refusing to start');
+    });
+
+    it('checks the Anthropic field too, not just the OpenAI one', async () => {
+      const msg = await start({ upstreamAnthropicUrl: 'https://192.168.0.9' });
+      expect(msg).toContain('upstreamAnthropicUrl');
+    });
+
+    it('allows a real provider URL, so the rule is not simply refusing everything', async () => {
+      expect(await start({ upstreamOpenAiUrl: 'https://api.openai.com' })).toBeUndefined();
+      expect(await start({})).toBeUndefined();
+    });
+
+    it('allows a public address that merely looks numeric', async () => {
+      // 8.8.8.8 is public. A rule that rejected every literal IP would be easy to write and wrong.
+      expect(await start({ upstreamOpenAiUrl: 'https://8.8.8.8' })).toBeUndefined();
+    });
+
+    it('honours allowInsecureUpstream, which is what local test stubs use', async () => {
+      expect(
+        await start({ upstreamOpenAiUrl: 'http://127.0.0.1:1234', allowInsecureUpstream: true }),
+      ).toBeUndefined();
+    });
+
+    it('refuses a malformed URL rather than passing it to fetch', async () => {
+      expect(await start({ upstreamOpenAiUrl: 'not-a-url' })).toContain('not a valid absolute URL');
+    });
+  });
+
+  // --------------------------------------------------------------------------
   // F-05 — trace.fallbackReason embedded a verbatim line of source
   // --------------------------------------------------------------------------
   describe('F-05: dropped-directive message does not reproduce the directive', () => {

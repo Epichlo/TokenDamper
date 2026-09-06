@@ -79,7 +79,7 @@ describe('gateway upstream timeout', () => {
   ): Promise<T> => {
     const server = new GatewayServer({
       port: 0,
-      upstreamOpenAiUrl: `http://127.0.0.1:${upstreamPort}`,
+      upstreamOpenAiUrl: `http://127.0.0.1:${upstreamPort}`, allowInsecureUpstream: true,
       upstreamTtfbTimeoutMs: ttfbMs,
     });
     await server.start();

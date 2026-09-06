@@ -222,7 +222,7 @@ deliberately does *not* cover — read it before assuming a row is closed.
 
 | ID | Sev | Fixed by | Residual left open |
 |---|---|---|---|
-| **F-01** | Med | Per-connection session id replaces the `'default-session'` literal | Session state is still mutated **before** any credential check, so a request ending in 401 has already written to the store; an explicit `x-session-id` can still bind to another client's session. Both are the documented `exec` trust boundary. |
+| **F-01** | Med | Per-connection session id replaces the `'default-session'` literal | Session state is still mutated **before** any credential check, and an explicit `x-session-id` can still bind to another client's session. **Hoisting the credential check was tried and rejected as vacuous — see below.** |
 | **F-02** | Med | Refs shorter than `ELISION_HASH_PREFIX_LENGTH` refused, mirroring `TokenHasher.resolve` | None for the oracle itself. **But the §6.3 SSRF hazard is library-only and strictly more severe, and remains unfiled — the placement question in §8.2 is still unanswered.** |
 | **F-03** | Low | stderr warning naming ingested files git ignores | Reports; does not filter. A bundle spanning two repositories is checked against the first one's rules. |
 | **F-04** | Low | Report written `0600`, then `chmodSync` again for the overwrite case | POSIX only — on Windows the mode bits are not the operative access control. |
@@ -230,6 +230,30 @@ deliberately does *not* cover — read it before assuming a row is closed.
 | **F-06** | Low | Line breaks escaped in the envelope label | **The content vector is not fixed.** A delimiter-shaped line inside a file body still passes through — escaping content would corrupt the bytes the tool exists to deliver. Mitigated by shape: genuine labels are absolute paths. |
 | **F-07** | Low | Documented in README, not fixed in code | Markers stay unauthenticated. A per-run nonce was rejected: it would change emitted bytes every run and make output non-deterministic, colliding with invariant 1. |
 | **F-08** | Low | Already fixed at v1.7.3 by the v1.7.2 build split, before anyone acted on this finding | None. |
+
+**F-01's remaining residual was investigated for a fix and the fix was refused, which is worth
+recording because the refusal is the result.** §9.1 listed "session state mutates before any
+credential check" as fixable: move the `hasAuthHeaders` test above `processOpenAiRequest` so a
+request that ends in 401 leaves no trace in the store. Measured before writing it, that control
+would stop nothing.
+
+`hasAuthHeaders` (`proxy.ts:287-289`) tests **presence, not validity** — `!!authorization ||
+!!x-api-key`. Driven against a live gateway, a request with no header at all and a request carrying
+`authorization: Bearer literally-anything` **both create the session**:
+
+```
+session created with NO auth header  : true
+session created with junk auth header: true
+```
+
+So hoisting the check closes exactly one case — the attacker who sends no header — and that
+attacker adds one. The gate would read as a credential check in the source and in the changelog
+while being a formality an adversary steps around by typing a word. **A control that only stops an
+attacker who declines to bypass it is the vacuity the protocol's own rule exists to prevent**, and
+shipping one is worse than the honest gap, because the next reader stops looking.
+
+The real control on this path is the gateway token, which `exec` deliberately does not enforce for a
+loopback peer (audit C3). That is the trust boundary; nothing short of changing it helps here.
 
 ### 3.2 The findings as originally filed
 
@@ -1305,8 +1329,21 @@ For an application that embeds `tokendamper` rather than running the CLI:
   reconciliation**: `buildUpstreamUrl` is now at `proxy.ts:250-253` and still trims one trailing
   slash and concatenates, with no validation of any kind.
 
-  **This is the largest security item still open in this document, and its placement is
-  unresolved.** It is library-only — and so was F-02, which was filed as a **Medium finding** and
+  **FIXED — this is no longer open.** `start()` now refuses an upstream base URL that is not
+  `https:` or that names a literal private, loopback or link-local address, with
+  `allowInsecureUpstream` as the named opt-in (the same shape as OX-M8's
+  `allowUnauthenticatedNonLoopback`). Placement at `start()` rather than per request follows M8's
+  reasoning: a misconfiguration that would leak a credential is named once, where it can still be
+  fixed, instead of surfacing as an opaque 502 on every call.
+
+  Two limits stated rather than glossed. **Literal addresses only** — a *hostname* resolving into a
+  private range is not caught, because this reads the configured string, not the address the socket
+  connects to; resolving at `start()` would still leave a TOCTOU window, so the honest fix is a
+  connect-time hook that does not exist yet. And the guard lives on `GatewayServer.start()`, so a
+  library caller invoking `handleProxyRequest` **directly** bypasses it entirely.
+
+  ~~**This is the largest security item still open in this document, and its placement is
+  unresolved.**~~ It is library-only — and so was F-02, which was filed as a **Medium finding** and
   has since been fixed. Two issues of the same reachability were treated differently, and this is
   the more severe of them: F-02 leaked stored plaintext to a caller who already had the store,
   while this delivers the caller's live provider credential to a host the embedder names. §8.2
@@ -1914,10 +1951,10 @@ Nothing below is a finding. Each is either a recorded decision or work never sta
 
 | | Item | Why it is open |
 |---|---|---|
-| **1** | **The unvalidated upstream base URL (§6.3)** | Library-only, and re-verified live at `proxy.ts:250-253`. **More severe than F-02, which was filed and fixed on the same reachability terms.** Needs the placement decision §8.2 asks for — file it, or move F-02 down beside it. |
+| ~~**1**~~ | ~~**The unvalidated upstream base URL (§6.3)**~~ | **CLOSED.** `start()` refuses non-`https:` and literal private/loopback/link-local upstreams; `allowInsecureUpstream` is the named opt-in. Two limits remain and are stated at §6.3: literal addresses only (a hostname resolving into a private range is not caught), and the guard is on `start()`, so a direct `handleProxyRequest` caller bypasses it. |
 | **2** | **v1.7.3's +859 new lines have never been audited** | Sessions 1–3 read `c4f4149`. The M8/M9 gateway work and a 332-line `drift-tracker.ts` change came after, and were read only where a finding touched them. Deserves its own Pass 1 and Pass 5. **Largest remaining piece of work.** |
 | **3** | **The fixes have been falsified by nobody** | Sessions 1–3 were checked by Session 4 because the protocol holds that an author cannot check their own reasoning. The same argument applies to the remediation. |
-| **4** | **F-01, F-06 and F-07 residuals** | Each deliberate and recorded in §3.1: session state mutates before the credential check; a delimiter-shaped line in file *content* still passes; markers stay unauthenticated because a nonce would break invariant 1. |
+| **4** | **F-01, F-06 and F-07 residuals** | Each deliberate and recorded in §3.1. F-01's — session state mutating before the credential check — was investigated for a fix and **the fix was refused as vacuous**: `hasAuthHeaders` tests presence, not validity, so any attacker passes it by typing a word. Measurement is under §3.1. F-06's content vector and F-07's unauthenticated markers stand for the reasons given there. |
 | **5** | **Concurrency and timing** | §6.2's two untested axes — sessions racing on `pruneExpired`/`evictOldestSession`, and the `getContent` prefix walk's timing profile — remain untested. |
 | **6** | **Whether a model is actually fooled by forged provenance** | F-06 and F-07 establish that attacker-controlled provenance reaches the model's context. Whether any given agent acts on it is a property of that agent. Session 4's absolute-vs-relative asymmetry makes this *more* worth testing, since it is what separates Low from Medium. |
 

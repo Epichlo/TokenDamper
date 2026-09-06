@@ -84,6 +84,21 @@ export interface GatewayConfig {
    * value so that the intent is legible in a config file and greppable in a deployment.
    */
   readonly allowUnauthenticatedNonLoopback?: boolean | undefined;
+  /**
+   * Permit an upstream base URL that is not `https:`, or that names a private, loopback or
+   * link-local address. Default false, and `start()` throws rather than listening — security
+   * review §6.3.
+   *
+   * The hazard is not hypothetical: `buildForwardHeaders` sends the caller's `Authorization` and
+   * `x-api-key` to whatever `upstreamOpenAiUrl` / `upstreamAnthropicUrl` name, and R-06
+   * demonstrated a one-line configuration change putting a live-looking bearer token on an
+   * arbitrary listener. `169.254.169.254` is the destination that makes it worth doing.
+   *
+   * Like `allowUnauthenticatedNonLoopback`, a named field rather than a magic value, so the
+   * intent is legible in a config file and greppable in a deployment. Its main honest use is a
+   * local test stub — this repository's own gateway tests are exactly that case.
+   */
+  readonly allowInsecureUpstream?: boolean | undefined;
 }
 
 /**
