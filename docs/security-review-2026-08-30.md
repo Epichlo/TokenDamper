@@ -1952,7 +1952,7 @@ Nothing below is a finding. Each is either a recorded decision or work never sta
 | | Item | Why it is open |
 |---|---|---|
 | ~~**1**~~ | ~~**The unvalidated upstream base URL (§6.3)**~~ | **CLOSED.** `start()` refuses non-`https:` and literal private/loopback/link-local upstreams; `allowInsecureUpstream` is the named opt-in. Two limits remain and are stated at §6.3: literal addresses only (a hostname resolving into a private range is not caught), and the guard is on `start()`, so a direct `handleProxyRequest` caller bypasses it. |
-| **2** | **v1.7.3's +859 new lines have never been audited** | Sessions 1–3 read `c4f4149`. The M8/M9 gateway work and a 332-line `drift-tracker.ts` change came after, and were read only where a finding touched them. Deserves its own Pass 1 and Pass 5. **Largest remaining piece of work.** |
+| ~~**2**~~ | ~~**v1.7.3's +859 new lines have never been audited**~~ | **DONE — Session 5, §10.** Passes 1, 3, 4 and 5 over the diff. Two Gateway findings (**V-01** duplicate-key splice corruption, **V-02** `Origin: null` bypass), seven clean results, and a correction: V-02 overturns §3.1's "vacuous" verdict on F-01's credential-check residual, which held for a local attacker and not for a browser. |
 | **3** | **The fixes have been falsified by nobody** | Sessions 1–3 were checked by Session 4 because the protocol holds that an author cannot check their own reasoning. The same argument applies to the remediation. |
 | **4** | **F-01, F-06 and F-07 residuals** | Each deliberate and recorded in §3.1. F-01's — session state mutating before the credential check — was investigated for a fix and **the fix was refused as vacuous**: `hasAuthHeaders` tests presence, not validity, so any attacker passes it by typing a word. Measurement is under §3.1. F-06's content vector and F-07's unauthenticated markers stand for the reasons given there. |
 | **5** | **Concurrency and timing** | §6.2's two untested axes — sessions racing on `pruneExpired`/`evictOldestSession`, and the `getContent` prefix walk's timing profile — remain untested. |
@@ -1961,3 +1961,89 @@ Nothing below is a finding. Each is either a recorded decision or work never sta
 `oxaudit.md` is separately complete but for **L17** (architecture import rules) and **L18**
 (coverage tooling), both deferred by DECISIONS §69 because each needs a new devDependency and the
 audit itself calls them optional.
+
+---
+
+## 10. Session 5 — the v1.7.3 surface Sessions 1–4 never audited
+
+- **Date:** 2026-09-04 · **Surface:** `c4f4149..445b3ed` over `src/` — **+859 / −223 across 17
+  files**, the code that landed after Sessions 1–3 read the tree and that Session 4 opened only
+  where an existing finding touched it.
+- **Passes run:** 1 (credential flow), 3 (cross-session isolation), 4 (untrusted input), 5 (output
+  integrity), scoped to the diff. §9.1 item 2 is what this closes.
+- **Not in scope:** the remediation commits themselves (§9.1 item 3). An author checking their own
+  fixes is the thing Session 4 exists to avoid, and this session wrote most of them.
+
+Two findings, both on the Gateway, both reproduced end to end. **V-02 also overturns a judgement
+made earlier in this document**, which is recorded below rather than quietly amended.
+
+### 10.1 Findings
+
+| ID | Title | Severity | Entry mode | `file:line` | Exploit path | Fix direction |
+|---|---|---|---|---|---|---|
+| **V-01** | The egress splice resolves duplicate JSON keys **first-wins** while `JSON.parse` resolves them **last-wins**, so it overwrites the wrong span | **Low** | Gateway (`exec`) | `src/gateway/proxy.ts:760-791` (`findMemberValue`), `:817-857` (`scanContentSpans`), `:952-972` (`forwardableBody`) | A message carrying two `content` keys is parsed as the **second** value — which is what the pipeline optimizes — while the scanner returns the span of the **first**. The splice then writes the optimized second value over the first, destroying it, and leaves the second in place. Demonstrated: the forwarded body lost `DECOY` entirely, kept **both** copies of the repeated block, and carried a marker the provider cannot resolve. `forwardableBody`'s "never grow" guard does not catch it, because the corruption makes the body *shorter*. Same divergence on Anthropic's `system` field. | Make `findMemberValue` last-wins to match `JSON.parse`, or detect a repeated key and **decline** — declining matches what `scanContentSpans` already does when alignment would break. |
+| **V-02** | `Origin: null` bypasses the browser-origin refusal entirely | **Low** | Gateway (`exec`) | `src/gateway/server.ts:335` | The guard reads `originHeader !== 'null'`, so the one Origin value a browser sends when it is *most* sandboxed is the one value exempted. Measured: `Origin: https://evil.example` → **403, no session**; `Origin: null` → **200, session created**. A sandboxed iframe, a `data:` URL and some redirect chains all produce `Origin: null`, so a page can reach the loopback gateway with a simple `text/plain` POST that needs no preflight. It **cannot** get a request forwarded upstream — `authorization` is not CORS-safelisted, so supplying it forces a preflight the server answers `405` with no `Access-Control-*` — but it does reach session handling, which is where V-02 meets the F-01 residual below. | Treat `null` as a *foreign* origin rather than an absent one. An absent `Origin` header is the non-browser client; the literal string `null` is a browser declining to name itself, which is not the same thing. |
+
+### 10.2 V-02 overturns §3.1's "vacuous" verdict on F-01
+
+§3.1 records that hoisting the Gateway's credential check above session mutation was investigated
+and refused, because `hasAuthHeaders` tests presence rather than validity — an attacker passes it
+with `Bearer anything`, so the gate stops nobody. **That reasoning considered one attacker and
+there are two.**
+
+It holds for a *local process*, which can set any header it likes. It does **not** hold for a
+*browser*, which is precisely the attacker OX-M9 exists to defend against: on a simple request a
+browser may not set `authorization` at all, and asking for it triggers a preflight this server
+refuses. So against the browser reached by V-02, hoisting the credential check is a **real
+control** — it is the difference between a web page being able to create and evict sessions on the
+local gateway and not.
+
+The chain, each step measured here: a page in a sandboxed iframe sends `Origin: null` → V-02
+exempts it → the Host check passes because the browser is genuinely talking to `127.0.0.1` →
+`getOrCreateSession` runs before any credential check → 100 such requests evict every real
+session's dedup state through the LRU cap. No credential is needed at any point, and none can be
+supplied.
+
+**Recorded as a correction rather than an edit.** §3.1's paragraph stands as written, because it
+was an honest measurement of the case it considered; what was wrong was the scope of the
+conclusion drawn from it, and that is the more useful thing for a later reader to see.
+
+### 10.3 Checked and clean
+
+Reported so the next session knows what was actually covered on this surface.
+
+1. **The hand-written JSON scanner is iterative, not recursive.** `scanValue` (`proxy.ts:718-747`)
+   walks a depth counter in a `while` loop, so deeply nested attacker JSON cannot overflow the
+   stack — the hazard a recursive-descent scanner on a 10 MB body would carry.
+2. **It is linear, measured rather than assumed.** 500 → 8,000 messages (116 KB → 1.86 MB) is a 16×
+   input for a ~4× time increase, with ms/KB flat; 1.86 MB scans in 22 ms. No quadratic path.
+   `findMemberValue` is bounded by its own object, so the per-element work does not compound.
+3. **The scanner never sees malformed JSON.** `processOpenAiRequest` runs `JSON.parse` first and
+   returns 400, so `scanValue`'s depth counting — which assumes balanced input — is never asked to
+   reason about a body that is not.
+4. **The splice cannot grow a body**, and declines rather than misaligning when a message is not an
+   object or has no `content` key (`scanContentSpans:843-846`). V-01 is the one case that slips
+   through, and it slips through *because* the two enumerations disagree rather than one of them
+   failing.
+5. **`drift-tracker.ts`'s 332 changed lines touch no gate.** `shouldFallback`, `measurementGate`
+   and `retentionGate` appear 14 times in the file and **zero** changed lines contain any of them;
+   `maxDriftThreshold` and `weightStruct` are `0.40` in both trees. The change extracts
+   `extractItemSymbols` out of an inlined loop and counts `symbolBearingItemCount` — §71's
+   trace-only change, and the diff agrees with that description. *(This negative was itself
+   re-checked: a grep returning nothing proves nothing until you confirm the terms exist in the
+   file — §8.3's item 22 is why.)*
+6. **The Origin refusal works for the case it was built for.** An ordinary cross-origin `POST` is
+   refused 403 with no session created. V-02 is one exempted value, not a broken control.
+7. **The `Host` check is sound on a loopback bind.** `authorityHostname` strips ports and IPv6
+   brackets before comparing, and a foreign `Host` is refused — the DNS-rebinding shape.
+
+### 10.4 What this session did not establish
+
+- **The remediation commits are still unreviewed by anyone but their author** (§9.1 item 3).
+  V-02's correction of §3.1 is an argument for closing that gap rather than against it: the flaw
+  was not in the measurement but in the scope of the conclusion, which is exactly what a second
+  reader catches.
+- **`bench/`, `cli/main.ts` and `planner/` changes were read but not driven.** They are off the
+  credential and egress paths; the passes run here were scoped to the surfaces that carry either.
+- **No corpus run.** Nothing found here changes optimize-route output: V-01 and V-02 are Gateway
+  only, and the Gateway is off the corpus route entirely.
