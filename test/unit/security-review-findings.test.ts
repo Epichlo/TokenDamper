@@ -19,6 +19,7 @@ import {
 } from '../../src/core/model/constructors';
 import { escapeDelimiterLabel, ITEM_DELIMITER_PREFIX, renderBundleOutput } from '../../src/core/render';
 import { validate } from '../../src/core/validation';
+import { JsonValidator } from '../../src/core/validation/ast/json-validator';
 import type { OptimizationResult } from '../../src/core/model/types';
 
 /**
@@ -779,6 +780,176 @@ describe('security review 2026-08-30 — findings', () => {
       expect(out.toString('utf8')).toContain('# body');
       // One file renders as its bytes alone, with no header at all.
       expect(renderFallbackBytes([files[0]!])).toEqual(files[0]!.bytes);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // S-03 — V8's JSON.parse message quotes the payload, and it was forwarded whole
+  //        into trace.fallbackReason — the field F-05 cleaned (Session 7, R-15)
+  // --------------------------------------------------------------------------
+  describe('S-03: a JSON syntax error does not quote the payload back', () => {
+    const SECRET = 'hunter2-Ab9x';
+    const validator = new JsonValidator();
+    const messages = (content: string): string[] => validator.validate(content).issues.map((i) => i.message);
+
+    it('does not echo the bytes around the error', () => {
+      // R-15's own input. V8 answers `Unexpected token 'q', ..."Ab9x","r":qq}" is not valid JSON`.
+      const [message] = messages(`{"db_password":"${SECRET}","r":qq}`);
+      expect(message).toBeDefined();
+      expect(message).not.toContain(SECRET);
+      expect(message).not.toContain('Ab9x');
+      expect(message).not.toContain('is not valid JSON');
+    });
+
+    it('does not echo a whole short document either', () => {
+      // For an input shorter than the window, V8 quotes all of it.
+      expect(messages(SECRET).join(' ')).not.toContain(SECRET);
+      expect(messages(`[1,2,${SECRET}]`).join(' ')).not.toContain(SECRET);
+    });
+
+    it('does not echo the offending character, which is also a byte of the input', () => {
+      // `Unexpected token 'Z'` names a character taken straight from the payload. Position says
+      // where it is, which is everything a holder of the input needs and nothing to anyone else.
+      expect(messages('ZZZ').join(' ')).not.toContain("'Z'");
+    });
+
+    it('still says where the error is, so the message stays diagnostic', () => {
+      const result = validator.validate(`{\n  "db_password": "${SECRET}",\n  "r": qq\n}`);
+      const [issue] = result.issues;
+      expect(issue).toBeDefined();
+      // The message agrees with the structured fields rather than restating a V8 position that
+      // may or may not have been parsed out of the text.
+      expect(issue?.message).toContain(`line ${issue?.line}`);
+      expect(issue?.message).toContain(`column ${issue?.column}`);
+    });
+
+    it('still distinguishes one kind of error from another', () => {
+      expect(messages('[').join(' ')).not.toBe(messages('{"a" "b"}').join(' '));
+      expect(messages('[').join(' ')).toMatch(/end of input/i);
+      expect(messages('{"a" "b"}').join(' ')).toMatch(/':'/);
+    });
+
+    // The property, over generated input rather than the four shapes I happened to think of.
+    it('never reproduces input bytes, over 500 generated malformed documents', () => {
+      const rnd = (n: number): number => Math.floor(Math.random() * n);
+      const breakers = ['qq', ',', '', '}', ']', ':', '\\q', '\\uZZ', '01', '-', '1e', 'tru'];
+      const leaked: string[] = [];
+      for (let n = 0; n < 500; n += 1) {
+        const marker = `MARKER${n}SECRET`;
+        const shapes = [
+          `{"k":"${marker}",${breakers[rnd(breakers.length)]}}`,
+          `{"k":"${marker}"${breakers[rnd(breakers.length)]}}`,
+          `[1,"${marker}",${breakers[rnd(breakers.length)]}]`,
+          `${marker}`,
+          `{"${marker}" ${breakers[rnd(breakers.length)]}}`,
+          `{"a":{"b":["${marker}",${breakers[rnd(breakers.length)]}]}}`,
+        ];
+        for (const doc of shapes) {
+          let parses = true;
+          try {
+            JSON.parse(doc);
+          } catch {
+            parses = false;
+          }
+          if (parses) continue;
+          const text = messages(doc).join(' ');
+          if (text.includes(marker)) leaked.push(doc);
+        }
+      }
+      expect(leaked).toEqual([]);
+    });
+
+    it('keeps the payload out of trace.fallbackReason, which is where R-15 observed it', () => {
+      const before = createContextBundle(`{"db_password":"${SECRET}","r":qq}`, 'file', 'prod.json');
+      const report = validate(before, before, { stageIds: [] } as never, {} as never);
+      const reason = report.issues.map((i) => i.message).join('; ');
+      expect(reason).toContain('JSON');
+      expect(reason).not.toContain(SECRET);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // S-04 — the §6.3 guard validates the configured base URL, and fetch was free
+  //        to follow a redirect away from it carrying x-api-key (Session 7, R-16)
+  // --------------------------------------------------------------------------
+  describe('S-04: an upstream redirect does not carry the credential onward', () => {
+    it('does not deliver the caller credential to the redirect target', async () => {
+      // Stands in for 169.254.169.254. Records anything that reaches it.
+      let reached: Record<string, string | string[] | undefined> | undefined;
+      const metadata = createServer((req, res) => {
+        reached = { ...req.headers };
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ AccessKeyId: 'stolen' }));
+      });
+      await new Promise<void>((r) => metadata.listen(0, '127.0.0.1', () => r()));
+      const metaPort = (metadata.address() as { port: number }).port;
+
+      // A hostile or compromised provider — threat model 5. It only redirects.
+      const provider = createServer((_req, res) => {
+        res.writeHead(302, { location: `http://127.0.0.1:${metaPort}/latest/meta-data/` });
+        res.end();
+      });
+      await new Promise<void>((r) => provider.listen(0, '127.0.0.1', () => r()));
+      const providerPort = (provider.address() as { port: number }).port;
+
+      const server = new GatewayServer({
+        port: 0,
+        upstreamAnthropicUrl: `http://127.0.0.1:${providerPort}`,
+        allowInsecureUpstream: true,
+      });
+      const port = await server.start();
+      try {
+        const r = await fetch(`http://127.0.0.1:${port}/v1/messages`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-api-key': 'sk-ant-VICTIM-KEY' },
+          body: JSON.stringify({ model: 'claude-3', messages: [{ role: 'user', content: 'hello' }] }),
+        });
+        const body = await r.text();
+
+        expect(reached).toBeUndefined();
+        expect(body).not.toContain('stolen');
+        expect(r.status).toBe(502);
+      } finally {
+        await server.stop();
+        provider.close();
+        metadata.close();
+      }
+    });
+
+    it('still forwards to an upstream that does not redirect', async () => {
+      let sawKey: string | undefined;
+      const stub = createServer((req, res) => {
+        sawKey = req.headers['x-api-key'] as string | undefined;
+        req.resume();
+        req.on('end', () => {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ id: 'msg_1', content: [{ type: 'text', text: 'ok' }] }));
+        });
+      });
+      await new Promise<void>((r) => stub.listen(0, '127.0.0.1', () => r()));
+      const stubPort = (stub.address() as { port: number }).port;
+
+      const server = new GatewayServer({
+        port: 0,
+        upstreamAnthropicUrl: `http://127.0.0.1:${stubPort}`,
+        allowInsecureUpstream: true,
+      });
+      const port = await server.start();
+      try {
+        const r = await fetch(`http://127.0.0.1:${port}/v1/messages`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-api-key': 'sk-ant-VICTIM-KEY' },
+          body: JSON.stringify({ model: 'claude-3', messages: [{ role: 'user', content: 'hello' }] }),
+        });
+        expect(r.status).toBe(200);
+        expect(await r.text()).toContain('msg_1');
+        // The credential still reaches the host the operator configured. Refusing redirects is
+        // not refusing to proxy.
+        expect(sawKey).toBe('sk-ant-VICTIM-KEY');
+      } finally {
+        await server.stop();
+        stub.close();
+      }
     });
   });
 });

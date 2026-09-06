@@ -16,6 +16,37 @@ sessions including two independent falsification passes — one over the finding
 fixes. Findings are cited by their report ID.
 
 ### Fixed
+- **A JSON syntax error no longer quotes the payload back into the trace (security review S-03).**
+  `JsonValidator` forwarded V8's `JSON.parse` message verbatim, and one of its forms embeds the
+  input: `Unexpected token 'q', ..."Ab9x","r":qq}" is not valid JSON` — roughly fifteen characters
+  either side of the error, and **for a document shorter than that window, all of it**. That string
+  reaches `ValidationIssue.message`, is joined into `reason`, and lands in `trace.fallbackReason`,
+  which the CLI writes to stderr on every run. It is the defect F-05 fixed for constraint
+  directives, on the same field, through a sibling message nobody had looked at.
+
+  The message is now built from a fixed vocabulary — a prefix match against a seventeen-entry
+  table returning this file's own constants, never a slice of V8's string — plus the validator's
+  own line and column: `JSON Syntax Error: unexpected token at line 2, column 1`. The offending
+  character goes too, because it is also a byte of the payload and the position already identifies
+  it for anyone holding the input. An unrecognised form degrades to `invalid JSON`, so a future
+  Node makes the message vaguer rather than leakier. Shapes were enumerated against Node 22 and
+  26, which agree; only the `Unexpected token` family ever carried input. The sibling validators
+  were checked and interpolate positions and structural characters only.
+- **The gateway does not follow an upstream redirect (security review S-04).** `forwardUpstreamRequest`
+  set no `redirect` option, so `fetch` defaulted to `follow` — while §6.3's guard runs once, at
+  `start()`, on the configured base URL. A `302` is not that string. Demonstrated end to end: a
+  stub provider redirecting to a stand-in metadata listener delivered **`x-api-key`** to it, and
+  the gateway relayed that listener's body to the caller as a 200. `authorization` was stripped —
+  but by undici implementing the Fetch spec's cross-origin rule, not by anything here, and
+  `x-api-key` is a vendor header on no such list.
+
+  `redirect: 'manual'` now, and a 3xx becomes a **502** naming the status. The `Location` header is
+  upstream-controlled and is deliberately not echoed. **This is a behavioural change**: an upstream
+  that answers a redirect now fails instead of being followed. Neither `api.openai.com` nor
+  `api.anthropic.com` redirects an API POST, so nothing anyone does today changes; an endpoint that
+  does redirect needs its destination configured as the upstream URL, which leaves the §6.3 guard
+  covering it. No new flag — following safely would mean re-validating `Location`, deciding what to
+  strip and bounding the hops, for a case no provider needs.
 - **The gateway creates a session only on a route that uses one (security review S-01).** The
   credential check hoisted in the previous round is conditioned on `isApiRoute`;
   `getOrCreateSession` ran above the route dispatch and was not. So `POST /v1/anything` and

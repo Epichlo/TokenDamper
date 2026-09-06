@@ -5534,3 +5534,120 @@ scoped to where the reproduction ran. The test for S-01 was titled "an unauthent
 creates no session" and asserted it of one route — which is invariant 10 arriving at the
 remediation's own test names, and the reason §9.1 item 3 was worth closing with somebody else's
 agent rather than another self-authored pass.
+
+---
+
+## 74. The Last Two From Session 7: A Message That Quoted the Payload, and a Guard That Stopped at the First Hop
+
+§73 closed the two Session 7 findings that were fixes failing to do what they claimed. **S-03** and
+**S-04** are different in kind and are closed here: neither earlier fix was wrong, and each is
+incomplete in a way its author had no particular reason to anticipate. `oxaudit.md` and
+`max_audit.md` are unaffected; this finishes `docs/security-review-2026-08-30.md`.
+
+### S-03 — V8's `JSON.parse` message is a payload echo, on the field F-05 had just cleaned
+
+F-05 replaced a verbatim constraint directive in `trace.fallbackReason` with offset, length and a
+digest, on the argument that the message "reaches two places that outlive the process" — stderr on
+every CLI run, and the trace an MCP client can ask for. Six lines above that fix,
+`json-validator.ts` did this:
+
+```ts
+message: `JSON Syntax Error: ${message}`,   // `message` is V8's, verbatim
+```
+
+One of V8's forms quotes the input. Measured through the shipped binary on
+`{"db_password":"hunter2-Ab9x","r":qq}`:
+
+```
+"AST Error in item […] at line 2, col 1: JSON Syntax Error:
+ Unexpected token 'q', ...\"Ab9x\",\"r\":qq}\n\" is not valid JSON"
+```
+
+The window is roughly fifteen characters either side of the error, and **for a document shorter
+than the window it is the whole document**: `JSON.parse('ZZSECRETZZ')` answers
+`Unexpected token 'Z', "ZZSECRETZZ" is not valid JSON`. The offending character in the quotes is
+itself a byte of the payload.
+
+**The shapes were enumerated rather than assumed.** Twenty-four malformed documents through Node 22
+and Node 26 produce twenty-two distinct message shapes, identical between the two versions, and
+**only the `Unexpected token` family carries input**. Everything else is `<kind> in JSON at
+position N (line L column C)`.
+
+**The fix builds the message from a fixed vocabulary and never from V8's string.** A prefix match
+against a seventeen-entry table returns this file's own constant; an unrecognised form degrades to
+`invalid JSON`. That is the whole safety argument, and it is why the table matches on a *prefix* —
+the payload always appears after one. The obvious alternative, regex-stripping the quoted clause
+out of V8's text, fails open the day a message changes shape, and a control that fails open on an
+upgrade is the kind this repository keeps having to retract.
+
+The position stays, from the validator's own `line`/`column` rather than from the message text:
+`JSON Syntax Error: unexpected token at line 2, column 1`. **The offending character goes**, and by
+F-05's own reasoning — position identifies it exactly for anyone holding the input, which is who
+the message is for, and to nobody else.
+
+The sibling messages were checked rather than assumed clean: the TypeScript, Python and Go
+validators interpolate line numbers, column numbers and bracket or quote characters from a fixed
+structural alphabet, and nothing else. The one `throw` that interpolates carries a path. So the
+class is closed, not just the instance.
+
+**Scope, stated plainly.** This was Low and stays Low. It required a JSON item, a syntax error, and
+a secret adjacent to it, and the exposure was bounded at about thirty bytes — narrower than the
+unbounded clause F-05 removed. It is fixed because it is the same defect on the same field, not
+because anything about it is severe.
+
+### S-04 — the SSRF guard checks a string, and `fetch` was free to leave it
+
+§6.3 refuses an upstream base URL that is not `https:` or that names a private, loopback or
+link-local address, at `start()`. It was verified against 43 URLs in Session 7 — every classic
+notation for the metadata service refused, including the ones that defeat most allowlists.
+
+It checks a *configured string*. `forwardUpstreamRequest` set no `redirect` option, so `fetch`
+defaulted to `follow`, and a `302` is not that string. Demonstrated end to end: a stub provider
+answering `302 Location: http://127.0.0.1:<meta>/latest/meta-data/iam/security-credentials/`
+delivered
+
+```
+x-api-key    : sk-ant-api03-VICTIMS-REAL-ANTHROPIC-KEY
+authorization: undefined
+```
+
+to the listener, whose body this gateway then relayed to the caller as a **200**.
+
+**The `authorization: undefined` is the instructive half.** That protection is undici implementing
+the Fetch specification's cross-origin redirect strip — it comes from the HTTP client, not from
+anything here. `x-api-key` is a vendor header on no such list, and `buildForwardHeaders` adds it
+for Anthropic. So the OpenAI-shaped credential was safe by inheritance and the Anthropic-shaped one
+was not, which is exactly the kind of asymmetry that survives a code review of either provider path
+read on its own.
+
+**The fix is `redirect: 'manual'` and a 502.** Following correctly would mean re-running
+`describeUpstreamUrlRefusal` on `Location`, deciding what to strip, and bounding the hop count —
+three chances to be wrong, for a case no provider needs. An operator whose endpoint genuinely
+redirects configures the destination as the upstream URL, which is one line and leaves the guard
+covering it. The 502 says so.
+
+**No new flag.** `allowInsecureUpstream` exists because this repository's own tests need a local
+stub and a rule with no escape hatch gets weakened; nothing needs an `allowUpstreamRedirects`, and
+adding a knob for a hypothetical is what §55's LOW table is a monument to.
+
+**The `Location` header is deliberately not echoed** into the 502 body. It is upstream-controlled
+text and the upstream is the attacker in threat model 5; the status code is enough to act on, and
+an operator can resolve the destination themselves.
+
+### What this does not establish
+
+**The corpus was not run, and for once that needs no defence beyond stating the routes.** S-04 is
+Gateway-only and the Gateway is off the corpus route entirely. S-03 changes a string inside
+`trace.fallbackReason` for JSON items that fail to parse — it moves no optimized byte, and
+`outputSha` cannot move because no stage reads a validation message.
+
+**A redirect from a legitimate provider now fails instead of working.** Neither `api.openai.com`
+nor `api.anthropic.com` redirects an API POST, so this changes nothing anyone is doing today; a
+corporate gateway that answers `301` on a trailing slash would now need its final URL configured.
+That is a real behavioural change and it is the intended one — the alternative is a credential
+travelling somewhere no check has seen.
+
+**S-03's fix loses information on an unrecognised V8 form.** `invalid JSON at line L, column C` is
+less useful than a named kind. The table covers every shape Node 22 and 26 produce, so the
+degradation is prospective; if a future Node adds a form, the message gets vaguer rather than
+leakier, which is the direction to fail in.

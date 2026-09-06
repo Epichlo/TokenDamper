@@ -243,9 +243,47 @@ async function forwardUpstreamRequest(params: ForwardUpstreamOptions): Promise<P
       // by a body that is not valid UTF-8, and bodies are capped at 10 MB.
       body: params.bodyBytes ? new Uint8Array(params.bodyBytes).buffer : params.body,
       signal,
+      // **Redirects are not followed** (security review S-04). `fetch` defaults to `'follow'`,
+      // and §6.3's guard runs once, at `start()`, on the configured base URL — a `302` is not
+      // that string, so the guard could be walked around by the upstream itself. Worse, the
+      // guarantee people assume here comes from the HTTP client rather than from this
+      // repository: undici deletes `authorization` on a cross-origin redirect per the Fetch
+      // spec, but `x-api-key` is a vendor header on no such list, and `buildForwardHeaders` adds
+      // it for Anthropic. Demonstrated end to end — a stub provider answering
+      // `302 Location: http://127.0.0.1:<meta>/latest/meta-data/…` delivered
+      // `x-api-key: sk-ant-…` to the listener, whose body this gateway then relayed to the
+      // caller as a 200.
+      //
+      // `'manual'` rather than a re-validated follow, because following correctly means
+      // re-running `describeUpstreamUrlRefusal` on `Location`, deciding what to strip, and
+      // bounding the hops — three chances to be wrong, in exchange for a case no provider needs.
+      // An operator whose endpoint redirects can configure the destination as the upstream URL,
+      // which is one line and leaves the guard covering it.
+      redirect: 'manual',
     };
 
     upstreamResponse = await fetch(upstreamUrl, fetchInit);
+    // `status === 0` is the Fetch spec's opaque-redirect response. undici hands back the real
+    // `302` instead, which is what the test observes — this covers the spec-shaped answer too, so
+    // the guard does not depend on which of the two a runtime gives.
+    if (upstreamResponse.status === 0 || (upstreamResponse.status >= 300 && upstreamResponse.status < 400)) {
+      // Nothing here reads the body, and an undrained one holds its connection open — which a
+      // hostile upstream answering nothing but redirects would be happy to exploit.
+      await upstreamResponse.body?.cancel().catch(() => {});
+      // The `Location` header is upstream-controlled text and is deliberately not echoed; the
+      // status is enough to act on, and the operator can resolve the destination themselves.
+      return {
+        statusCode: 502,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          error:
+            `Upstream ${params.provider} answered ${upstreamResponse.status} with a redirect, which is not followed: ` +
+            'the caller\'s provider credential would travel to the redirect target, which no configuration check has ' +
+            'seen. Configure that destination as the upstream URL if it is where requests should go.',
+        }),
+        session: params.session,
+      };
+    }
   } catch (error) {
     if (error instanceof Error && error.name === 'TimeoutError') {
       return {

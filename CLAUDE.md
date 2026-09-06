@@ -726,9 +726,17 @@ What is worth carrying here, because it changes how you read the rest of this fi
 - **Its `file:line` citations are v1.6.0 coordinates.** Sessions 1–3 audited `c4f4149`; the
   falsification pass and the fixes are against v1.7.3. §8.4 lists the four that no longer resolve.
 
-**Still open there** (§9.1): v1.7.3's +859 new lines have never been audited — the M8/M9 gateway
-work and a 332-line `drift-tracker.ts` change were read only where a finding touched them. Also,
-nobody has falsified the fixes, which is the same argument that justified Session 4.
+**Both of those are now closed.** v1.7.3's +859 new lines were audited in Session 5 (§10, findings
+V-01 and V-02), and Session 7 (§12) is the independent falsification of the **remediation** — the
+pass the protocol's own rule demanded and that Session 6 could not be, having written the fixes it
+checked. Eleven of the fourteen fixes held; four defects were found and all four are fixed
+(DECISIONS §73–§74). Two are worth knowing here because they are the same mistake twice: **a fix is
+scoped to the route its finding reproduced on**. The credential hoist guarded the two API routes
+while `getOrCreateSession` guarded none, so any other path still minted sessions for a caller with
+no credential — reachable from a web page, because a no-cors GET sends no `Origin` header at all.
+And F-06's label escaping lived in `core/render` while the CLI's fallback renderer built the same
+`==> path <==` header from the raw path. **What is still open** is in §12.9: nobody has measured
+whether a model acts on a forged header, and the concurrency and timing axes are untested.
 
 ## Reference docs in repo
 

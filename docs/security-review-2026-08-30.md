@@ -8,9 +8,11 @@
 - **Session 3 date:** 2026-08-30 — Passes 6–7 (distribution, dependencies, history)
 - **Session 4 date:** 2026-09-03 — falsification (§8), run against `445b3ed`, **v1.7.3**
 - **Session 4b date:** 2026-09-03 — falsification of Session 3 (§8.6)
-- **Sessions completed:** 1, 2, 3, 4, 4b — **the review is complete**
+- **Session 5 date:** 2026-09-04 — the v1.7.3 surface (§10) · **Session 6:** 2026-09-04, a self-authored pass over the fixes (§11)
+- **Session 7 date:** 2026-09-07 — **independent** falsification of the remediation (§12), against `58538b8`
+- **Sessions completed:** 1, 2, 3, 4, 4b, 5, 6, 7 — **the review is complete, and every finding in it is closed**
 
-> ## Status: all eight findings are fixed. Read this box before the findings table.
+> ## Status: every finding is fixed — F-01…F-08, V-01…V-03 and S-01…S-04. Read this box before the findings table.
 >
 > **Every finding in §3 has been remediated.** F-08 was already fixed at v1.7.3 by an unrelated
 > build change; F-01 through F-07 were fixed deliberately, in PR #53 (`d8885a8`), each with the
@@ -31,9 +33,11 @@
 > been audited at all** (§8.5). The last of those is the largest piece of remaining work in this
 > file.
 >
-> **The fixes have been falsified by nobody.** Sessions 1–3 were checked by Session 4 because the
-> protocol says an author cannot check their own reasoning. The same argument applies to the
-> remediation, and no equivalent pass has been run on it.
+> **The fixes have now been falsified independently — §12.** Sessions 1–3 were checked by Session 4
+> because the protocol says an author cannot check their own reasoning, and the same argument applied
+> to the remediation. Session 7 is that pass, run by an agent that wrote none of the fixes: eleven of
+> the fourteen held, four defects were found (S-01…S-04), and all four are fixed in §12.8 and §12.9.
+> What remains open is recorded in §12.9 and is not a finding.
 
 > **Procedural note on sessions 1–3.** The protocol asks each session to start fresh; these three
 > were run in one context. For Sessions 1–2 the protocol's own reason for splitting is context
@@ -2161,11 +2165,11 @@ Each of these was a specific hypothesis, not a re-read.
 | **F-02** minimum ref length | **Confirmed** — 0/1/2/11 chars refused, 12/13/64 resolve, a marker-shaped one-char ref refused. |
 | **F-03** git-ignored-file warning | **Confirmed, one stated assumption falsified** — see D-1. |
 | **F-04** report written `0600` | **Confirmed on ext4** — 600 on create, and 600 after overwriting a file left at 0644 and at 0666. |
-| **F-05** directive as offset+length+digest | **Confirmed for the directive; incomplete for the field** — see S-03. |
+| **F-05** directive as offset+length+digest | **Confirmed for the directive; incomplete for the field** — see S-03, fixed in 12.9. |
 | **F-06** envelope label escaping | **Confirmed on the route it patches; bypassed on the fallback route** — see S-02, fixed in 12.8. |
 | **F-07** README documentation | **Confirmed present and accurate but for one sentence**, which S-02 makes false. |
 | **F-08** build split | Out of scope here — v1.7.2, not in this range. |
-| **§6.3** upstream base URL guard | **Confirmed against 43 URLs**, including every classic notation; **does not survive a redirect** — see S-04. |
+| **§6.3** upstream base URL guard | **Confirmed against 43 URLs**, including every classic notation; **did not survive a redirect** — see S-04, fixed in 12.9. |
 | **V-01** last-match-wins | **Confirmed** — 0 divergences across 44,419 accepted bodies. |
 | **V-02** `Origin: null` refused | **Confirmed** across 10 spellings; §11.2's "no remaining special case" is not quite true — see D-2. |
 | **F-01 residual** credential hoist | **FALSIFIED**, now fixed in 12.8 — the guard was scoped to API routes, and the eviction primitive was intact on every other one. See S-01. |
@@ -2181,8 +2185,8 @@ about fixes. Nothing here retracts a *finding*; the findings were already falsif
 |---|---|---|---|---|---|---|
 | **S-01** ✅ **FIXED (12.8)** | The hoisted credential check guards only `/v1/chat/completions` and `/v1/messages`; every other route still creates a session before answering, so the browser-reachable LRU eviction primitive §10.1 reported closed is intact | **Low** | Gateway (`exec`) | `src/gateway/proxy.ts:58` + `:86-96` (the `isApiRoute &&` guard), `:99-100` (`getOrCreateSession`, unconditional), `:158-164` (the 404 that already holds a session) | The hoist is conditioned on `isApiRoute`. `getOrCreateSession` then runs for *any* path, so `POST /v1/anything` and `GET /nope` create a session and return 404. A cross-origin page cannot send an `Origin`-free POST, but a **no-cors GET carries no `Origin` header at all** — the Fetch spec appends `Origin` only for CORS-tainted requests or non-GET/HEAD methods — so V-02's gate never sees it, and the `Host` check passes because the browser really is talking to `127.0.0.1`. Measured in Chromium against a live gateway: **400 no-cors GETs → 400 distinct TCP connections → 0 requests carrying `Origin` → `sessionCount` 100**, the store's `maxSessions` cap. With a victim session seeded first, **130 requests evicted it and its stored content** (`getSession` → undefined, `getContent` → null). That is §10.2's chain, step for step, after the fix. R-13. | Create the session inside the two API branches, or answer the 404 before `getOrCreateSession`. A 404 needs no session, and `ProxyRequestResult.session` is already optional and already documented as read by nobody. |
 | **S-02** ✅ **FIXED (12.8)** | F-06's label escaping lives in `core/render` only; the CLI's fallback renderer builds the same header from the unescaped path, so a filename containing a newline still forges an envelope header | **Low** | CLI `optimize <dir>` / multi-path | `src/cli/main.ts:463-475` (`renderFallbackBytes`), against `src/core/render/index.ts:43-46` (`itemLabel`, escaped) | `renderFallbackBytes` emits the header as `ITEM_DELIMITER_PREFIX + file.path + ITEM_DELIMITER_SUFFIX` with the raw path. Its own comment says "under the header the renderer emits", which stopped being true when the renderer started escaping. On `fallbackUsed` the CLI writes *this*, not `emittedOutput`. Demonstrated on ext4 with one directory and two runs: success path → **3 headers, forged payload absent**; fallback path → **4 headers**, the extra one `==> security_policy.py <==` followed by `ALLOW_INSECURE_TLS = True`. The attacker controls the trigger as well as the payload — one file of their own containing invalid UTF-8 forces the fallback through `inputNotRepresentable`. README's "Line breaks in a filename are escaped, so a crafted name cannot introduce a header line either" is false on this route. R-14. | Escape in one place both renderers call — export `itemLabel`, or have `renderFallbackBytes` use it. The bytes that must not be touched are the *contents*; the header is written by this function itself. |
-| **S-03** | F-05 removed the verbatim directive from `trace.fallbackReason` and left a sibling message on the same field that still copies raw payload bytes into it | **Low** | CLI `optimize` (stderr) | `src/core/validation/ast/json-validator.ts:58`, surfaced by `src/core/validation/index.ts:55` and joined into `reason` at `:239` | `JSON Syntax Error: ${message}` forwards V8's `JSON.parse` message unmodified, and V8's `Unexpected token` form quotes roughly fifteen characters of the input around the error position. Measured through the shipped CLI on `{"db_password":"hunter2-Ab9x","r":qq}`: `fallbackReason` reads `… JSON Syntax Error: Unexpected token 'q', ..."Ab9x","r":qq}\n" is not valid JSON`. The password's tail is in the diagnostic channel F-05 exists to keep payload bytes out of, on the same field, a few lines above the fix. **Bounded, and narrower than F-05 was**: JSON items only, ~15 bytes, and only bytes adjacent to a syntax error. Not reproduced on the MCP route. R-15. | Report the JSON error's position and code rather than V8's rendered message; or apply `describeDirective`'s own answer — offset, length, digest. |
-| **S-04** | The §6.3 upstream guard validates the configured base URL and nothing after it: `fetch` follows redirects, and undici strips `authorization` cross-origin but not `x-api-key`, so a redirecting upstream walks the caller's Anthropic key to any address | **Low** | Gateway (`exec`), threat model 5 | `src/gateway/proxy.ts:217-229` (`fetchInit` sets no `redirect`), `:335-370` (`buildForwardHeaders` forwards `x-api-key`), against `src/gateway/server.ts:49-133` | The guard runs once, at `start()`, on a string. A `302` from the upstream is not that string. Demonstrated end to end: the gateway forwarded to a stub provider that answered `302 Location: http://127.0.0.1:<meta>/latest/meta-data/iam/security-credentials/`; the listener received **`x-api-key: sk-ant-api03-VICTIMS-REAL-ANTHROPIC-KEY`** — and, correctly, no `authorization`, which undici deletes — and the gateway relayed the listener's body to the caller as a **200**. The demo used `allowInsecureUpstream` only to host the stub on loopback; the attack does not need it, because the guard allows **any hostname** (`https://gateway.internal.example.com` is ALLOWED, measured in 12.4) and following a redirect from an allowed `https:` base needs no opt-out at all. R-16. | `redirect: 'manual'` on the forward `fetch`, treating a 3xx as a 502; or re-run `describeUpstreamUrlRefusal` on `Location` before following. |
+| **S-03** ✅ **FIXED (12.9)** | F-05 removed the verbatim directive from `trace.fallbackReason` and left a sibling message on the same field that still copies raw payload bytes into it | **Low** | CLI `optimize` (stderr) | `src/core/validation/ast/json-validator.ts:58`, surfaced by `src/core/validation/index.ts:55` and joined into `reason` at `:239` | `JSON Syntax Error: ${message}` forwards V8's `JSON.parse` message unmodified, and V8's `Unexpected token` form quotes roughly fifteen characters of the input around the error position. Measured through the shipped CLI on `{"db_password":"hunter2-Ab9x","r":qq}`: `fallbackReason` reads `… JSON Syntax Error: Unexpected token 'q', ..."Ab9x","r":qq}\n" is not valid JSON`. The password's tail is in the diagnostic channel F-05 exists to keep payload bytes out of, on the same field, a few lines above the fix. **Bounded, and narrower than F-05 was**: JSON items only, ~15 bytes, and only bytes adjacent to a syntax error. Not reproduced on the MCP route. R-15. | Report the JSON error's position and code rather than V8's rendered message; or apply `describeDirective`'s own answer — offset, length, digest. |
+| **S-04** ✅ **FIXED (12.9)** | The §6.3 upstream guard validates the configured base URL and nothing after it: `fetch` follows redirects, and undici strips `authorization` cross-origin but not `x-api-key`, so a redirecting upstream walks the caller's Anthropic key to any address | **Low** | Gateway (`exec`), threat model 5 | `src/gateway/proxy.ts:217-229` (`fetchInit` sets no `redirect`), `:335-370` (`buildForwardHeaders` forwards `x-api-key`), against `src/gateway/server.ts:49-133` | The guard runs once, at `start()`, on a string. A `302` from the upstream is not that string. Demonstrated end to end: the gateway forwarded to a stub provider that answered `302 Location: http://127.0.0.1:<meta>/latest/meta-data/iam/security-credentials/`; the listener received **`x-api-key: sk-ant-api03-VICTIMS-REAL-ANTHROPIC-KEY`** — and, correctly, no `authorization`, which undici deletes — and the gateway relayed the listener's body to the caller as a **200**. The demo used `allowInsecureUpstream` only to host the stub on loopback; the attack does not need it, because the guard allows **any hostname** (`https://gateway.internal.example.com` is ALLOWED, measured in 12.4) and following a redirect from an allowed `https:` base needs no opt-out at all. R-16. | `redirect: 'manual'` on the forward `fetch`, treating a 3xx as a 502; or re-run `describeUpstreamUrlRefusal` on `Location` before following. |
 
 **None of these is an exclusion-list item refiled.** §1.1–§1.3 carry no entry about route scoping in
 the gateway handler, the CLI fallback renderer, the JSON validator's message text, or redirect
@@ -2461,7 +2465,7 @@ Typecheck, lint and build clean.
 moves stdout only for a filename containing a newline, which no corpus file has. Byte-identical
 would have measured nothing.
 
-**S-03 and S-04 remain open**, and they are what §9.1 should now carry from this session. Neither
+**S-03 and S-04 were open when 12.8 was written and are now closed in 12.9.** Neither
 is a fix that fails to do what it claims: S-03 is a sibling message F-05 did not consider, and
 S-04 is a guarantee that stops at the first HTTP hop. Both are Low. D-1 and D-2 are unchanged —
 they downgrade sentences, not behaviour, and no behaviour was altered to suit them.
@@ -2469,3 +2473,44 @@ they downgrade sentences, not behaviour, and no behaviour was altered to suit th
 **One thing the fixes did not need to change: the README.** Its claim that "a crafted name cannot
 introduce a header line" was false on the fallback route when 12.2 was written, and is true again
 now, on both. That is the whole of S-02 stated in one sentence.
+
+### 12.9 Remediation of S-03 and S-04 — this document is closed
+
+- **Date:** 2026-09-07. **DECISIONS §74** carries the reasoning; this is the record. With 12.8,
+  **all four Session 7 findings are fixed**, and every finding in this file — F-01…F-08, V-01…V-03,
+  S-01…S-04 — is now closed.
+- **Written test-first**, like 12.8. S-03 failed as `expected 'JSON Syntax Error: Unexpected token
+  \…' not to contain 'Ab9x'` and as a 505-document property violation; S-04 failed as
+  `expected { host: '127.0.0.1:51845', …(7) } to be undefined` — the metadata listener's own
+  request headers, arriving.
+
+| | Fixed by | Verified |
+|---|---|---|
+| **S-03** | The message is built from a fixed vocabulary — a prefix match returning `json-validator.ts`'s own constants, never a slice of V8's string — plus the validator's own line and column. The offending character goes too: it is a payload byte, and position already identifies it for anyone holding the input. Unrecognised forms degrade to `invalid JSON`. | R-15 re-run through the shipped CLI: `fallbackReason` now reads `JSON Syntax Error: unexpected token at line 2, column 1`, and **no part of the trace contains the password**. Property test: 500 generated malformed documents, each carrying a distinct marker, **0 leaks**. |
+| **S-04** | `redirect: 'manual'` on the forward `fetch`; a 3xx becomes a 502 naming the status. `Location` is upstream-controlled text and is not echoed. | R-16 re-run: the gateway answers **502**, and the metadata listener receives **nothing** — no request arrived at all, so no `x-api-key`. Control: a non-redirecting upstream still receives the key and its 200 still reaches the caller. |
+
+**Suite:** 99 files / **936 passed, 2 skipped**. Typecheck, lint and build clean.
+
+**Two things worth carrying out of these two, because neither is about the code that was changed.**
+
+- **S-04's `authorization: undefined` was protection by inheritance.** undici deletes that header on
+  a cross-origin redirect because the Fetch specification says so; nothing in this repository knew.
+  `x-api-key` is a vendor header on no such list, so the OpenAI-shaped credential was safe and the
+  Anthropic-shaped one was not — an asymmetry that survives reading either provider path on its
+  own, and that only shows up when you ask what is actually enforcing a property you believe you
+  have.
+- **S-03 was six lines from F-05's fix and on the same field.** What separated them was that F-05
+  was found by tracing a *directive* and this was found by asking what else writes to
+  `fallbackReason`. The scope of a fix follows the scope of the search that produced it, which is
+  the sentence §73 ended on and the reason this section exists at all.
+
+**No corpus run.** S-04 is Gateway-only, off the corpus route entirely; S-03 changes a string inside
+`trace.fallbackReason` for JSON items that fail to parse and moves no optimized byte — no stage
+reads a validation message, so `outputSha` cannot move.
+
+**What is left in this file.** D-1 and D-2 stand: they downgrade sentences in §11 and in a source
+comment, not behaviour, and no behaviour was altered to suit them. §9.1's items 5 (concurrency and
+timing) and 6 (whether a model is actually fooled by forged provenance) are untouched by anything
+in Session 7, and 12.6's limits still apply — in particular that S-01's fix was verified against
+session *creation* and eviction, and that nobody has measured what a downstream agent does with a
+forged header.
