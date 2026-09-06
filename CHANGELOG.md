@@ -31,6 +31,36 @@ sessions including an independent falsification pass. Findings are cited by thei
   No entry mode reached this today — the MCP session store is never populated — so it was filed as
   latent. It becomes live for any embedder that hands a populated Gateway store to
   `createMcpServer({ sessionStore })`, which the option exists to invite.
+### Added
+- **Architecture import rules are policed, not just described (audit OX-L17, DECISIONS §72).** Two
+  bans, both via `@typescript-eslint/no-restricted-imports` — **no new dependency.** The audit
+  suggested `eslint-plugin-boundaries` or dependency-cruiser and §69 deferred the item on that
+  cost; the rules this repository actually has are two import bans, and the linter already
+  expresses them.
+
+  Invariant 4: only `src/core/stage-registry` may value-import a concrete stage. Layering:
+  `src/core` and `src/stages` may not import from `adapters/`, `cli/` or `gateway/`.
+  `allowTypeImports` permits `import type`, which is erased and couples nothing.
+
+  **Both were verified by planting the violation they should catch**, because a misconfigured lint
+  rule looks exactly like a clean codebase. Value import from a stage → error; `import type` from a
+  stage → passes; upward import → error.
+
+  Writing the rule found that **invariant 4 is not what the code does**:
+  `core/validation/index.ts:13` value-imports `extractConstraintDirectives` from
+  `stages/cleanup/constraint-preservation`. Exempted at that one path with the reason at the site
+  rather than refactored — moving the extractor changes the optimize route, which needs a corpus
+  measurement, and a linter commit should not carry one.
+- **Coverage reporting (audit OX-L18, DECISIONS §72).** `npm run coverage`, via
+  `@vitest/coverage-v8`. **Reporting only — `npm test` does not run it and no threshold fails a
+  build**, deliberately: a number attached to a gate becomes a target, and several suites here
+  exist to pin a characterization that a coverage gate would reward deleting.
+
+  Baseline over `src/**`: statements **92.54%**, branches **87.20%**, functions **97.01%**.
+  `coverage/` was already gitignored and contributes 0 entries to `npm pack`, checked rather than
+  assumed.
+
+### Fixed
 - **A signal no longer truncates the MCP output stream (audit OX-L8).** `process.exit()` discards
   whatever a stream still holds, so `tokendamper mcp` exiting the instant `stop()` returned lost
   any JSON-RPC frame still buffered. Shutdown now waits for the output stream to report its write

@@ -5326,3 +5326,76 @@ with it, and the doc comments on `DriftCoverage` are where it is argued.
 those" until now. §33 widened the unwitnessed rule from validator-covered items to every item,
 which is the opposite of a subset and describes the exact population §33 was written to stop
 losing. Symbols are one accepted witness; content markers are the other.
+
+---
+
+## 72. L17 and L18 Land, and One of Them Never Needed the Dependency
+
+**Date:** 2026-09-07 · **Status:** Accepted · **Closes:** OX-L17, OX-L18 — the last two open items
+in `oxaudit.md` · **Reverses:** the deferral in §69
+
+§69 held both back for one reason, stated once for the pair: *"Both require a new devDependency
+(`eslint-plugin-boundaries` or dependency-cruiser; `@vitest/coverage-v8`). The audit calls both
+optional. Adding dependencies to someone's package on the strength of a LOW finding is not a call
+to make unasked."* The call has now been made. Taking the two items separately is what turned up
+something worth recording.
+
+### L17 needed no dependency, and the deferral reason did not survive contact
+
+The audit suggested `eslint-plugin-boundaries` or dependency-cruiser. Both would express these
+rules more elegantly than what shipped; both cost a package. **The rules this repository actually
+has are two import bans**, and `@typescript-eslint/no-restricted-imports` — already present,
+already loaded — expresses both. So §69's reason applies to L18 and, on inspection, never applied
+to L17 at all. A deferral written for a pair inherited a justification only one of them had.
+
+`allowTypeImports` is the load-bearing option. An `import type` is erased at compile time and
+wires nothing, which is what these invariants are about: the engine naming a stage's *options
+type* does not couple the engine to that stage.
+
+**Two rules, both verified to fire rather than merely to pass.** A lint rule that is silently
+misconfigured looks exactly like a clean codebase, which is invariant 10 pointed at the linter, so
+each was checked by planting the violation it is supposed to catch:
+
+| Planted | Expected | Observed |
+|---|---|---|
+| value import from `stages/` into `core/planner` | error | **error** |
+| `import type` from `stages/` into `core/planner` | pass | **pass** |
+| import of `gateway/session-store` into `core/planner` | error | **error** |
+
+### The rule found that invariant 4 is not what the code does
+
+CLAUDE.md states it flatly: *"Only `stage-registry` imports concrete stage implementations."*
+Three other files import from `src/stages/`. Two are `core/engine`'s `import type`, which the rule
+allows and which couple nothing. The third is real: **`core/validation/index.ts:13` value-imports
+`extractConstraintDirectives` from `stages/cleanup/constraint-preservation`**, so the constraint
+*check* and the stage that preserves constraints share one extractor. That is a runtime dependency
+from core onto a concrete stage, and the invariant says there is exactly one of those.
+
+**Exempted at the file, with the reason at the site, rather than refactored or hidden.** Moving the
+extractor somewhere neutral is a change to the optimize route, and this repository requires a
+corpus measurement for those; a commit adding a linter is not the commit that should carry one. The
+exemption is one path with a comment naming it as a known violation, so the rule locks in the
+status quo and every *new* violation fails. The honest state is that the code and the invariant
+disagree and the code is what shipped.
+
+### L18 is reporting, not a gate, and that is the decision
+
+`@vitest/coverage-v8` is a real dependency and there is no way around it. What is optional is what
+to do with the number.
+
+`npm run coverage` produces it; `npm test` does not; **no threshold fails a build.** A number
+attached to a gate becomes a target, and the failure mode is a suite that covers lines instead of
+behaviour — which is the opposite of what this repository's tests are for. Several exist to pin a
+*characterization*: `validator-guarantee.test.ts` asserts that English prose passes the TypeScript
+validator, and a coverage gate would reward deleting it. The instrument is here to be read.
+
+Baseline at this commit, over `src/**` only: **statements 92.54% (8895/9612), branches 87.20%
+(3100/3555), functions 97.01% (358/369)**. `coverage/` is already in `.gitignore` and, checked
+rather than assumed, contributes **0 entries** to `npm pack` — still 223 files.
+
+### What this does not establish
+
+Neither rule says the architecture is *right*, only that it stopped drifting. The layering rule was
+clean before it existed and exists to keep it so, which means it has never actually caught
+anything — its value is entirely prospective, and a rule that has never fired in anger is a rule
+whose usefulness is still a hypothesis.

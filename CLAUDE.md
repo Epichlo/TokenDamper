@@ -327,6 +327,21 @@ as a favourable number, not a portable gain.
 different non-regression reasons (§45 line endings, §46 corpus growth, §48 the target binding, §50
 this). Compare per-row over one frozen corpus.
 
+**`npm run coverage` exists and is reporting only** (audit OX-L18, DECISIONS §72). It is not part
+of `npm test`, `prepublishOnly` or CI, and **no threshold fails a build** — deliberately, because a
+coverage gate rewards deleting the characterization tests this repository depends on
+(`validator-guarantee.test.ts` asserts that English prose *passes* the TypeScript validator). Read
+the number; do not make it a target. Baseline over `src/**`: statements 92.54%, branches 87.20%,
+functions 97.01%.
+
+**The linter now polices two architecture rules** (audit OX-L17, DECISIONS §72), via
+`@typescript-eslint/no-restricted-imports` and no new dependency: only `stage-registry` may
+*value*-import a concrete stage (`import type` is allowed and couples nothing), and `src/core` /
+`src/stages` may not import from `adapters/`, `cli/` or `gateway/`. Writing the rule found that
+**invariant 4 above is not what the code does** — `core/validation/index.ts:13` value-imports
+`extractConstraintDirectives` from a stage. That one path is exempted with the reason at the site;
+every new violation fails.
+
 **There is no `npm run format`, and do not add one back without reading DECISIONS §49.** It was
 `prettier --check .`, it had never passed, and nothing invoked it — CI and `prepublishOnly` both
 run typecheck, lint, build, test. It failed on 148 files for two independent reasons (CRLF vs
