@@ -33,6 +33,106 @@ export function isLoopbackHost(host: string): boolean {
 }
 
 /**
+ * Whether a hostname is a literal address inside a range that never belongs to a provider.
+ *
+ * Covers the ranges an SSRF actually aims at: loopback, RFC1918 private space, and above all
+ * **link-local `169.254.0.0/16`**, which is where every major cloud's instance-metadata service
+ * lives and therefore where a stolen `Authorization` header buys the most.
+ *
+ * **Literals only, and that limit is real.** A *hostname* that resolves into one of these ranges
+ * is not caught, because this inspects the configured string rather than the address the socket
+ * eventually connects to. Closing that properly needs a check at connect time — resolving here
+ * would still leave a TOCTOU window, since DNS can answer differently between `start()` and the
+ * request — so it is stated rather than half-done. What this does close is the whole class of
+ * *directly named* internal destinations, which is what R-06 demonstrated.
+ */
+export function isPrivateOrLoopbackAddress(host: string): boolean {
+  let h = host.trim().toLowerCase();
+  // `[::1]` arrives bracketed from `URL.hostname` only when the caller wrote it that way.
+  if (h.startsWith('[') && h.endsWith(']')) h = h.slice(1, -1);
+  if (h === 'localhost' || h.endsWith('.localhost')) return true;
+
+  // IPv4-mapped IPv6 is the same address wearing a different notation, and omitting it is how
+  // this kind of check usually fails on dual-stack hosts.
+  //
+  // **Both spellings, because `URL` rewrites one into the other.** `new URL()` normalises
+  // `[::ffff:127.0.0.1]` to `[::ffff:7f00:1]` and `[::ffff:169.254.169.254]` to
+  // `[::ffff:a9fe:a9fe]`, so a check that only understood the dotted form would pass the
+  // *metadata service itself* straight through. Caught by the test, not by reading.
+  const mappedDotted = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.exec(h);
+  if (mappedDotted?.[1]) h = mappedDotted[1];
+
+  const mappedHex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(h);
+  if (mappedHex?.[1] && mappedHex[2]) {
+    const hi = parseInt(mappedHex[1], 16);
+    const lo = parseInt(mappedHex[2], 16);
+    h = `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
+  }
+
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    if (a === 0 || a === 10 || a === 127) return true;
+    if (a === 169 && b === 254) return true; // link-local, incl. 169.254.169.254
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+    return false;
+  }
+
+  if (h === '::' || h === '::1') return true;
+  if (/^f[cd][0-9a-f]{2}:/.test(h)) return true; // fc00::/7 unique-local
+  if (/^fe[89ab][0-9a-f]:/.test(h)) return true; // fe80::/10 link-local
+  return false;
+}
+
+/**
+ * Why this upstream base URL may not be used, or `undefined` if it is fine.
+ *
+ * Security review §6.3: `buildUpstreamUrl` trims one trailing slash and concatenates, with no
+ * validation of any kind, while `buildForwardHeaders` delivers the caller's `Authorization` and
+ * `x-api-key` to whatever comes out. R-06 demonstrated the consequence — one line of configuration
+ * put a live-looking bearer token on an arbitrary listener. The review left this unfiled because
+ * no CLI surface sets these fields; that made it a library-API hazard rather than a finding, not a
+ * safe behaviour.
+ *
+ * Two rules, both checkable from the string alone:
+ *
+ *   - **`https:` only.** A provider credential must not cross a plaintext hop, and the `http:`
+ *     case is exactly how R-06 delivered one to a local listener.
+ *   - **No literal private, loopback or link-local address.** See `isPrivateOrLoopbackAddress`
+ *     for what that covers and, more importantly, what it does not.
+ *
+ * `allowInsecureUpstream` opts out of both, and exists because the alternative is worse: this
+ * repository's own gateway tests point at `http://127.0.0.1` stubs, and a rule with no escape
+ * hatch would have been either abandoned or quietly weakened to let them pass. Naming the
+ * exemption keeps the default strict and makes each use of it visible.
+ */
+export function describeUpstreamUrlRefusal(raw: string, field: string): string | undefined {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return `${field} is not a valid absolute URL: ${JSON.stringify(raw)}`;
+  }
+  if (url.protocol !== 'https:') {
+    return (
+      `${field} must use https: — got ${JSON.stringify(url.protocol)} in ${JSON.stringify(raw)}. ` +
+      'The caller\'s Authorization / x-api-key header is forwarded to this host, and must not ' +
+      'cross a plaintext hop. Set allowInsecureUpstream if this is a local test stub.'
+    );
+  }
+  if (isPrivateOrLoopbackAddress(url.hostname)) {
+    return (
+      `${field} points at a private, loopback or link-local address (${url.hostname}), which no ` +
+      'provider uses and which is where instance-metadata services live. The caller\'s provider ' +
+      'credential is forwarded to this host. Set allowInsecureUpstream if this is deliberate.'
+    );
+  }
+  return undefined;
+}
+
+/**
  * The hostname out of a `Host` or `Origin` authority, lowercased, with the port and any
  * IPv6 brackets removed. `undefined` when there is nothing parseable.
  */
@@ -101,6 +201,7 @@ export class GatewayServer {
       upstreamAnthropicUrl: config?.upstreamAnthropicUrl,
       gatewayToken: config?.gatewayToken,
       allowUnauthenticatedNonLoopback: config?.allowUnauthenticatedNonLoopback,
+      allowInsecureUpstream: config?.allowInsecureUpstream,
       upstreamTtfbTimeoutMs: config?.upstreamTtfbTimeoutMs,
       mockUpstream: config?.mockUpstream,
       allowMissingUpstreamCredentials: config?.allowMissingUpstreamCredentials,
@@ -150,6 +251,22 @@ export class GatewayServer {
           '127.0.0.1, or set allowUnauthenticatedNonLoopback if an open relay is genuinely what ' +
           'you want.',
       );
+    }
+
+    // Security review §6.3, same placement and the same reasoning as OX-M8 above: a configuration
+    // that would hand the caller's provider credential somewhere it must not go is refused at
+    // `listen`, not diagnosed per request. Per-request rejection would surface as an opaque 502 on
+    // every call and leave the misconfiguration running; failing at startup names it once, in the
+    // place that can still be fixed.
+    if (!this.config.allowInsecureUpstream) {
+      for (const [field, value] of [
+        ['upstreamOpenAiUrl', this.config.upstreamOpenAiUrl],
+        ['upstreamAnthropicUrl', this.config.upstreamAnthropicUrl],
+      ] as const) {
+        if (value === undefined) continue;
+        const refusal = describeUpstreamUrlRefusal(value, field);
+        if (refusal) throw new Error(`Refusing to start: ${refusal}`);
+      }
     }
 
     return new Promise((res, rej) => {

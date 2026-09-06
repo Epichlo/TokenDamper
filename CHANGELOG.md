@@ -31,6 +31,29 @@ sessions including an independent falsification pass. Findings are cited by thei
   No entry mode reached this today — the MCP session store is never populated — so it was filed as
   latent. It becomes live for any embedder that hands a populated Gateway store to
   `createMcpServer({ sessionStore })`, which the option exists to invite.
+- **The Gateway refuses an unsafe upstream base URL before it listens (security review §6.3).**
+  `buildUpstreamUrl` trimmed a slash and concatenated with no validation of any kind, while
+  `buildForwardHeaders` delivers the caller's `Authorization` / `x-api-key` to whatever came out —
+  R-06 demonstrated a one-line config change putting a live-looking bearer token on an arbitrary
+  listener, and `169.254.169.254` is the destination that makes it worth doing. `start()` now
+  refuses a URL that is not `https:` or that names a literal private, loopback or link-local
+  address, with `allowInsecureUpstream` as the named opt-in.
+
+  Refused at `start()` rather than per request, following OX-M8's reasoning: a misconfiguration
+  that would leak a credential is named once where it can still be fixed, not surfaced as an opaque
+  502 on every call. **Two limits, stated rather than glossed.** Literal addresses only — a
+  *hostname* resolving into a private range is not caught, because this reads the configured string
+  rather than the address the socket connects to, and resolving at startup would still leave a
+  TOCTOU window. And the guard is on `GatewayServer.start()`, so a library caller invoking
+  `handleProxyRequest` directly bypasses it.
+
+  One bypass in the first draft was caught by its own test rather than by reading: `URL` normalises
+  `[::ffff:169.254.169.254]` to `[::ffff:a9fe:a9fe]`, so a validator understanding only dotted
+  IPv4-mapped notation passes **the metadata service itself**. Both spellings are handled.
+
+  This finding was never filed in §3 — it sat in §6.3 as a library hazard because no CLI surface
+  reaches it. That reasoning was inconsistent: F-02 was library-only on identical terms, was filed
+  as a Medium, and was fixed. Fixing this closes the asymmetry from the other side.
 - **Gateway clients that name no session no longer share one (security review F-01).**
   `getSessionIdFromHeaders` fell back to the literal `'default-session'`, so every client that set
   no session header landed in one session object — the *common* case, because the third-party tools

@@ -680,6 +680,41 @@ whether a check actually ran.
   that scanner-first produces **silent unmeasured elision**, not the visible zero the docs
   promised, because a struct or import manufactures a symbol that body elision cannot destroy.
 
+## The security review — a fourth audit, and it is closed
+
+**`docs/security-review-2026-08-30.md`** is a four-session security review under a protocol
+(`docs/SECURITY-REVIEW.md`, untracked, main checkout only). It is not part of `max_audit.md`'s
+waves or `oxaudit.md`'s lanes. **All eight findings are fixed**; §3.1 of that file is the per-finding
+table and §9 the remediation record.
+
+What is worth carrying here, because it changes how you read the rest of this file:
+
+- **`driftScore: 0, measured: true, fallbackUsed: false` is not a semantic-safety attestation.** A
+  Python function's entire body — including `if not user.is_admin: raise` — can be elided with all
+  five gate fields green, and that is *correct* under this project's own definition, because the
+  `def` line survives so symbol retention is 1.0. The deletion is *marked*, which is the distinction
+  the `tclConfig.sh` case turns on. Any consumer treating that triple as "nothing important was
+  lost" is reading a guarantee the number does not make.
+- **The `==> path <==` envelope and `[TokenDamper: …]` markers are unauthenticated text shapes**, so
+  content can forge both. Newlines in a label are escaped now; a delimiter-shaped line *inside*
+  content still passes and is documented rather than fixed, because escaping content would corrupt
+  the bytes the tool exists to deliver. The practical discriminator: every genuine header on every
+  CLI route carries an **absolute** path.
+- **Two fixes are deliberately absent, and both refusals are the result.** A per-run marker nonce
+  would break invariant 1. And hoisting the Gateway's credential check above session mutation was
+  measured vacuous — `hasAuthHeaders` tests *presence*, not validity, so an attacker passes it with
+  `Bearer anything`.
+- **The review found the same failure mode this file warns about, aimed at itself.** A
+  "checked and clean" entry rested on `grep -rn "node:fs"`, which matched a doc comment and could
+  not have seen `git-inspector.ts` — it imports bare `'fs'`. The conclusion held; the check never
+  ran. Invariant 10 applies to audit evidence, not only to engine output.
+- **Its `file:line` citations are v1.6.0 coordinates.** Sessions 1–3 audited `c4f4149`; the
+  falsification pass and the fixes are against v1.7.3. §8.4 lists the four that no longer resolve.
+
+**Still open there** (§9.1): v1.7.3's +859 new lines have never been audited — the M8/M9 gateway
+work and a 332-line `drift-tracker.ts` change were read only where a finding touched them. Also,
+nobody has falsified the fixes, which is the same argument that justified Session 4.
+
 ## Reference docs in repo
 
 **`docs/audit-remediation-status.md`** — current audit state, measured baseline, what is next.
