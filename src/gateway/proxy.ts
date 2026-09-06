@@ -37,8 +37,6 @@ export async function handleProxyRequest(
 ): Promise<ProxyRequestResult> {
   const requestUrl = new URL(urlPath, 'http://tokendamper.local');
   const routePath = requestUrl.pathname;
-  const sessionId = getSessionIdFromHeaders(headers, rawBody, options.defaultSessionId);
-  const session = options.sessionStore.getOrCreateSession(sessionId);
 
   // Can the string model represent what the caller actually sent?
   //
@@ -57,14 +55,49 @@ export async function handleProxyRequest(
     }
   }
 
-  if (method.toUpperCase() !== 'POST' && (routePath === '/v1/chat/completions' || routePath === '/v1/messages')) {
+  const isApiRoute = routePath === '/v1/chat/completions' || routePath === '/v1/messages';
+
+  if (method.toUpperCase() !== 'POST' && isApiRoute) {
     return {
       statusCode: 405,
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ error: `Method ${method} is not allowed for ${routePath}` }),
-      session,
     };
   }
+
+  // **Credentials are checked before any session exists** (security review F-01 / V-02).
+  //
+  // This check used to sit *after* `processOpenAiRequest`, so a request that ended in 401 had
+  // already created a session, stored its content blocks and advanced the turn counter. §3.1
+  // recorded a decision not to move it, on the grounds that `hasAuthHeaders` tests presence rather
+  // than validity — a local process passes it by sending `Bearer anything`, so the gate stopped
+  // nobody and would have read as a control while being a formality.
+  //
+  // **That reasoning held for one attacker and there are two.** Session 5's V-02 found that a
+  // browser reaches this handler through `Origin: null`, and a browser *cannot* set `authorization`
+  // on a simple request: the header is not CORS-safelisted, so asking for it forces a preflight
+  // this server answers `405` with no `Access-Control-*`. Against that caller the check is real,
+  // and what it prevents is a web page creating sessions until the LRU cap evicts every genuine
+  // one. Hoisted for that attacker, not for the local one, and the distinction is the finding.
+  //
+  // Placed above `getOrCreateSession` rather than merely above the stages, because creating the
+  // session *is* the mutation that matters here — an empty session still occupies a slot under
+  // `maxSessions`, which is the whole of the eviction primitive.
+  if (
+    isApiRoute &&
+    !shouldUseMockUpstream(options) &&
+    options.allowMissingUpstreamCredentials !== true &&
+    !hasAuthHeaders(cleanHeaders)
+  ) {
+    return {
+      statusCode: 401,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ error: 'Unauthorized: Missing upstream authorization header' }),
+    };
+  }
+
+  const sessionId = getSessionIdFromHeaders(headers, rawBody, options.defaultSessionId);
+  const session = options.sessionStore.getOrCreateSession(sessionId);
 
   // Handle OpenAI API endpoint
   if (routePath === '/v1/chat/completions') {
@@ -74,18 +107,14 @@ export async function handleProxyRequest(
     if (optimized.statusCode !== 200 || shouldUseMockUpstream(options)) {
       return optimized;
     }
+    // No credentials, and reaching this line means the caller opted into that: the hoisted check
+    // above returns 401 unless `allowMissingUpstreamCredentials` is set. Answer locally with the
+    // optimized body rather than calling a provider that would only reject us. Restoring this was
+    // required — hoisting the 401 removed it by accident, and `gateway-response-headers.test.ts`
+    // is what noticed, which is the seam's own regression test doing its job.
     if (!hasAuthHeaders(cleanHeaders)) {
-      if (options.allowMissingUpstreamCredentials === true) {
-        return optimized;
-      }
-      return {
-        statusCode: 401,
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ error: 'Unauthorized: Missing upstream authorization header' }),
-        session,
-      };
+      return optimized;
     }
-
     return forwardUpstreamRequest({
       provider: 'openai',
       requestUrl,
@@ -93,7 +122,7 @@ export async function handleProxyRequest(
       ...(optimized.bodyBytes ? { bodyBytes: optimized.bodyBytes } : {}),
       incomingHeaders: cleanHeaders,
       streamRequested: isStreamRequested(optimized.body),
-      session: optimized.session,
+      session: optimized.session ?? session,
       options,
     });
   }
@@ -106,18 +135,14 @@ export async function handleProxyRequest(
     if (optimized.statusCode !== 200 || shouldUseMockUpstream(options)) {
       return optimized;
     }
+    // No credentials, and reaching this line means the caller opted into that: the hoisted check
+    // above returns 401 unless `allowMissingUpstreamCredentials` is set. Answer locally with the
+    // optimized body rather than calling a provider that would only reject us. Restoring this was
+    // required — hoisting the 401 removed it by accident, and `gateway-response-headers.test.ts`
+    // is what noticed, which is the seam's own regression test doing its job.
     if (!hasAuthHeaders(cleanHeaders)) {
-      if (options.allowMissingUpstreamCredentials === true) {
-        return optimized;
-      }
-      return {
-        statusCode: 401,
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ error: 'Unauthorized: Missing upstream authorization header' }),
-        session,
-      };
+      return optimized;
     }
-
     return forwardUpstreamRequest({
       provider: 'anthropic',
       requestUrl,
@@ -125,7 +150,7 @@ export async function handleProxyRequest(
       ...(optimized.bodyBytes ? { bodyBytes: optimized.bodyBytes } : {}),
       incomingHeaders: cleanHeaders,
       streamRequested: isStreamRequested(optimized.body),
-      session: optimized.session,
+      session: optimized.session ?? session,
       options,
     });
   }
@@ -762,9 +787,11 @@ function findMemberValue(source: string, objectStart: number, key: string): RawS
   if (source[i] !== '{') return undefined;
   i += 1;
 
+  let found: RawSpan | undefined;
+
   for (;;) {
     i = skipWs(source, i);
-    if (source[i] === '}') return undefined;
+    if (source[i] === '}') return found;
     if (source[i] !== '"') return undefined;
 
     const keyEnd = scanString(source, i);
@@ -778,14 +805,24 @@ function findMemberValue(source: string, objectStart: number, key: string): RawS
     const valueEnd = scanValue(source, valueStart);
     if (valueEnd === -1) return undefined;
 
-    if (name === key) return { start: valueStart, end: valueEnd };
+    // **Last match wins, because `JSON.parse` does** (security review V-01). RFC 8259 permits a
+    // repeated name and leaves the resolution to the parser; ECMA-262 builds the object in source
+    // order, so a later duplicate overwrites an earlier one. This used to return on the *first*
+    // match, and the two rules disagreeing is not a cosmetic difference here — the pipeline
+    // optimizes the value `JSON.parse` produced, and this span says where to write it back. Given
+    // `{"content":"A","content":"B"}` the engine reasoned about `B` and the splice overwrote `A`,
+    // so the forwarded body lost `A` outright and still carried `B` unelided.
+    //
+    // Scanning on rather than returning early costs one pass over the remainder of the object,
+    // which is already bounded — `findMemberValue` never leaves the object it was given.
+    if (name === key) found = { start: valueStart, end: valueEnd };
 
     i = skipWs(source, valueEnd);
     if (source[i] === ',') {
       i += 1;
       continue;
     }
-    if (source[i] === '}') return undefined;
+    if (source[i] === '}') return found;
     return undefined;
   }
 }

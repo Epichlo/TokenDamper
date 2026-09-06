@@ -331,8 +331,15 @@ export class GatewayServer {
   private refuseByOriginPolicy(req: IncomingMessage): string | undefined {
     const port = this.listeningPort ?? this.config.port;
 
+    // `null` is **not** exempt (security review V-02). It used to be, and it was the wrong value to
+    // exempt: an *absent* `Origin` is a non-browser client, but the literal string `null` is a
+    // browser declining to name itself — what a sandboxed iframe, a `data:` URL and some redirect
+    // chains all send. Exempting it meant the one origin value a browser produces when it is most
+    // sandboxed was the one value that walked past the gate this method exists to be. It now falls
+    // into the block below, where `new URL('null')` throws and the request is refused as
+    // cross-origin, which is what it is.
     const originHeader = req.headers.origin;
-    if (typeof originHeader === 'string' && originHeader !== '' && originHeader !== 'null') {
+    if (typeof originHeader === 'string' && originHeader !== '') {
       let sameOrigin = false;
       try {
         const origin = new URL(originHeader);
