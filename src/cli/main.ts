@@ -4,7 +4,7 @@ import { dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { CLI_ADAPTER_NAME, CLI_ADAPTER_VERSION, format as formatCliOutput, parse } from '../adapters/cli';
 import { createMultiItemRequest } from '../core/model/constructors';
-import { ITEM_DELIMITER_PREFIX, ITEM_DELIMITER_SUFFIX } from '../core/render';
+import { escapeDelimiterLabel, ITEM_DELIMITER_PREFIX, ITEM_DELIMITER_SUFFIX } from '../core/render';
 import { gitIgnoredAmong, ingestPaths, type IngestedFile } from './ingest';
 import { loadConfig } from '../config';
 import { declarableLanguages, normalizeLanguage } from '../core/model';
@@ -459,8 +459,21 @@ function warnAboutDroppedFiles(
   );
 }
 
-/** The fallback stream: each file's original bytes, under the header the renderer emits. */
-function renderFallbackBytes(files: ReadonlyArray<IngestedFile>): Buffer {
+/**
+ * The fallback stream: each file's original bytes, under the header the renderer emits.
+ *
+ * **The label goes through `escapeDelimiterLabel`, the same one `core/render` uses** (security
+ * review S-02). It used to interpolate `file.path` raw, and a POSIX filename may contain a
+ * newline — so a crafted name broke the header across lines here and planted a second,
+ * well-formed `==> … <==` naming a file that does not exist, on the one route F-06's fix did not
+ * reach. Reaching it is not exotic: fail-open is where this function is called, and an attacker
+ * forces it with one file of their own that is not valid UTF-8.
+ *
+ * Only the header is escaped. `file.bytes` is written through untouched, because emitting the
+ * caller's original bytes is the entire reason this path exists rather than `emittedOutput`
+ * (DECISIONS §35).
+ */
+export function renderFallbackBytes(files: ReadonlyArray<IngestedFile>): Buffer {
   if (files.length === 1) {
     return files[0]!.bytes;
   }
@@ -468,7 +481,8 @@ function renderFallbackBytes(files: ReadonlyArray<IngestedFile>): Buffer {
   const parts: Buffer[] = [];
   files.forEach((file, index) => {
     if (index > 0) parts.push(Buffer.from('\n', 'utf8'));
-    parts.push(Buffer.from(`${ITEM_DELIMITER_PREFIX}${file.path}${ITEM_DELIMITER_SUFFIX}\n`, 'utf8'));
+    const label = escapeDelimiterLabel(file.path);
+    parts.push(Buffer.from(`${ITEM_DELIMITER_PREFIX}${label}${ITEM_DELIMITER_SUFFIX}\n`, 'utf8'));
     parts.push(file.bytes);
   });
   return Buffer.concat(parts);
