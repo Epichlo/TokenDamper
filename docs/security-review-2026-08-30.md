@@ -1953,7 +1953,7 @@ Nothing below is a finding. Each is either a recorded decision or work never sta
 |---|---|---|
 | ~~**1**~~ | ~~**The unvalidated upstream base URL (§6.3)**~~ | **CLOSED.** `start()` refuses non-`https:` and literal private/loopback/link-local upstreams; `allowInsecureUpstream` is the named opt-in. Two limits remain and are stated at §6.3: literal addresses only (a hostname resolving into a private range is not caught), and the guard is on `start()`, so a direct `handleProxyRequest` caller bypasses it. |
 | ~~**2**~~ | ~~**v1.7.3's +859 new lines have never been audited**~~ | **DONE — Session 5, §10.** Passes 1, 3, 4 and 5 over the diff. Two Gateway findings (**V-01** duplicate-key splice corruption, **V-02** `Origin: null` bypass), seven clean results, and a correction: V-02 overturns §3.1's "vacuous" verdict on F-01's credential-check residual, which held for a local attacker and not for a browser. |
-| **3** | **The fixes have been falsified by nobody** | Sessions 1–3 were checked by Session 4 because the protocol holds that an author cannot check their own reasoning. The same argument applies to the remediation. |
+| **3** | **The fixes have been falsified by nobody _independent_** | **Partially addressed — Session 6, §11.** An adversarial (but self-authored) pass found **V-03**: V-01's fix was incomplete and the same corruption returned through a unicode-escaped key. Five other bypass hypotheses failed, including the classic decimal/hex/octal SSRF notations. **Still open**, because the agent that wrote the fixes wrote this pass too, and V-03 is precisely the argument for that mattering. |
 | **4** | ~~F-01~~, **F-06 and F-07 residuals** | **F-01's is CLOSED** — §3.1 refused the fix as vacuous against a *local* attacker, and Session 5's V-02 showed the reasoning did not cover the *browser* one, which cannot supply `authorization` at all. Hoisted; 20 unauthenticated requests now leave `sessionCount` at 0. F-06's content vector and F-07's unauthenticated markers stand for the reasons given in §3.1. |
 | **5** | **Concurrency and timing** | §6.2's two untested axes — sessions racing on `pruneExpired`/`evictOldestSession`, and the `getContent` prefix walk's timing profile — remain untested. |
 | **6** | **Whether a model is actually fooled by forged provenance** | F-06 and F-07 establish that attacker-controlled provenance reaches the model's context. Whether any given agent acts on it is a property of that agent. Session 4's absolute-vs-relative asymmetry makes this *more* worth testing, since it is what separates Low from Medium. |
@@ -2066,3 +2066,69 @@ Reported so the next session knows what was actually covered on this surface.
   credential and egress paths; the passes run here were scoped to the surfaces that carry either.
 - **No corpus run.** Nothing found here changes optimize-route output: V-01 and V-02 are Gateway
   only, and the Gateway is off the corpus route entirely.
+
+---
+
+## 11. Session 6 — falsifying the fixes
+
+- **Date:** 2026-09-04 · **Surface:** the ten fixes merged in PRs #53, #55 and #56 (`d8885a8..1ae6493`).
+- **This closes §9.1 item 3 only partially, and the limit must be stated first.**
+
+> **This pass is not independent.** The protocol gives falsification to a fresh agent precisely
+> because an author cannot check their own reasoning, and the same agent wrote every fix examined
+> here. What follows is an adversarial pass with concrete bypass hypotheses, and it found a real
+> defect — but **a confirmation below is worth materially less than a confirmation in §8**, and
+> §9.1 item 3 should stay open until someone else runs it. The one finding is evidence the exercise
+> was worth doing, not evidence that it was sufficient.
+
+### 11.1 V-03 — V-01's fix was incomplete, and the same corruption returns through an escaped key
+
+| ID | Title | Severity | Entry mode | `file:line` | Exploit path | Fix direction |
+|---|---|---|---|---|---|---|
+| **V-03** ✅ **FIXED** | `findMemberValue` compared the **undecoded** source slice, so a key written with a JSON escape did not match the name it actually spells | **Low** | Gateway (`exec`) | `src/gateway/proxy.ts:797-815` | V-01 made the scan last-match-wins, which fixed *literal* duplicate keys. It compared `source.slice(...)` against `'content'` — but `"content"` **is** `content` to `JSON.parse`. So given `{"content":"AAAA","content":"BBBB"}` the parser resolves to `BBBB` while the scanner matched only the literal key and returned `AAAA`'s span: V-01's exact corruption, reached around V-01's fix. Reproduced end to end after the fix was in — `DECOY survived? false`, block occurrences `2`, so one value destroyed and the dedup saved nothing. | Decode the key with `JSON.parse` rather than slicing it, which is the only comparison that cannot disagree with the parser downstream. |
+
+**Why this one matters more than its severity.** V-01's fix was verified end to end and by four unit
+tests, and it was still wrong — because the test and the fix shared an assumption about what a "key"
+is. That is the failure mode this whole review keeps finding, now at one more remove: the check and
+the thing checked were derived from the same idea, so agreement between them proved nothing about
+the world. It is also a concrete argument for item 3, since the author who wrote the fix wrote the
+tests that passed it.
+
+### 11.2 Attacks that failed — the fixes that held
+
+Each of these was a specific hypothesis, not a re-read.
+
+1. **SSRF guard vs. alternate IP notation.** The classic bypass — decimal `https://2852039166`, hex
+   `https://0xA9FEA9FE`, octal `https://0251.0376.0251.0376`, trailing-dot
+   `https://169.254.169.254.` — **all four are refused.** WHATWG `URL` normalises every one of them
+   to `169.254.169.254` before the guard sees it, so the check inherits the parser's canonicalisation
+   rather than having to reimplement it. Worth recording as *verified* rather than assumed: this is
+   the single most common way an SSRF allowlist is defeated.
+2. **F-02's length guard vs. the exact-match branch.** The guard runs *after* the exact-match
+   lookup, so a stored key shorter than 12 characters would still resolve. It cannot occur in the
+   product — `storeContent` is only ever called with `item.contentHash`, a 64-character digest — and
+   a library caller who stores a short key already holds the content it maps to. Not an oracle.
+3. **F-06's label escaping vs. Unicode line breaks.** U+0085 NEL, U+2028 LINE SEPARATOR and U+2029
+   PARAGRAPH SEPARATOR survive the `\r`/`\n` escaping. **The demonstrated guarantee is intact** —
+   header count by `\n` is unchanged with all three present, so no forged header appears — and
+   whether a *consumer* renders them as breaks is §9.1 item 6's question, not this code's. An
+   attempt to escape them anyway was abandoned: three editors in sequence inserted the literal
+   characters into the regex, which TypeScript cannot hold, and the change is a hardening against a
+   speculative renderer rather than a demonstrated exploit. **Recorded as a residual, deliberately
+   not fixed.**
+4. **V-02 vs. case and whitespace.** `Origin: null` was the only exempted value and the exemption is
+   gone entirely, so `NULL`, `null ` and every other spelling now reach `new URL()`, throw, and are
+   refused. There is no remaining special case to slip through.
+5. **The credential hoist vs. header spelling.** `x-api-key` is no more CORS-safelisted than
+   `authorization`, so the browser attacker cannot reach the session store through either.
+
+### 11.3 What this session did not do
+
+- **It did not establish independence**, which is the whole point of a falsification pass. §9.1
+  item 3 remains open and should be run by an agent that has not seen this conversation.
+- **It did not re-audit the fixes' *documentation***, only their behaviour.
+- **F-05's digest is a residual worth naming.** The dropped-directive message now reports
+  `sha256:<12 hex>` of the directive. For a short directive in a known format that digest is
+  brute-forceable offline by anyone holding the trace — which is a smaller exposure than the
+  verbatim text it replaced, but not zero, and it is the same 48-bit-prefix property recorded at
+  `marker.ts:10-18` as audit L9.

@@ -31,6 +31,16 @@ sessions including an independent falsification pass. Findings are cited by thei
   No entry mode reached this today — the MCP session store is never populated — so it was filed as
   latent. It becomes live for any embedder that hands a populated Gateway store to
   `createMcpServer({ sessionStore })`, which the option exists to invite.
+- **The egress splice resolves a JSON key written with an escape (security review V-03).**
+  V-01's fix made the scan last-match-wins, which handled *literal* duplicate keys. It still
+  compared the undecoded source slice against `'content'` — but `"content"` **is** `content`
+  to `JSON.parse`, so the parser resolved the duplicate to the escaped key's value while the
+  scanner matched only the literal one, and V-01's exact corruption returned by another route.
+  Reproduced end to end *after* V-01 was fixed. The key is decoded with `JSON.parse` now, which is
+  the only comparison that cannot disagree with the parser downstream.
+
+  Found by falsifying V-01's own fix. Worth noting how it survived: the fix passed four unit tests
+  and an end-to-end reproduction, all of which shared the fix's assumption about what a key is.
 - **The egress splice no longer overwrites the wrong value when a message repeats a JSON key
   (security review V-01).** `findMemberValue` returned the **first** match while `JSON.parse`
   resolves a duplicate name to the **last** — and the pipeline optimizes what the parser produced,
