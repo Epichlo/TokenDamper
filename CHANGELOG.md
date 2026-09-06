@@ -31,6 +31,30 @@ sessions including an independent falsification pass. Findings are cited by thei
   No entry mode reached this today — the MCP session store is never populated — so it was filed as
   latent. It becomes live for any embedder that hands a populated Gateway store to
   `createMcpServer({ sessionStore })`, which the option exists to invite.
+- **A signal no longer truncates the MCP output stream (audit OX-L8).** `process.exit()` discards
+  whatever a stream still holds, so `tokendamper mcp` exiting the instant `stop()` returned lost
+  any JSON-RPC frame still buffered. Shutdown now waits for the output stream to report its write
+  flushed, under a 2 s cap.
+
+  **Measured end to end, because the platform decides whether this exists at all.** Node's stdout
+  is synchronous for pipes on Windows and Linux and asynchronous on macOS, and the buffer only
+  overflows on a large frame. Driving the real `tokendamper mcp` on Linux — a 900 kB response with
+  SIGINT delivered mid-stream — **365,696 bytes arrived and the final frame did not parse**,
+  against **900,819 bytes and a whole frame** with the fix. On Windows the same payload was never
+  truncated.
+
+  This was previously recorded rather than fixed, and the recorded reason was verifiability: SIGINT
+  could not be exercised from the suite, so the change would ship unverified, and the fix
+  contemplated then — dropping the forced exit to let the loop drain — risked hanging on Ctrl+C.
+  Both halves are answered. The exit is still forced, merely deferred until the stream reports a
+  flush or the cap fires, so a stuck consumer cannot wedge shutdown; and
+  `test/unit/cli/sigint-flush.test.ts` pins the ordering deterministically by holding the write
+  callback rather than waiting on a clock. **All three of its cases fail against the unfixed
+  handler**, which is what makes them worth having.
+
+  One approach measured and rejected: awaiting `server.stop()`. `stop()` is `(): void`, so the
+  await yields one microtask, and a microtask does not run the I/O loop that drains a pipe — it
+  delivered **146,176 bytes of 1,000,046, byte for byte identical to no fix at all**.
 - **The egress splice resolves a JSON key written with an escape (security review V-03).**
   V-01's fix made the scan last-match-wins, which handled *literal* duplicate keys. It still
   compared the undecoded source slice against `'content'` — but `"content"` **is** `content`

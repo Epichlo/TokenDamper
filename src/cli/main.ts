@@ -53,22 +53,50 @@ export function runCli(
         config,
       });
 
-      // `process.exit(0)` below can truncate a stdout frame the server has just written, because
-      // it does not wait for pending writes to flush — audit OX-L8.
+      // A signal must not cut the output stream short — audit OX-L8.
       //
-      // Recorded rather than fixed, and the reason is verifiability, not size. The fix is to stop
-      // forcing the exit — `server.stop(); process.stdin.pause(); process.exitCode = 0;` — and let
-      // the loop drain. But `stop()` only removes the `data` listener; it does not pause or unref
-      // stdin, so whether the process then exits at all depends on stream state this file does not
-      // control, and the failure mode of getting it wrong is `tokendamper mcp` hanging on Ctrl+C.
-      // Delivering SIGINT to exercise that is not something the suite can do here, and shipping an
-      // unverified change to a shutdown path to fix a rare truncated final frame is the wrong
-      // trade. See `docs/audit-remediation-status.md`.
+      // `process.exit()` does not wait for writes already handed to a stream, so exiting the
+      // instant `stop()` returns discards whatever is still buffered. This was recorded rather
+      // than fixed for a stated reason — "delivering SIGINT is not something the suite can do
+      // here", so the change would ship unverified — and the fix contemplated at the time,
+      // dropping the forced exit and letting the loop drain, carried a real risk of `tokendamper
+      // mcp` hanging on Ctrl+C instead.
+      //
+      // **Measured before writing, because the platform decides whether this bug exists at all.**
+      // Node's stdout is synchronous for pipes on Windows and Linux and asynchronous on macOS,
+      // and the buffer only overflows on a large frame. Spawning a child that writes one frame
+      // and exits the way this handler does:
+      //
+      //   payload 1 MB, piped   | Windows: 1000046/1000046 complete
+      //                         | Linux:    146176/1000046 TRUNCATED  <- 85% of the response lost
+      //   payload 1 KB / 100 KB | both: complete (it fits the pipe buffer)
+      //
+      // So the defect is real, and it is worst exactly where it matters: a large MCP response is
+      // the one a client cannot afford to lose half of.
+      //
+      // **The obvious fix does not work, and was measured too.** Awaiting `server.stop()` — the
+      // shape this repository's other Lane A worktree reached for — delivers **146176 bytes, byte
+      // for byte the same as no fix at all**: `stop()` is `(): void`, so the await yields one
+      // microtask, and a microtask does not run the I/O loop that drains a pipe.
+      //
+      // What works is asking the stream itself. An empty `write` queues behind everything already
+      // pending, so its callback is the stream saying "your bytes have reached the OS": measured
+      // 1000046/1000046 complete on Linux. The timeout is what answers the original objection —
+      // a consumer that never reads cannot wedge shutdown, because the exit happens anyway after
+      // 2 s. `unref` keeps the timer itself from holding the loop open.
+      let exiting = false;
+      const exitNow = (): void => {
+        if (exiting) return;
+        exiting = true;
+        process.exit(0);
+      };
       const shutdown = () => {
         server.stop();
         process.removeListener('SIGINT', shutdown);
         process.removeListener('SIGTERM', shutdown);
-        process.exit(0);
+        const cap = setTimeout(exitNow, 2000);
+        cap.unref?.();
+        io.stdout.write('', () => exitNow());
       };
 
       process.on('SIGINT', shutdown);
