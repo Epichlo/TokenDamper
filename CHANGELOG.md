@@ -304,6 +304,35 @@ fixes. Findings are cited by their report ID.
   the operative access control and this is a POSIX guarantee; the README now says so, and says
   that the report embeds full content.
 
+### Changed
+- **The README is restructured, and every figure in it was re-measured against the built
+  artifact.** It now leads with a worked example and three Mermaid diagrams — the pipeline, the
+  planner's three plan shapes, and the validation gate — before the reference material, and the
+  caveats are gathered into one *What it does not do* section rather than scattered as retractions.
+  No behaviour changes; this is a documentation edit.
+
+  **Two measured claims in the old text did not survive re-running them**, which is the reason
+  this entry exists rather than a bare "docs" line:
+
+  - The knapsack feature bullet read "31 files in, **15 pruned, 20,540 tokens saved**" for
+    `optimize ./src/core --max-input-tokens 4000`. Re-run against v1.7.3 that is 34 files and
+    13 pruned for 17,823 tokens — **and the run falls back**, on 19 `CONSTRAINT_DIRECTIVE_LOST`
+    plus drift at 0.42 against the 0.40 gate, so the caller receives **0.00%**. The figure was
+    `pruning:topology-pruner`'s own stage metric quoted as a result. That is invariant 10's shape
+    in the documentation: a number that reads as an outcome but describes something upstream of
+    the gate. It is now written up under *It will not save you from a comment-heavy codebase*,
+    with the fallback shown.
+  - A first draft of the replacement claimed that undeclared TypeScript over stdin "falls back".
+    It does not: `languageSupport.noneSupported` is true, `compression:token-hashing` finds no
+    eligible item and skips it, and `fallbackUsed` stays `false` at a silent 0%. Caught by
+    reading the trace instead of the token delta, before it shipped.
+
+  Also corrected against source: the config example's `configSchemaVersion` is `1.1`, not
+  `1.0.0`; `TOKENDAMPER_PLANNER_MODE` accepts `pass_through` only, and is now documented;
+  Python over stdin is detected by the content probe without `--language`, which the old text
+  implied it was not. The npm `latest` tag is recorded as **1.7.2** against this repository's
+  `v1.7.3` — a tag here does not imply a registry version.
+
 ## [v1.7.3] - 2026-09-01
 
 **Read this if anything you own parses the trace.** `DriftCoverage.symbolBearingItems` changes
