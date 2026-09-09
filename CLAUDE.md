@@ -193,6 +193,28 @@ and takes precedence over budget-derived knapsack selection.
 
 ## Where the project actually is (read this first)
 
+**The plan is `docs/superpowers/specs/2026-09-09-tokendamper-v2-roadmap-design.md`, decided in
+DECISIONS §75, scheduled in `ROADMAP.md`.** Four releases, named rather than numbered (§53):
+
+- **R1 — ship the backlog. It blocks everything, and it is where the project actually is.**
+  `npm view tokendamper version` returns **1.7.2** while tags run to **v1.7.3**, and
+  `CHANGELOG.md` `[Unreleased]` holds the whole 2026-08-30 security remediation (§73–§74)
+  including S-04's behavioural change. **Check the registry, not the tag list** — this file has
+  warned about that since v1.7.1 and it is live again.
+- **R2 — the constraint gate's two open axes, plus the per-file latency harness that does not
+  exist.** Both are preconditions for *measuring* R3–R4, not features competing with them.
+- **R3 — the `ParserAdapter` seam and the Deep path on the four languages that already work.**
+  No new dependency, no new language, no reduction change. The deliverable is a measurement.
+- **v2.0.0 — `tokendamper-deep` ships**, N languages reduce, and `--mode` is withdrawn
+  (`optimize|bench` today, where `optimize` is the identity and `bench` duplicates the positional
+  command) so the name can mean `fast|deep`.
+
+**Deep mode is a language-coverage feature, not a precision one, and §75 records why the two
+obvious alternatives were rejected on measurement.** The lexer is not the binding constraint on
+reduction — the constraint gate is, at 24% of TypeScript fallbacks and 18 of 20 Go — so building
+a parser to reduce more would be BM25 and MMR a third time. And §46's refusal to wire
+`ts.createSourceFile` is **not** reversed: the Fast path's claim stays bracket/quote integrity.
+
 **v1.2.0 shipped 2026-08-11** — tagged, GitHub release, and published to npm as `tokendamper@1.2.0`
 (`latest`), carrying Phase 1c and the three decisions the audit deferred. `DECISIONS.md` §36–§48
 carries the reasoning; `docs/audit-remediation-status.md` is the index and is the doc kept current.
@@ -207,7 +229,7 @@ with **zero** new fallbacks and **zero** files that stopped reducing; 522 rows a
 because subdivision is confined to the ceiling path. Current measured baseline: python file
 **17.95%**, typescript file **18.52%** — status doc §2, not the figures a prior session may quote.
 
-**v1.7.3 shipped 2026-09-01** — §71: `DriftCoverage.symbolBearingItems` counts symbols
+**v1.7.3 was tagged 2026-09-01 and is _not_ on npm — the registry serves 1.7.2.** §71: `DriftCoverage.symbolBearingItems` counts symbols
 rather than validator coverage. **A patch number that moves a trace field on 254 of 580 corpus
 rows**, numbered that way because `outputSha` is identical on all 580 and stdout does not
 move — the change is confined to the trace. Anything parsing `driftCoverage` should treat
@@ -399,11 +421,18 @@ MMR's premise fits *conversational* redundancy (the same file pasted twice, repe
 results), which is Gateway traffic; the Gateway plans only `session-dedup`, and exact duplicates
 are already handled there.
 
-**Candidates with preconditions that do hold today:** widen elision beyond TS/JS/Python (H2
-measured 3 of 17 languages reducible, now 4 with Go — the largest real-world gain available, and
-taken); per-item drift, to
-finish what Phase 1c started; sub-region elision, which is what would make
-`--target-reduction-ratio` adhere tightly rather than partially.
+**Candidates with preconditions that do hold today — and two of the three this list used to
+carry have since closed.** ~~Per-item drift~~ was closed *without implementing* (§51: the only
+non-attributable drift failure accounts for 0 of 117 corpus fallbacks). ~~Sub-region elision~~
+shipped as v1.4.0 (§50). Both stayed on this list after they closed, which is the small version of
+the failure §55 is a monument to — **an open item is a claim about the current build and it
+expires like any other.**
+
+What remains is **widening elision**, and it is now the spine: H2 measured 3 of 17 languages
+reducible, 4 with Go, and §75 is the decision to stop hand-writing one lexer per language. Still
+open and *not* on the spine: sub-statement elision inside a control-flow block (18 of 576 rows
+still exceed 50% achieved) and bundle-scoped drift (a bundle failing on drift alone falls back
+whole). §8 of the design doc lists every held item with its disposition.
 
 ## Known bugs — historical per-issue record
 
@@ -742,6 +771,10 @@ whether a model acts on a forged header, and the concurrency and timing axes are
 
 **`docs/audit-remediation-status.md`** — current audit state, measured baseline, what is next.
 Start here for anything audit-related; it is the doc kept current.
+
+**`docs/superpowers/specs/2026-09-09-tokendamper-v2-roadmap-design.md`** — the road to v2.0.
+Start here for anything *feature*-related. Its §8 enumerates every open item with a disposition,
+including the ones deliberately not scheduled, and its §9 says what is not established.
 
 `ARCHITECTURE.md` (canonical, frozen) · `ROADMAP.md` · `DECISIONS.md` · `CHANGELOG.md` ·
 `max_audit.md` (the audit itself — note several of its *reachability* claims were measured wrong;

@@ -1,6 +1,11 @@
 # TokenDamper Product Roadmap — v1.1.0 → v2.0.0
 
-**Baseline:** **v1.7.0** (shipped 2026-09-01 — **`oxaudit.md` closed in full**: **§70** the last
+**Baseline:** **v1.7.3** — *tagged, and the registry is one release behind it.* `npm view
+tokendamper version` returns **1.7.2**, and `CHANGELOG.md` `[Unreleased]` holds the whole
+2026-08-30 security-review remediation (**§73–§74**, findings S-01–S-04) including S-04's
+behavioural change. **Shipping that is R1**, and it precedes every feature below. On top of
+**v1.7.2** (the build narrows to `tsconfig.build.json`; the package goes 508 → 223 entries),
+**v1.7.1** (`oxaudit.md` closed in full) and **v1.7.0** (**§70** the last
 four findings, three of them decisions — bench stops executing dataset code, an exposed Gateway
 bind must be authenticated, Origin/Host validation, and two inert CLI dials documented), on top
 of **v1.6.1** (tagged 2026-08-30, GitHub release only, never published to npm — **§61** Go
@@ -87,13 +92,33 @@ v1.1.0 (tag @ 807f6f0) — never published to npm
        ├── v1.4.0  SHIPPED 2026-08-12 — sub-region elision; the target adheres (§50)
        ├── v1.5.0  SHIPPED 2026-08-12 — a comment narrates as well as instructs (§52)
        │
-       ├── unreleased — M7 (§54) and the LOW table (§55).
-       │      max_audit.md closed in full. Number assigned at ship time (§53).
+       ├── v1.6.0 · v1.6.1 · v1.7.0 · v1.7.1 · v1.7.2 · v1.7.3
+       │      max_audit.md, oxaudit.md and the security review all closed.
        │
-       └── v2.0.0: Enterprise Gateway, Remote MCP & Guardrails  [B answered: experimental]
-              a major signals BREAKING, not queue position — §53
+       └── THE ROAD TO v2.0 — named R1–R4, numbered at ship time (§53)
+             │
+             ├── R1  ship the backlog ─────────► npm matches the tag
+             │       v1.7.3 is tagged; npm has 1.7.2; [Unreleased] holds
+             │       the security remediation. Blocks everything.
+             │
+             ├── R2  constraint gate (2 axes, two-sided)
+             │       + per-file latency harness ──► a trustworthy instrument
+             │       Blocks R3–R4's *numbers*, not their code.
+             │
+             ├── R3  ParserAdapter seam + Deep path, 4 existing languages,
+             │       staged negative control ────► a backend, checked where
+             │       we can still hand-check it. Blocks R4 absolutely.
+             │
+             └── v2.0.0  tokendamper-deep + grammars; --mode fast|deep,
+                    old --mode withdrawn. A major signals BREAKING — §53
 
-  unnumbered — Granular Sub-Query Re-hydration & MCP Tool Extension
+  held — MCP over Streamable HTTP/SSE · LiteLLM guardrail · Prometheus
+       ↩ Moved off v2.0.0 2026-09-09. MCP-over-HTTP has no premise problem
+          and is the strongest candidate for the release after 2.0; the
+          other two instrument a path that saves 0 bytes cross-turn by
+          design (invariant 8). Unscheduled, not closed.
+
+  held — Granular Sub-Query Re-hydration & MCP Tool Extension
        ✅ Buildable: M5b shipped in Wave 2, so the base rehydration path
           works. What remains is designing the targeted-match response
           shape. It held v1.5.0 and lost it to work that finished first.
@@ -103,10 +128,11 @@ v1.1.0 (tag @ 807f6f0) — never published to npm
           1,486 pairs above its 0.90 threshold. It gets a number when its
           preconditions hold, not before.
 
-  unnumbered — AST Code Folding ("Fast" vs "Deep") & Cache Alignment
-       ⛔ Holds no version number. Fast mode is substantially already shipped
-          in `elision/regions.ts`; cache alignment needs a caller-supplied
-          `cl100k_base` encoder before 1,024-token quantization means anything.
+  ~~unnumbered — AST Code Folding ("Fast" vs "Deep") & Cache Alignment~~
+       ↪ Replaced 2026-09-09 by the R1–R4 spine above. Deep mode is a
+          LANGUAGE-COVERAGE feature, not a precision one. The cache-alignment
+          half was never part of it and lives with Milestone 8, where its
+          exact-tokenizer precondition still binds.
 ```
 
 ---
@@ -291,6 +317,10 @@ elision is what closes that and is the next piece of work
 
 ### What to do instead — preconditions verified as holding
 
+> **Item 1 below is what became the R1–R4 spine.** Widening elision was the largest measured gain
+> available and it shipped for Go; the spine is that same argument continued past the point where
+> hand-writing one lexer per language stops scaling. Items 2–4 stand as written.
+
 1. ~~**Widen elision beyond TypeScript/JavaScript and Python.**~~ **Shipped — §59, §60, §61.**
    Elision reduces **4 of 17** languages now. Application Go measures **27.46%** at target 0.3
    and the stdlib 19.42%, against this repo's TypeScript at 21.22%. The original entry read:
@@ -423,9 +453,12 @@ reduction figure buys back.
 
 ---
 
-## Unreleased — `max_audit.md` Closed In Full
+## v1.6.0 — `max_audit.md` Closed In Full — **SHIPPED 2026-08-16**
 
-Not a feature release, and it holds no number until it ships (§53).
+**This header read "Unreleased — holds no number until it ships (§53)" until 2026-09-09.** It
+shipped as v1.6.0 on 2026-08-16 and the Version Summary has said so since; the section header did
+not, which is §53's rule working exactly as intended right up to the moment the number existed
+and nobody came back to write it down.
 
 - **M7 (§54)** — the Gateway forwards the caller's bytes. Elided content is spliced into the
   original body instead of the body being rebuilt with `JSON.stringify`, which had been rewriting
@@ -442,77 +475,217 @@ that L7 is inert — 0 of 45 Python corpus files have a blank line after a `def`
 
 ---
 
-## Unnumbered — AST Code Folding ("Fast" vs "Deep") & Cache Alignment
+## The Road to v2.0 — R1 through R4
 
-> **⚠ Re-scoped by audit. Fast mode is substantially already shipped.** This release was written
-> as though body folding did not exist. It does: `selectElisionRegions` (`elision/regions.ts:382-384`)
-> already folds function bodies on TypeScript, JavaScript and Python, and `FUNCTION_HEADER`
-> (`regions.ts:50`) is precisely the "distinguishes top-level declarations from control-flow
-> blocks" discriminator this release schedules as new work — it is combined with
-> `CONTROL_FLOW_HEADER` to exclude `if`/`try`/class bodies. The audit rates this among the
-> project's genuinely good work (`max_audit.md` §4.4). **Re-derive Fast mode as an increment over
-> `regions.ts`, not as a new subsystem**, and measure what is missing before scheduling it.
+> **Design doc: `docs/superpowers/specs/2026-09-09-tokendamper-v2-roadmap-design.md`**
+> (2026-09-09). That document carries the measurements, the staged negative control, the risks
+> and the list of what is *not* established. This section is the schedule.
 >
-> Two further corrections, **both since superseded — read the updates, not the originals:**
-> - ~~**`cache_control` injection is blocked on question A (H5)**~~ — **no longer.** Prefix
->   locking is reachable since §43; `optimize` takes multiple paths and directories. The
->   remaining precondition is a different one and it still binds: 1,024-token quantization is
->   only meaningful with `isExact: true`, which needs a caller-supplied `cl100k_base` encoder.
->   The default `EnhancedHeuristicTokenizer` has 24% mean absolute error, so boundary placement
->   under it is approximate by construction.
-> - ~~**The `R_AST = 1.0` target below is not the guarantee it appears to be**~~ — **the
->   arithmetic it describes was fixed.** `R_struct` is no longer pinned at 1.0 for code: §40
->   computes it over `extractContentMarkers`, which excludes `filepath:`, and a ratio whose
->   before-set is empty no longer votes at all — its weight is redistributed. For code
->   `S_k = 1 - R_AST`, so the maximum symbol loss that can pass fell from **66.7% to 40%**.
->   `R_AST` still defaults to 1.0 on an empty symbol set, but §28 and §33 turned that case into
->   a refusal rather than a silent pass. State folding's retention target against the current
->   metric; the "post-C1" caveat is satisfied.
+> **It replaces "AST Code Folding ("Fast" vs "Deep") & Cache Alignment", which occupied this
+> slot.** That section was written as though body folding did not exist — it does, and the
+> correction had already been made in place. What replaces it is a different feature wearing the
+> same name: **Deep mode is a language-coverage feature, not a precision feature.** The *cache
+> alignment* half was never part of it and is unaffected; it lives with Milestone 8, where its
+> one precondition still binds.
+>
+> **The releases are named R1–R4, not numbered (§53).** A number is a fact about what shipped.
+> `v2.0.0` is the exception a major always is.
 
-**Core objective:** dual-mode context compression, and exact provider prompt-cache alignment where the tokenizer allows it.
+**Deep is how the language list stops being hand-written.** Elision reduces **4 of 17** probed
+languages; every other bucket measures **0.00%**. Each of the four cost a hand-written lexer, a
+symbol extractor and a region scanner — landed in that order for the safety reason §56 measured,
+and roughly 1,400 lines apiece. That does not scale to Rust, Java, C#, C++, Ruby, Kotlin, Swift
+and PHP. One tree-sitter grammar supplies all three seams from one artifact:
 
-### User-facing configuration
-```json
-{
-  "planner": {
-    "mode": "fast"
-  }
-}
-```
-or `--mode fast` / `--mode deep` on the CLI.
+| what a language needs today | where Deep gets it |
+|---|---|
+| `extractSymbols` coverage (§59) | named declaration nodes |
+| an `AstValidator` (§60) | `ERROR` / `MISSING` nodes in the parse tree |
+| a region scanner (§61) | body node byte ranges |
 
-- **Fast mode** (default): sub-millisecond execution, zero external runtime dependencies.
-- **Deep mode:** surgical, full-grammar folding for complex or heavily-nested source.
+- **Fast** — the shipped, zero-dependency lexer path. Default. TS/JS/Python/Go/JSON.
+- **Deep** — opt-in tree-sitter (WASM), shipped in a **companion package** so core keeps its zero
+  runtime dependencies. The same seam pattern as `TokenizerAdapter` / `createTiktokenAdapter`:
+  core ships the interface and does not bundle an implementation.
 
-### Fast mode: Declaration Boundary Detector + brace-depth tracker
-- The existing validators (`ts-validator.ts`, `python-validator.ts`) only track a bracket/quote stack for syntax-balance checking — they have no concept of "this brace opens a function body" vs. an `if`/`try`/object-literal block. Folding needs a dedicated **Declaration Boundary Detector**: a lightweight regex/heuristic layer on top of the existing brace-depth stack that distinguishes top-level function/class/interface/method declarations from control-flow blocks.
-- Folds non-dirty declaration bodies into signature stubs:
-```typescript
-export function processOrder(order: Order): Promise<Result> {
-  /* ... [TokenDamper Folded Body] ... */
-}
-```
-- Target: ~80% token reduction per file, 100% AST-symbol retention ($R_{\text{AST}} = 1.0$), zero runtime dependencies.
+### Two payoffs rejected on measurement, recorded so they are not re-proposed
 
-### Deep mode: optional formal AST parser module
-- Opt-in plugin (`@typescript-eslint/parser` / Python `ast`) for users who need full grammatical precision on edge cases (multiline decorators, nested closures).
-
-### `cache_control` ephemeral breakpoint injection
-- Automatically inject Anthropic `cache_control: {"type": "ephemeral"}` markers at 1,024-token boundaries after prefix locking.
-- **Exact mode:** requires the caller to construct `createTiktokenAdapter()` (v1.1.0) with
-  their own `cl100k_base`-compatible encoder — TokenDamper does not bundle one. Only then
-  does `isExact === true` and boundary placement become precise.
-- **Best-effort mode (default):** the zero-dependency `EnhancedHeuristicTokenizer`
-  (`isExact: false`) is what runs unless a caller has wired up their own encoder — boundaries
-  are approximate. State this explicitly to users; don't imply the default estimator
-  delivers exact placement.
-
-### Performance verification targets
-- **Benchmark target (via `src/bench`):** Fast Mode `<1ms`/file; Deep Mode `~15ms`/file. Unvalidated until built — treat as targets, not committed numbers.
+- ~~**Deep reduces more on the four languages we already have.**~~ The lexer is not the binding
+  constraint. Go's fallbacks are **18 of 20** `CONSTRAINT_DIRECTIVE_LOST`; TypeScript's are **15
+  of 62** — the same gate, and not a parse failure. Built for this reason it would be BM25 and
+  MMR a third time: correct code, no observable effect.
+- ~~**Deep makes validation a real syntax guarantee.**~~ §46 decided against wiring
+  `ts.createSourceFile` on cost, and that decision is not reversed here. The Fast path's claim
+  stays **bracket/quote integrity**, and `test/unit/validator-guarantee.test.ts` stays as
+  written. If Deep's guarantee is ever advertised, that test, the README table and CLAUDE.md's
+  opening paragraph change together — which is what the test exists to force.
 
 ---
 
-## Unnumbered — Granular Sub-Query Re-hydration & MCP Tool Extension
+### R1 — Ship the backlog
+
+**Nothing in this plan gets built first.** `npm view tokendamper version` returns **1.7.2** while
+tags run to **v1.7.3**, and `CHANGELOG.md` `[Unreleased]` holds the entire security-review
+remediation (§73–§74, findings S-01–S-04) *including a behavioural change* — S-04 makes the
+Gateway refuse an upstream redirect with a 502 — plus the README restructure. None of it has
+reached a consumer.
+
+This is the failure the `release` skill exists to prevent and it is currently live: work landed
+on `main` after the tag, which is the sequence that cost v1.6.1 and v1.7.0 their publishes.
+
+- **Scope:** run the `release` skill. S-04 changes behaviour for any caller whose upstream
+  redirects, so this is a **minor** under this project's usual threshold, not a patch.
+- **Measurement:** none. R1 adds no code, and §12.9 already recorded why S-03 and S-04 move no
+  optimized byte.
+- **Exit:** `npm view tokendamper version` matches the tag, and `npm pack --dry-run` was read
+  *before* publishing rather than after.
+
+---
+
+### R2 — The constraint gate, and a clock
+
+Two items, and both are **preconditions for measuring R3–R4 honestly** rather than features
+competing with them. R4's whole claim is a number, and that number comes from an instrument which
+today has a known bias and no time axis at all. Ship grammars first and every new-language figure
+is measured through a gate that discards a quarter of its files for a reason unrelated to the
+grammar — then has to be re-measured against a moved baseline. This is §56's ordering argument
+pointed at measurement instead of safety.
+
+**The constraint gate — two axes §52 left open.** `NARRATIVE_DIRECTIVE_REGEX`
+(`src/core/constraints/directives.ts:139`) requires a preceding `have`/`has`/`had` or a following
+past-tense verb, so it matches only perfect and past constructions of two keywords.
+
+- **Axis A — present-tense descriptive `never`/`always`.** `// Should never happen, but we` — the
+  comment dominating Go's fallbacks — is present tense and falls straight through. So is
+  `is always deterministic`.
+- **Axis B — the other seven alternations, used descriptively.** `IMPERATIVE_KEYWORD_SOURCE`
+  (`directives.ts:3`) has nine; §52 touched two. `do not support`, `required by`, `critical path`
+  are outside its scope entirely.
+
+**Measured two-sided, and both sides gate the merge.** *Recovery:* net fallbacks recovered per
+language, per-row over the frozen corpus, with **zero** new fallbacks — §52's standard.
+*Retention:* a planted-directive corpus where every document carries a genuine imperative that
+must survive, staying at **100% caught**. A change that passes recovery and fails retention is
+refused whatever reduction it buys — this gate protects content, and no reduction figure buys
+back a deleted instruction.
+
+**Report per language, never as an aggregate.** §52 gained 6pp on TypeScript and **zero** on
+Python because all four recovered files were this repo's own narrative source, and this repo is
+~94% TypeScript. That is the corpus-bias trap arriving as a favourable number, which is the
+direction that is hardest to notice.
+
+**The latency instrument.** The `<1ms` / `~15ms` targets are unvalidated and *cannot* be
+validated today: `stageDurationsMs` (`src/core/engine/index.ts:102-123`) is per stage, and there
+is no per-file wall clock anywhere. Extend `tools/corpus-harness/measure.js` with a timing run —
+**a separate invocation from the byte-identity run**, because wall clock is noisy and
+byte-identity is the harness's load-bearing deterministic output. Mixing them makes a green
+identity result depend on machine load, the mistake `ast-sla-determinism.test.ts` exists to
+prevent for `slaExceeded`.
+
+- **Exit:** both axes measured two-sided per language with retention at 100%; a pinned latency
+  baseline for the current engine on the frozen corpus, which is what R3 and R4 compare against.
+
+---
+
+### R3 — The `ParserAdapter` seam, and a negative control
+
+**No new dependency, no new language, no new grammar, no reduction change.** The deliverable is a
+*measurement*: that a second backend, wired through the same gates, reproduces the shipped one.
+
+This is the release that is easy to skip and must not be. **A backend first trusted on a language
+nobody can hand-check is a backend nobody has checked.**
+
+```
+src/core/parser/
+  types.ts      ParserAdapter, ParsedTree, DeclarationNode
+  registry.ts   registerParserBackend / resolveParserBackend
+```
+
+`ParserAdapter` answers the three questions a language needs and nothing else: `symbols()`,
+`check()`, `regions()`. Three constraints are not negotiable:
+
+- **The surface stays synchronous.** `AstValidator.validate` is sync and so is every caller down
+  the chain; `web-tree-sitter` needs `await Parser.init()` and `await Language.load()`. All async
+  work happens **at registration**, before the pipeline runs. Making the validator async would
+  ripple through the engine, the fallback resolver and three adapters to buy nothing.
+- **Invariant 1 is per-configuration.** Same input, same *mode*, same bytes out. Fast and Deep
+  differing on one file is the feature, not a violation — `ARCHITECTURE.md` gets that sentence
+  when the seam lands, because the invariant reads as absolute today.
+- **`selectValidator` (`src/core/validation/ast/index.ts:96-133`) becomes a registry lookup with
+  the hardcoded chain as its fallback, and the chain stays first.** Fast must not change because
+  Deep exists, and the shipped path must not depend on a registry being populated.
+
+**The negative control is staged, because byte-identity is the wrong assertion throughout.** A
+parser legitimately finds better regions than a lexer; demanding identity everywhere would forbid
+the improvement the feature exists for. §59/§60/§61 staged Go the same way:
+
+| step | assertion | precedent |
+|---|---|---|
+| **1. symbols** | Sets equal or superset; per-file `S_k` **must not fall** on a hand-elided control | §59 — a falling `S_k` means the backend manufactures symbols body elision cannot destroy, which is §56's hazard |
+| **2. validator** | Disagreement rate over **≥5,000 real files per language**, **every disagreement inspected**; corpus output **byte-identical** | §60 — 9,181 Go files, TS lexer flagged 73, Go lexer 1, and all 72 were read. Plus its inverse control, because **0 findings is also what a validator that examines nothing reports** |
+| **3. regions** | Output **may** differ; every differing row classified as improvement or regression; **fallbacks must not rise**; latency against R2's baseline | §61 — the main corpus was 574/574 identical *because it contained no Go*; the evidence came from a separately frozen corpus |
+
+Steps 1 and 2 are true negative controls and their assertion is identity. Step 3 is not, and
+pretending otherwise would either block the feature or launder a regression as an improvement.
+
+- **Exit:** all three steps on all four existing languages; Deep reachable via `--mode deep`, with
+  every difference from Fast read by a person.
+
+---
+
+### R4 — v2.0.0
+
+`tokendamper-deep` ships, N new languages reduce, and the flag surface is rationalized. See the
+v2.0.0 section below for what breaks.
+
+**Packaging — core stays at zero runtime dependencies.** `packages/deep/` gets its own tsconfig
+and its own publish; **core's build is not touched.** CLAUDE.md is explicit and the reason is
+load-bearing: `rootDir: "."` is what keeps output at `dist/src/...`, and a src-only build without
+it relocates every file and breaks `main`/`bin` **while still compiling**.
+`published-package-scope.test.ts` extends to both tarballs, and core's must not grow — it went
+508 → 223 entries and 3.08 → 1.65 MB in v1.7.2, which is what a companion package protects.
+
+**Discovery:** `--mode deep` attempts an optional `require('tokendamper-deep')`. Absent, it fails
+with a message naming the install command — **not** a silent downgrade to Fast. A mode that
+silently does something else is invariant 10: a green result from a path that never ran.
+
+**Choosing the languages by measurement, not by grammar availability.** §56 is the template and
+it is not optional:
+
+1. Measure the **elidable ceiling** — bytes inside body nodes clearing `MIN_REGION_BYTES` (104)
+   and `isSubstantiveRegion`.
+2. **On at least two independent corpora per language.** Go read **65.36%** on application code
+   and **54.78%** on the stdlib, and the cause was checked rather than averaged — 21.7% of stdlib
+   source bytes sit in files with no elidable region, mostly generated tables. One corpus would
+   have overstated Go by ten points.
+3. Ship only what clears a floor, **with its own measured fallback rate** — not one borrowed from
+   another language, which is what §56's 23–28% projection did and what §9 of the status doc
+   records as not established even though it landed.
+
+Reference points: TypeScript 57.78% ceiling → **24.56%** achieved at 0.3; Go app 65.36% →
+**27.46%**; Go stdlib 54.78% → **19.42%**; Python (pip) 46.88% → **22.73%**.
+
+Candidate set, unranked until measured: Rust, Java, C#, C++, Ruby, PHP, Kotlin, Swift, C.
+
+**Test files are the larger prize and nothing here has ever counted them.** `_test.go` is 53 MB
+against 36 MB of source in the Go app corpus, at **92.22%** elidable, measuring **26.88%** against
+source's 14.42%. Measure test and source separately for every candidate.
+
+**Two extension lists are a precondition, and they are deliberately separate.**
+`isCodeExtension` (`src/core/model/constructors.ts:1181`) is a *classification* rule deciding
+whether a validator is selected at all (audit H2); `INGESTIBLE_EXTENSIONS` (`src/cli/ingest.ts`)
+is a *selection* rule for directory walking. Do not merge them to fix one. The gap is narrower
+than it looks: `rs`, `java`, `c`, `cpp`, `h`, `hpp` are **already** in `isCodeExtension`, making
+Rust, Java, C and C++ the cheapest candidates; `rb`, `kt`, `swift`, `php`, `cs` need both lists
+extended. **The trap:** since §33–§34, falling outside `isCodeExtension` produces an honest
+*refusal* rather than a silent deletion — so a Ruby file with a working grammar and a missing
+extension reduces 0% while every gate reports correctly, which reads exactly like the safety
+machinery working. The per-language step-1 control must assert the file was classified as code
+before asserting anything about its symbols.
+
+---
+
+## Held — Granular Sub-Query Re-hydration & MCP Tool Extension
 
 > **✅ Unblocked — M5b shipped in Wave 2 (DECISIONS §44).** This release adds a `query` field to
 > `rehydrate_context`, and that tool's session path had **never worked**: its regex
@@ -552,38 +725,64 @@ Update `TOOL_DEFINITIONS` in `src/adapters/mcp/tools.ts` — this matches the to
 
 ---
 
-## v2.0.0 — Enterprise Gateway, Remote MCP & Proxy Guardrails
+## v2.0.0 — Deep Mode: N Languages, One Seam
 
-> **⚠ Question B is answered (DECISIONS §41) — and the answer was "experimental", which is not
-> the same as "proceed".** The half that was broken is fixed: `tokendamper exec` reaches its own
-> gateway, and the mode says what it actually does. `TOKENDAMPER_GATEWAY_TOKEN` was written at
-> `exec.ts:58` and read nowhere in `src/`, so the server 401'd every request the documented
-> command produced. Interception is by **base URL**, not `HTTP_PROXY` — it is an origin server
-> and implements neither absolute-form request URIs nor `CONNECT`, and the README now says so
-> rather than leading with the Gateway.
->
-> **The half that is not fixed is the premise, deliberately (invariant 8).** Cross-turn dedup of
-> a sole copy still saves **0 bytes**, because the consumer is a stateless provider API with no
-> rehydration mechanism, so the marker is deletion rather than reference.
-> `test/integration/gateway-dedup-reality.test.ts` pins that: if a cross-turn saving ever
-> appears, either resolvability was implemented or the gate was relaxed. Within-payload dedup
-> does save, and is the one path C4 was live on.
->
-> **The measurement half of the sequencing constraint is now satisfied (M7, DECISIONS §54).**
-> `rawTokens`/`optimizedTokens` came from `summary.tokenEstimate` — the bundle render — and now
-> come from the bytes actually forwarded, so a `/metrics` endpoint would export a number that
-> means what it says. The three stale render-based fields were removed rather than left beside
-> the new ones.
->
-> **The premise half still stands.** A Prometheus endpoint on a pass-through that saves nothing
-> cross-turn instruments nothing. What is worth exporting today is within-payload dedup and the
-> fallback rate — both real — not a cross-turn saving that invariant 8 says will be zero.
+> **⚠ This section was "Enterprise Gateway, Remote MCP & Proxy Guardrails" until 2026-09-09, and
+> the change is a re-scope, not a reshuffle.** The design doc
+> (`docs/superpowers/specs/2026-09-09-tokendamper-v2-roadmap-design.md`) puts Deep mode here and
+> moves the ecosystem items to *held*. The old section's own premise note is why: the Gateway
+> saves **0 bytes** cross-turn by design (invariant 8), so **a Prometheus endpoint on a
+> pass-through that saves nothing cross-turn instruments nothing.** That was true when it was
+> written and nothing since has changed it. The three items are listed at the bottom, unscheduled
+> rather than deleted, because an item in no table reads as done (§55, status-doc §6 and §8).
 
-**Core objective:** enterprise-grade proxy integration and multi-agent remote access.
+**Core objective:** `tokendamper-deep` ships, and the language list stops being hand-written.
+R4 above is the work; this section is what makes the number a major.
 
-- **MCP over Streamable HTTP/SSE:** extend `McpStdioServer` (`src/adapters/mcp/server.ts`) to support SSE and HTTP POST transports alongside stdio — enables remote containers, Cursor, Claude Code, and cloud agents over the network. (Note: this is distinct from the Gateway's existing upstream-SSE-passthrough — that's unrelated proxy behavior already in place, not MCP transport.)
-- **LiteLLM & AI proxy guardrail plugin:** in-process pre-call guardrail integration (`guardrails: tokendamper`) for LiteLLM and open-source AI proxy gateways.
-- **Gateway observability suite:** Prometheus `/metrics` endpoint + structured JSON access logging in `src/gateway/server.ts`.
+### What breaks
+
+A major must break something. It breaks these.
+
+**`--mode` is withdrawn and the name reused.** Today it accepts `optimize | bench`
+(`src/cli/main.ts:709-720`), where `optimize` is the identity — nothing branches on it — and
+`bench` sets `command = 'bench'`, which the positional `tokendamper bench` already does. **The
+flag is fully redundant with the positional command.** At 2.0 it accepts `fast | deep` and
+nothing else; `--mode optimize` and `--mode bench` become parse errors naming the positional
+form. This is §62's disposal of `--mode explain` and `--trace-output` — a dial that reported
+success and did nothing — with the difference that the name is then reused for something real.
+
+**Config lands as `engine.mode`, not `planner.mode`.** `planner.defaultMode` already means the
+planner mode (`session_dedup` vs. budget-derived knapsack) and `--planner-mode` is a separate
+flag accepting only `pass_through` (`main.ts:742-748`). Deep vs Fast is an **engine backend**,
+not a planner mode, and the two axes stay visibly distinct.
+
+**A config file carrying `mode: "optimize"` keeps loading.** §62's precedent — a config still
+carrying `traceOutput` loads. L1/§55 made an unrecognized enum *value* a hard error, but that
+rule is for values the code branches on; a **withdrawn key** is ignored with a startup warning
+naming the replacement. Anything else turns a documentation change into an outage.
+
+### What does not break
+
+**The Gateway stays experimental and invariant 8 stands.** Cross-turn dedup of a sole copy still
+saves 0 bytes, and `test/integration/gateway-dedup-reality.test.ts` still pins it. Deep mode does
+not touch that path.
+
+### Held — the ecosystem items, unscheduled rather than closed
+
+Listed with their preconditions so the next person does not re-derive them.
+
+- **MCP over Streamable HTTP/SSE** — extend `McpStdioServer` (`src/adapters/mcp/server.ts`) with
+  SSE and HTTP POST transports alongside stdio, enabling remote containers and cloud agents.
+  (Distinct from the Gateway's upstream-SSE passthrough, which is unrelated proxy behaviour
+  already in place.) **No premise problem — this one is simply not on the spine, and is the
+  strongest candidate for the release after 2.0.**
+- **LiteLLM & AI proxy guardrail plugin** — in-process pre-call guardrail
+  (`guardrails: tokendamper`). Premise unexamined since the Gateway was labelled experimental.
+- **Gateway observability suite** — Prometheus `/metrics` plus structured JSON access logging.
+  **The measurement half is fixed** (M7, §54: `rawTokens`/`optimizedTokens` come from the bytes
+  forwarded rather than the bundle render, so a metric would now mean what it says). **The
+  premise half stands.** What is worth exporting today is within-payload dedup and the fallback
+  rate — both real — not a cross-turn saving invariant 8 says will be zero.
 
 ---
 
@@ -608,13 +807,25 @@ remediation track was inserted. Corrected below; the numbering now matches the c
 | v1.5.0 | Prior release | §52 — a comment narrates as well as instructs | 4 fallbacks fixed, 0 new, 572/576 identical | Shipped 2026-08-12 |
 | v1.6.0 | Prior release | §54 M7 (wire bytes + wire metrics) · §55 the LOW table · §57 the block-hash false positive | 576/576 rows identical; 677 tests green | Shipped 2026-08-16 |
 | v1.6.1 | Prior release | §59–§61 Go elides · §62 two withdrawn dials · §64 `debtScore` measures · §65–§68 four Gateway defects · §63/§69 the float pool and the OX LOW table | 574/574 rows identical on the main corpus; application Go 27.46% | Tagged 2026-08-30 — GitHub release only, never published to npm |
-| **v1.7.0** | **Baseline (shipped)** | §70 — the last four OX findings: bench stops executing dataset code (M15), an exposed bind must be authenticated (M8), Origin/Host validation (M9 + L13), two inert dials documented (M13) | `oxaudit.md` closed in full; 95 files / 859 tests green | **Shipped 2026-09-01** |
+| v1.7.0 | Prior release | §70 — the last four OX findings: bench stops executing dataset code (M15), an exposed bind must be authenticated (M8), Origin/Host validation (M9 + L13), two inert dials documented (M13) | `oxaudit.md` closed in full; 95 files / 859 tests green | Shipped 2026-09-01 |
+| v1.7.1 · v1.7.2 | Prior releases | A test fix; then the build narrows to `tsconfig.build.json` while typecheck stays on `tsconfig.json` | Package 508 → 223 entries, 3.08 → 1.65 MB | Shipped 2026-09-01 — **v1.7.2 is what npm serves** |
+| **v1.7.3** | **Baseline (tagged)** | §71 — `symbolBearingItems` counts symbols; a trace field moves on 254 of 580 rows | `outputSha` identical on all 580 | **Tagged; NOT published.** See R1 |
+| **R1** | **Ship the backlog** | The 2026-08-30 security remediation, §73–§74 (S-01–S-04) — currently sitting in `[Unreleased]` | npm matches the tag; `npm pack --dry-run` read first | ⏭ **Next, and it blocks everything** |
+| **R2** | **A trustworthy instrument** | The constraint gate's two open axes (two-sided) + the per-file latency harness that does not exist | Retention side at 100%; a pinned latency baseline | Preconditions for R3–R4's *numbers* |
+| **R3** | **The seam** | `ParserAdapter` + Deep path on the 4 existing languages; staged negative control | Steps 1–2 byte-identical; step 3 classified | No new dependency, no new language |
 | *unnumbered* | Selection quality | BM25 + graph hybrid scorer, dual-path MMR | `<10ms` pipeline selection | ⛔ **Both preconditions measured false** — holds no number |
-| *unnumbered* | Folding & cache | Fast (zero-dep) vs Deep (AST) mode, `cache_control` | `<1ms` Fast / `~15ms` Deep | ⛔ Fast largely shipped; cache needs an exact tokenizer — **holds no number** |
-| *unnumbered* | Retrieval | `rehydrate_context` with sub-query matching | Targeted line extraction | ✅ Unblocked (M5b shipped); response shape still to design |
-| v2.0.0 | Ecosystem | Streamable HTTP/SSE MCP, LiteLLM plugin, Prometheus metrics | High-throughput multi-agent proxy | ⚠ B answered *experimental*. M7 done (§54), so metrics now measure the wire; the premise — nothing to instrument cross-turn — still stands |
+| ~~*unnumbered*~~ | ~~Folding & cache~~ | **Split 2026-09-09.** Folding → the R1–R4 spine (Deep is coverage, not precision); `cache_control` → Milestone 8 | — | ↪ **Replaced.** Fast was already shipped in `elision/regions.ts` |
+| *held* | Retrieval | `rehydrate_context` with sub-query matching | Targeted line extraction | ✅ Unblocked (M5b shipped); response shape still to design |
+| **v2.0.0** | **Deep mode** | `tokendamper-deep` ships; N languages reduce; `--mode fast\|deep` takes the name and the old `--mode optimize\|bench` is withdrawn | Per language: measured ceiling on **two** corpora + its own fallback rate | Re-scoped 2026-09-09 from Ecosystem |
+| *held* | Ecosystem | Streamable HTTP/SSE MCP, LiteLLM plugin, Prometheus metrics | High-throughput multi-agent proxy | ↩ Moved off v2.0.0. MCP-over-HTTP has no premise problem; the other two instrument a path saving 0 bytes cross-turn (invariant 8) |
 | Milestone 8 | Caching | MCP Schema Deduplication & Cache-Aligned Knapsack | 100% Provider Cache Hit Rates | ⚠ A answered — knapsack reachable; needs an exact tokenizer |
 | Milestone 9 | Guardrails | Agent Loop Circuit Breaking & Critical Atom Recall Tracking | $S_k \le 0.40$ enforcement | ⚠ C1 + H6 both shipped; re-derive against the current metric |
+
+**The design behind R1–R4 is
+`docs/superpowers/specs/2026-09-09-tokendamper-v2-roadmap-design.md`**, whose §8 enumerates every
+open item — including the ones *not* on the spine — with a disposition. That enumeration is the
+point: an item in no table reads as done, which is how this project twice declared an audit
+closed while a whole severity band sat unscheduled (§55, status-doc §6 and §8).
 
 **Not in this table, because it is not a release: `docs/audit-remediation-status.md` §7 carries
 the near-term work.** Four of the five items it listed are now closed — sub-region elision
@@ -660,6 +871,24 @@ explains why a remembered number is worse than none. Source: `max_audit.md` Appe
 **Core objective:** Ensure provider cache hit rates via strict prefix pinning.
 - **MCP Schema Deduplication:** Convert tool definitions into deterministic, sorted JSON structures at prompt position 0. Use content-addressed hashes to anchor MCP schemas without blowing up context windows or cache blocks.
 - **Cache-Aligned 0/1 Knapsack Allocation:** Evaluate item weights in 1,024-token quantizations. Ensure items selected by the knapsack solver preserve exact prefix horizon ordering.
+
+### `cache_control` ephemeral breakpoint injection
+
+> **Moved here 2026-09-09** from "AST Code Folding ("Fast" vs "Deep") & Cache Alignment", which
+> the R1–R4 spine replaced. It is recorded rather than dropped: an item in no table reads as done
+> (§55). It was never part of the folding work — the two shared a section heading and nothing else.
+
+- Automatically inject Anthropic `cache_control: {"type": "ephemeral"}` markers at 1,024-token
+  boundaries after prefix locking.
+- **Exact mode** requires the caller to construct `createTiktokenAdapter()` with their own
+  `cl100k_base`-compatible encoder — TokenDamper does not bundle one. Only then is
+  `isExact === true` and boundary placement precise.
+- **Best-effort mode (default):** the zero-dependency `EnhancedHeuristicTokenizer`
+  (`isExact: false`) is what runs unless a caller wired up an encoder, so boundaries are
+  approximate. **State this to users; do not imply the default estimator delivers exact
+  placement.** Its mean absolute error is 24% — worse than the `ceil(len/4)` it replaced (17%).
+- **This is the same precondition the Milestone 8 header states**, which is why the two now sit
+  together instead of being tracked in two places.
 
 ## Milestone 9: Safety & Drift Guardrails
 

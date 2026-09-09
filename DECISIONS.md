@@ -5651,3 +5651,147 @@ travelling somewhere no check has seen.
 less useful than a named kind. The table covers every shape Node 22 and 26 produce, so the
 degradation is prospective; if a future Node adds a form, the message gets vaguer rather than
 leakier, which is the direction to fail in.
+
+---
+
+## 75. v2.0 Is Deep Mode, and Deep Mode Is About Coverage Rather Than Precision
+
+**Date:** 2026-09-09 · **Status:** accepted, nothing implemented · **Scope:** what v2.0.0 is, and
+the order the work goes in
+
+Design doc: `docs/superpowers/specs/2026-09-09-tokendamper-v2-roadmap-design.md`. This entry is
+the decision; that document is the schedule, the risks and the measurements.
+
+Recorded before implementation, on §56's precedent — the ordering argument below is the whole
+value of the entry, and it is worth nothing written afterwards.
+
+### The decision
+
+**v2.0.0 is `tokendamper-deep`: an opt-in tree-sitter backend that makes the supported-language
+list stop being hand-written.** It was "Enterprise Gateway, Remote MCP & Proxy Guardrails" in
+`ROADMAP.md` since the document was written.
+
+Elision reduces **4 of 17** probed languages and every other bucket measures **0.00%**. Each of
+the four cost a hand-written lexer, a symbol extractor and a region scanner, in that order for the
+reason §56 measured, and roughly 1,400 lines apiece. One grammar answers all three questions:
+named declaration nodes are the symbols, `ERROR`/`MISSING` nodes are the validity check, body node
+byte ranges are the regions.
+
+### Why not the Gateway, when the section had held that slot for a year
+
+**Because that section already contained the argument against itself and nobody acted on it.** It
+carries a note saying a Prometheus endpoint on a pass-through that saves nothing cross-turn
+instruments nothing — true when written, and invariant 8 has not moved since. M7 (§54) fixed the
+half that was fixable: `rawTokens`/`optimizedTokens` now come from the bytes forwarded rather than
+the bundle render, so a metric would mean what it says. The premise half is not a defect to fix,
+it is what the mode *is*.
+
+The three ecosystem items are **held and listed**, not deleted, and MCP-over-Streamable-HTTP is
+named as having no premise problem at all — it is simply not on this spine, and is the strongest
+candidate for the release after 2.0. An item in no table reads as done (§55).
+
+### Two payoffs rejected, and the measurements that rejected them
+
+Both are the obvious things "add a real parser" is supposed to buy. Neither survives contact with
+figures already in this repository, and both are recorded so the next session does not re-derive
+them from first principles and reach the opposite answer.
+
+- **"Deep reduces more on the four languages we already have."** The lexer is not the binding
+  constraint on reduction. Go's fallbacks are **18 of 20** `CONSTRAINT_DIRECTIVE_LOST` (§61);
+  TypeScript's are **15 of 62**, the same gate at the same rate (§56 expected Go's lower comment
+  density to make it fire *less*; density was the wrong variable). Neither is a parse failure.
+  Built on this argument, Deep would be BM25 and MMR a third time — ~1,000 lines of correct code
+  with no observable effect, the H5 condition.
+- **"Deep makes validation a real syntax guarantee."** §46 decided against wiring
+  `ts.createSourceFile` on cost — `typescript` is a *dev* dependency, and promoting it to runtime
+  buys install size and parse latency against a lexer that runs in single-digit milliseconds.
+  **That decision is not reversed here.** Deep's languages do get a real parse as a side effect,
+  but the Fast path's advertised guarantee stays **bracket/quote integrity**, and
+  `test/unit/validator-guarantee.test.ts` — which asserts that English prose *passes* the
+  TypeScript validator — stays exactly as written. If Deep's guarantee is ever advertised, that
+  test, the README table and CLAUDE.md's opening paragraph change in one commit, which is the
+  thing the test exists to force.
+
+### Core stays at zero runtime dependencies
+
+`web-tree-sitter` and the grammar WASM ship in a **companion package**, `packages/deep/`, with its
+own tsconfig and its own publish. Core ships the `ParserAdapter` seam and no implementation — the
+same shape as `TokenizerAdapter` / `createTiktokenAdapter`, which is this codebase's existing
+answer to "capability without a dependency".
+
+The alternative considered and refused was `optionalDependencies` in core. It is a better install
+story and it costs the zero-dependency claim plus download weight for every consumer of a mode
+most will not use — against a package that went 508 → 223 entries and 3.08 → 1.65 MB in v1.7.2
+specifically to be small.
+
+**`--mode deep` without the package fails with a message naming the install command.** It does not
+silently fall back to Fast. A mode that quietly does something else is invariant 10: a green
+result from a path that never ran.
+
+### The ordering, which is the part that is easy to get wrong
+
+**R1 ship the backlog → R2 the instrument → R3 the seam → R4 = v2.0.0.**
+
+**R2 comes before the feature because R4's entire claim is a number.** That number is produced by
+an instrument which today has a known bias and no time axis:
+
+- The constraint gate discards ~24% of files on both measured languages for a reason unrelated to
+  any grammar. §52 exempted *narrative* `never`/`always` — perfect and past-tense constructions of
+  two of the nine alternations in `IMPERATIVE_KEYWORD_SOURCE`. Present-tense descriptive use
+  (`// Should never happen`) and the other seven (`do not support`, `required by`) fall straight
+  through.
+- There is **no per-file wall clock anywhere**. `stageDurationsMs` is per stage. The `<1ms` Fast /
+  `~15ms` Deep targets in `ROADMAP.md` are not merely unvalidated, they are unvalidatable.
+
+Ship grammars first and every new-language figure is measured through that, then has to be
+re-measured against a moved baseline. **This is §56's ordering argument pointed at measurement
+instead of at safety**, and it is the same shape: doing the cheap thing first is not a tax on the
+feature, it is a precondition for knowing whether the feature worked.
+
+**The constraint-gate work is gated on a two-sided measurement, and the retention side gates the
+merge independently.** Recovery is fallbacks recovered with zero new ones, §52's standard.
+Retention is a planted-directive corpus staying at 100% caught. A change that passes recovery and
+fails retention is refused whatever it buys, because this gate protects content and no reduction
+figure buys back a deleted instruction. Both are reported **per language**: §52 gained 6pp on
+TypeScript and **zero** on Python, because all four recovered files were this repository's own
+narrative source and this repository is ~94% TypeScript.
+
+### R3 exists because a backend has to be checked where checking is still possible
+
+R3 ships the seam and the Deep path for the four languages that already work — **no new
+dependency, no new language, no new grammar, no reduction change.** Its deliverable is a
+measurement, not a capability.
+
+**A backend first trusted on a language nobody here can hand-check is a backend nobody has
+checked.** §60 is the precedent and the standard: 9,181 real Go files, the TypeScript lexer
+flagging 73 and the Go lexer 1, and **all 72 disagreements read individually** — they were raw
+strings. Plus its inverse control, because 0 findings is also what a validator that examines
+nothing reports.
+
+**The control is staged, and this is a correction to the obvious design.** Byte-identity is the
+right assertion for the symbol and validator steps and the **wrong** one for regions: a parser
+legitimately finds better spans than a lexer, so demanding identity there forbids the improvement
+the feature exists for. Step 3's assertion is instead that every differing row is classified as
+improvement or regression, that fallbacks do not rise, and that latency is reported against R2's
+baseline. §59/§60/§61 staged Go exactly this way and the staging is why the hazard was caught.
+
+### What this does not establish
+
+- **No language beyond the four has had its elidable ceiling measured.** The candidate list is a
+  list of grammars that exist, not of languages known to reduce. §3.7 of the design doc is where
+  that becomes a fact, on two independent corpora per language — one corpus overstated Go by ten
+  points.
+- **`web-tree-sitter`'s initialization cost is unmeasured, and it is paid per process.** For a CLI
+  invoked once per file it lands on every run and could dominate the parse. This is a plausible
+  reason for Deep to be unusable at the CLI while fine at the Gateway and MCP, and it is not yet
+  known.
+- **That one grammar really supplies all three seams is an argument from node types, not a
+  measurement.** Symbols and validity are near-certain. **Regions are the uncertain one** — the
+  body node of a Rust `impl` block or a C++ member function may not correspond to what
+  `isSubstantiveRegion` assumes. R3 is where that assumption meets evidence, on languages where
+  the answer is already known.
+- **G2's effect size is unknown.** 24% and 18-of-20 are the *share of fallbacks* the gate accounts
+  for, not the reduction recoverable by narrowing it. Some of those files fall back for a second
+  reason as well.
+- **No corpus was run for this entry**, because nothing was implemented. Everything numeric here
+  is cited from §52, §56, §59–§61 or the status doc, and none of it was re-measured today.
