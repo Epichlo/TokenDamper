@@ -3,8 +3,8 @@
 **Baseline:** **v1.7.4** — *cut 2026-09-19; R1 is done when the registry says so, not when the
 tag exists.* It ships the whole 2026-08-30 security-review remediation (**§73–§74**, findings
 S-01–S-04) including S-04's behavioural change, and carries **v1.7.3** with it, which was tagged
-2026-09-01 and never published. **Check `npm view tokendamper version`** — it must read
-**1.7.4**. On top of
+2026-09-01 and never published. `npm view tokendamper version` reads **1.7.4** as of 2026-09-19,
+**so R1 is closed.** On top of
 **v1.7.2** (the build narrows to `tsconfig.build.json`; the package goes 508 → 223 entries),
 **v1.7.1** (`oxaudit.md` closed in full) and **v1.7.0** (**§70** the last
 four findings, three of them decisions — bench stops executing dataset code, an exposed Gateway
@@ -542,9 +542,14 @@ This was the failure the `release` skill exists to prevent, and it was live: wor
   patch over moved output, and the rule itself is unchanged for the next release.
 - **Measurement:** none. R1 added no code, and §12.9 already recorded why S-03 and S-04 move no
   optimized byte.
-- **Exit:** `npm view tokendamper version` reads **1.7.4**, and `npm pack --dry-run` was read
-  *before* publishing rather than after. **The publish is the user's step (2FA), so the exit
-  condition is not satisfied by this repository alone.**
+- **Exit: met 2026-09-19.** `npm view tokendamper version` reads **1.7.4**, `dist-tags.latest` is
+  1.7.4, and `npm pack --dry-run` was read *before* publishing rather than after. Confirmed by
+  unpacking the published tarball: its `dist/src` is **byte-identical** to a local build, and its
+  `CHANGELOG.md` carries the promoted `[v1.7.4]` section.
+- **The publish is the user's step (2FA), and the first attempt went out as 1.7.3** from a checkout
+  that had not pulled the merge. Registry 1.7.3 is deprecated; the `release` skill now carries the
+  directory check and the banner check that would have caught it. **The repository passing every
+  check is not the same as the right bytes being published.**
 
 ---
 

@@ -7,8 +7,11 @@ Last updated 2026-09-19. **Cut as v1.7.4 (2026-09-19) — R1 of the road to v2.0
 2026-08-30 security review, every F, V and S finding (DECISIONS §73–§74), plus three
 `oxaudit.md` tooling items (OX-L8, L17, L18) and the README restructure. It also delivers
 **v1.7.3**, which was tagged 2026-09-01 and never published, so a consumer on 1.7.2 receives
-both. **The npm publish is the user's step (2FA)** — until `npm view tokendamper version`
-reads 1.7.4, R1 is not done, and a tag does not settle it. Suite at cut: **936 passing / 2
+both. **The npm publish is the user's step (2FA).** `npm view tokendamper version` reads **1.7.4**
+as of 2026-09-19, so **R1 is closed** — confirmed by unpacking the published tarball, not by
+reading the number. **The first publish attempt went out as 1.7.3** from a checkout that had not
+pulled the merge; that version is deprecated, and a registry version no longer implies its tag.
+Suite at cut: **936 passing / 2
 skipped across 99 files**, typecheck, lint and build clean; `npm pack --dry-run` read first at
 223 files / 1.9 MB unpacked. **Shipped as v1.7.0** (with a test fix in v1.7.1)**:** the last four `oxaudit.md` findings — M15, M8,
 M9 (with L13) and M13 — DECISIONS §70, §1 below, which **closes `oxaudit.md` in full**. Note

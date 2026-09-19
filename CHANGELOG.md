@@ -23,6 +23,14 @@ never published; its section below is left as the record of what was tagged rath
 here. `DriftCoverage.symbolBearingItems` changes meaning there, on **254 of 580** corpus rows —
 read that section if anything you own parses the trace.
 
+**Registry `1.7.3` is deprecated, and it is not the `v1.7.3` tag.** This release was first
+published from a checkout that had not pulled the release merge, so npm read the *old*
+`package.json` and put the pre-merge tree on the registry as **1.7.3** — the security
+remediation under a number whose git tag holds a tree **663 insertions** away. Nothing unsafe
+shipped and no consumer was stranded, because 1.7.3 had never been published before; the number
+is simply ambiguous, so it is deprecated in favour of 1.7.4. **`npm view tokendamper version` is
+still the only thing that says what a consumer gets.**
+
 **Numbered a patch although output moved. That is an explicit call at ship time, not the rule
 changing.** §53's threshold for a minor is *"the same command over the same input emits different
 bytes"*, and four changes here clear it: S-02 and F-06 escape envelope labels, S-03 and F-05
