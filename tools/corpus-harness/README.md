@@ -19,12 +19,51 @@ node tools/corpus-harness/measure.js <out-dir> --variant baseline
 
 # 3. patch dist/, re-measure under another label, diff the two jsonl files
 node tools/corpus-harness/measure.js <out-dir> --variant candidate
+
+# timing is a SEPARATE invocation — never folded into the run above
+node tools/corpus-harness/timing-run.js <out-dir> --variant baseline
 ```
 
 `<out-dir>` should be a scratch directory outside the repo. Never point it inside `src/`.
 
 `seam2.js <out-dir>` is a one-off analysis, not part of the loop — it scores candidate
 `looksLikeMarkdown` rules against the frozen corpus.
+
+## Timing (`timing-run.js`)
+
+Per-file latency. **A separate invocation on purpose** — wall clock is noisy and
+machine-dependent, byte-identity is deterministic and is what the rest of this harness exists
+to produce. Folding timing into `measure.js` would make a green identity result depend on
+machine load.
+
+It reports **three** numbers, because one would be wrong:
+
+| | |
+|---|---|
+| `cold` | git workspace cache cleared per file — models the **CLI**, a fresh process each time |
+| `warm` | cache retained — models the **Gateway** and **MCP**, which are long-lived |
+| `fixed` | spawned wall clock minus `cold` — Node boot plus module load |
+
+Measured `cold` p50 **159.1ms** against `warm` p50 **3.8ms** — a **41.48x** ratio, caused by
+`globalGitCache` (2000ms TTL). Timing N files in one process and calling the result "per-file
+latency" under-reports CLI cost forty-fold. See DECISIONS §76 for the baseline.
+
+It drives the engine **in-process through `runCli`** with captured streams, so the computation
+is the CLI’s rather than an approximation of it — the ~151ms of per-process fixed cost would
+otherwise swamp any engine difference. That buys resolution and costs a guarantee, so **every
+file is also run spawned and the output bytes compared**. One disagreement refuses the whole
+report.
+
+### Three things it refuses to report
+
+Each was added because the run that produced it looked fine:
+
+- an **empty sample** — a p95 of `0` over no observations reads as a measurement
+- a **coverage gap** between the two routes, rather than comparing the intersection
+- a run where **no stage was attributed**. The first baseline run did exactly this on all 292
+  files: `timeOnce` read `result.trace` and `runCli` returns an exit code, so the per-stage
+  table was empty beside a plausible end-to-end number. The instrument had the failure mode it
+  was built to detect.
 
 ## What it guarantees
 
