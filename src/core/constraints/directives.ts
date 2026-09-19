@@ -127,32 +127,100 @@ export const IMPERATIVE_DIRECTIVE_REGEX = new RegExp(IMPERATIVE_KEYWORD_SOURCE, 
  * between describing a constraint and stating one is blurry there, and a wrong call silently
  * deletes a real directive. Under-narrowing costs reduction; over-narrowing costs content.
  */
-const NARRATIVE_KEYWORDS = String.raw`(?:never|always)`;
 
 /** Irregular past tenses that no `-ed` rule will catch. */
 const PAST_TENSE_IRREGULARS = String.raw`(?:did|was|were|had|got|made|took|ran|read|said|meant|came|went|saw|knew|found|left|felt|kept|held|told|became|began|broke|brought|built|chose|drew|drove|fell|flew|gave|grew|hit|kept|knew|lay|led|lost|met|paid|put|sent|set|shot|shut|sold|spent|stood|struck|swore|threw|understood|withdrew|wrote|worked|wanted|needed|existed|reached|shipped|fired|failed|passed|stopped|started|used|meant)`;
 
 /**
- * Matches a narrative use: `has always read`, `never did`, `could never have worked`,
- * `never reached the wire`.
+ * Verbs with no agent, so no imperative form to be confused with.
+ *
+ * You cannot instruct something not to `happen`. These are unaccusative: the subject is not
+ * doing anything, so `never happen` can only be a description. That is the same standard §52
+ * set — provable from the words present rather than inferred from tone — and it is what exempts
+ * `// Should never happen, but we ...`, the shape recorded as dominating Go's fallbacks.
+ *
+ * Deliberately short. Every addition is a verb somebody could turn out to use imperatively, and
+ * this gate protects content.
  */
-const NARRATIVE_DIRECTIVE_REGEX = new RegExp(
-  String.raw`(?:\b(?:have|has|had)\s+(?:\w+\s+){0,2}${NARRATIVE_KEYWORDS}\b)` +
-    `|` +
-    String.raw`(?:\b${NARRATIVE_KEYWORDS}\s+(?:have|has|had)\b)` +
-    `|` +
-    String.raw`(?:\b${NARRATIVE_KEYWORDS}\s+(?:\w+ed|${PAST_TENSE_IRREGULARS})\b)`,
+const NON_AGENTIVE_VERBS = String.raw`(?:happen|occur|exist|arise|matter)`;
+
+/** `have`/`has`/`had` within two words before the keyword: `has always read`. */
+const PERFECT_BEFORE = new RegExp(String.raw`\b(?:have|has|had)\s+(?:\w+\s+){0,2}$`, 'i');
+
+/** A copula within two words before: `is always deterministic`, `are never exact`. Axis A. */
+const COPULA_BEFORE = new RegExp(
+  String.raw`\b(?:is|are|isn't|aren't|was|were|wasn't|weren't)\s+(?:\w+\s+){0,2}$`,
   'i',
 );
 
+/** `never have`, `never had`. */
+const PERFECT_AFTER = /^\s+(?:have|has|had)\b/i;
+
+/** `never reached`, `never did` — §52's past-tense test, applied to one occurrence. */
+const PAST_AFTER = new RegExp(String.raw`^\s+(?:\w+ed|${PAST_TENSE_IRREGULARS})\b`, 'i');
+
 /**
- * Whether this keyword occurrence is narrative rather than imperative.
+ * A third-person `-s` verb: `never returns`, `always expires`. Axis A, and the largest group —
+ * 99 of 322 unexempted occurrences on the frozen corpus.
+ *
+ * **An English imperative is a bare infinitive and cannot take `-s`.** So the `-s` is a proof of
+ * mood rather than a guess at one, which is why the imperative form of the same verb keeps
+ * firing: `never return a placeholder` instructs, `never returns a placeholder` describes.
+ *
+ * `is`/`as`/`has`/`was` are excluded because they are not this pattern — `never is` is a copula
+ * construction and `never has` is the perfect, both handled above.
+ *
+ * **The `[^s]s` is load-bearing and a failing negative control put it there.** A naive `\w+s`
+ * also matches bare verbs that merely end in `s`, and the first version of this rule exempted
+ * `always pass the ledger explicitly, or turn 2 falls back` — a real instruction, taken
+ * verbatim from this repository's own source. A third-person form is stem + `s` where the stem
+ * does not itself end in `s`, which keeps `pass`, `miss`, `cross`, `discuss`, `address` and
+ * `express` firing. `focus` is the one common single-`s` imperative that passes the shape
+ * test, so it is named.
+ */
+const THIRD_PERSON_AFTER = /^\s+(?!is\b|as\b|has\b|was\b|its\b|this\b|focus\b)\w*[^s\W]s\b/i;
+
+/** `never happen`, `never occur` — bare, because there is no imperative to collide with. */
+const NON_AGENTIVE_AFTER = new RegExp(String.raw`^\s+${NON_AGENTIVE_VERBS}\b`, 'i');
+
+/** Whether one `never`/`always` occurrence is narrative, judged from its own neighbourhood. */
+function isNarrativeOccurrence(before: string, after: string): boolean {
+  return (
+    PERFECT_BEFORE.test(before) ||
+    COPULA_BEFORE.test(before) ||
+    PERFECT_AFTER.test(after) ||
+    PAST_AFTER.test(after) ||
+    THIRD_PERSON_AFTER.test(after) ||
+    NON_AGENTIVE_AFTER.test(after)
+  );
+}
+
+/**
+ * Whether **every** `never`/`always` in this segment is narrative rather than imperative.
  *
  * Exported so the characterization tests can assert the boundary directly rather than inferring
  * it from a reduction figure two layers away.
+ *
+ * **Per occurrence, and unanimous — this is a correction to §52, not only an extension of it.**
+ * §52 tested the whole segment, so one narrative construction anywhere exempted everything in it.
+ * That was already live rather than theoretical: `the value is always set, so always check it
+ * first` lost its instruction, because `set` is a past-tense irregular. Axis A matches far more
+ * shapes, which would have turned a latent hazard into a common one.
+ *
+ * Unanimity is the same rule `extractImperativeDirectives` already applies across *keywords* —
+ * one `must` keeps the segment — now applied within the two keywords that can do both jobs. The
+ * mixed case resolves toward firing, which is the direction that cannot delete content.
  */
 export function isNarrativeUse(segment: string): boolean {
-  return NARRATIVE_DIRECTIVE_REGEX.test(segment);
+  const matches = Array.from(segment.matchAll(/\b(?:never|always)\b/gi));
+  if (matches.length === 0) {
+    return false;
+  }
+
+  return matches.every((match) => {
+    const index = match.index ?? 0;
+    return isNarrativeOccurrence(segment.slice(0, index), segment.slice(index + match[0].length));
+  });
 }
 
 /**
