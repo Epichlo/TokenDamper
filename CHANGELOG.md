@@ -12,6 +12,44 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Deep `check()`, and the validator disagreement measurement — R3 step 2 of three (DECISIONS
+  §80).** `packages/deep` reads tree-sitter's `ERROR` and `MISSING` nodes and reports them as an
+  `AstCheckResult`. Nothing on the optimize route moves: **586/586 corpus rows byte-identical**,
+  `src/` untouched. §46 and §75 stand — the Fast path's advertised guarantee is still
+  bracket/quote integrity and `validator-guarantee.test.ts` is unchanged.
+
+  **The inverse control runs per language**, because §60's second half is the one that gets
+  skipped: 0 findings is also what a validator that examines nothing reports. Brace deletion is
+  meaningless for Python, so Python gets a `def` header with its colon removed rather than a
+  control that silently proves nothing.
+
+  | language | files | rate | deep-only | fast-only |
+  |---|---|---|---|---|
+  | python | 13,897 | 8.03% | 6 | 1,110 |
+  | go | 8,251 | **0.85%** | 70 | 0 |
+  | typescript | 1,164 | 9.28% | 108 | 0 |
+  | javascript | 1,823 | 0.11% | 0 | 2 |
+
+  **Both validators are wrong, in opposite directions.** Fast rejects **1,110 valid Python
+  files** — 99.5% of them a backslash line continuation read as an unexpected indent, classified
+  across every one rather than generalised from an example; `argparse.py` compiles under CPython
+  and is rejected at L1701. Fast also rejects 2 valid `.js` files carrying JSX. And Deep rejects
+  valid source of its own, every case the **grammar lagging the language**: generic import types
+  `import("m").R<A, B>`, `global {}` nested in `declare module`, `export type *`, `abstract` as a
+  property name, Go's `new(expr)` and generic methods, Python's starred returns. Minimal repros
+  were bisected — a first pass blamed 86 TypeScript files on a construct that parses fine.
+
+  Deep is also **right twice**: two CPython `badsyntax_*` fixtures that Fast passes. Every Python
+  verdict was adjudicated against `py_compile`.
+
+  **A grammar is a versioned artifact that trails its language**, which is a failure mode this
+  project has not had before — a hand-written lexer drifts only when edited. `new(expr)` landed in
+  `golang/go` two weeks before this measurement. R4 needs a grammar-version policy.
+
+  Two of four languages miss §3.5's ≥5,000 bar (typescript 1,164, javascript 1,823) and the
+  harness prints the shortfall on every run. The Python indentation defect is worth **0 of the 10**
+  Python fallbacks on the frozen corpus — L7's lesson again, and why the survey used 13,897 files.
+
 - **The `ParserAdapter` seam, and the Deep backend's `symbols()` — R3 step 1 of three (DECISIONS
   §79).** `src/core/parser/` ships the interface and the registry and **bundles no
   implementation**, the shape `TokenizerAdapter` already uses. `selectValidator` takes an

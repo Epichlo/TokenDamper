@@ -20,16 +20,16 @@ accumulate.
 4. **`.claude/skills/measure-corpus`** and **`.claude/skills/widen-language`** — the loops. R3 is
    measurement work, so the first one is not optional.
 
-## State as of 2026-09-19
+## State as of 2026-09-20
 
 | | |
 |---|---|
-| `main` | `22f6db9` |
+| `main` | `99a7608` (R3 step 1, PR #71) |
 | npm `latest` | **1.7.4** (1.7.3 is published-but-deprecated; see CLAUDE.md) |
 | R1 | done — the backlog reached the registry |
 | R2 | done — §76 harness, §77 Axis A, §78 Axis B closed on measurement |
-| R3 | **step 1 of three done** (DECISIONS §79). Seam + `packages/deep` `symbols()`. Steps 2 and 3 open |
-| suite | 986 passing / 2 skipped across 102 files |
+| R3 | **steps 1 and 2 of three done** (§79, §80). Seam, `symbols()`, `check()`. **Step 3 open** |
+| suite | 1000 passing / 2 skipped across 103 files |
 
 ## What does **not** survive, and must be rebuilt first
 
@@ -42,30 +42,45 @@ All three lived in session-scoped temp directories and are gone:
 - **The timing baseline.** Re-run `timing-run.js`. *(Re-baselined 2026-09-19 on this machine: cold p50 **114.0ms**, warm p50 **3.3ms**, ratio **34.49x**, parity 293/293. §76’s 159.1/3.8/41.48x did not reproduce and was not expected to.)* **§76's numbers are machine-specific** —
   win32-x64, Node v26.4.0, one run, no repeated trials. Re-baseline on the machine before comparing
   anything to them.
-- **The Go corpus. Checked 2026-09-19 and it is still there** — 80 files, `gosrc` + `gostdlib`,
+- **The Go corpora — there are now two, and they are for different things.** Step 2 needed
+  volume, so `golang/go` was cloned at HEAD, sparse to `/src`, giving **8,251** files at
+  `C:/Users/ojass/AppData/Local/Temp/tdc/go`. **Clone to a short path**: the scratchpad path is
+  long enough that git fails with "Filename too long" on the pack `.keep` file, which does not
+  read as a path-length error. The 80-file tree below is the one §77 and §79 measure per-row
+  against, and is still there:
+- **The 80-file Go corpus. Checked 2026-09-19 and it is still there** — 80 files, `gosrc` + `gostdlib`,
   at the path the `go-corpus-location` memory records. Step 1 used it. Its filenames are already
   flattened, so **do not re-freeze it with `collect.js`**; generate a manifest in place instead
   (walk for `*.go`, hash, bucket by whether the path contains `gostdlib`). The main
-  `recipe.json` still has **no Go bucket and no JS bucket**, so JavaScript remains unmeasured.
+  `recipe.json` still has **no Go bucket and no JS bucket**. Step 2 measured both off-corpus;
+  what is still unmeasured is JavaScript *symbols* (step 1) on any corpus.
 
-## Where step 1 left off (2026-09-19)
+## Where steps 1 and 2 left off
 
-Read **DECISIONS §79** first; this is the two-line version.
+Read **DECISIONS §79 and §80** first; this is the short version.
 
 - **Done:** `src/core/parser/{types,registry}.ts`; `selectValidator(item, mode)` with `fast`
   never reading the registry; `packages/deep/` (`tokendamper-deep`, private, its own tsconfig,
   owns the tree-sitter dependency); `symbols()` for ts/js/python/go; `ARCHITECTURE.md`’s
   per-configuration determinism sentence. 586/586 corpus rows byte-identical.
-- **`check()` and `regions()` throw.** That is deliberate — `valid: true` and `[]` are both
-  indistinguishable from a backend that examined nothing. Step 2 replaces the first, step 3
-  the second.
+- **`regions()` throws.** That is deliberate — `[]` is indistinguishable from a backend that
+  examined the content and found nothing to elide. Step 3 replaces it. (`check()` threw for
+  the same reason until §80 implemented it.)
 - **Step 1’s assertion was rewritten against evidence.** "`S_k` must not fall" fails on 9 of
   75 files; every one is Deep declining to harvest a phantom the shipped regexes took from
   English in a comment. The criterion that holds is *a symbol Deep **has**, that Fast saw
   destroyed and Deep retained* — measured 0. `tools/corpus-harness/deep-drift-control.js`.
-- **Open, in order:** step 1 on JavaScript (no corpus exists); step 2
-  (`check()`, >=5,000 files per language, every disagreement read, plus §60’s inverse
-  control per language); step 3 (`regions()` behind `--mode deep`, which does not exist yet).
+- **Step 2 is done (§80).** `check()` reads tree-sitter `ERROR`/`MISSING` nodes. Disagreement
+  rates: python 8.03% over **13,897** files, go **0.85%** over **8,251**, typescript 9.28% over
+  1,164, javascript 0.11% over 1,823. Inverse control passes on all four — and Python’s is a
+  missing `def` colon, not §60’s brace deletion, which Python’s grammar would have accepted.
+- **Both validators are wrong and not about the same things.** Fast rejects 1,110 valid Python
+  files (99.5% backslash line continuations) and 2 valid `.js` files (JSX). Deep rejects valid
+  source wherever **the grammar lags the language** — generic import types, `export type *`,
+  nested `global {}`, Go `new(expr)` and generic methods, Python starred returns. Deep is also
+  right twice, on CPython `badsyntax_*` fixtures Fast passes.
+- **Open:** step 3 — `regions()` behind `--mode deep`, which does not exist yet. Its assertion
+  is **not** byte-identity; see §3.5 and the first trap below.
 - **One question step 1 opened and did not answer:** part of the shipped drift signal on code
   is phantom symbols from comment prose. If Deep’s symbols ever feed the live gate, drift on
   code falls toward zero and the gate stops discriminating. Decide that before wiring it.
