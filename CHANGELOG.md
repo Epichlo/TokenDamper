@@ -11,6 +11,40 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [v1.7.4] - 2026-09-19
+
+**The 2026-08-30 security remediation reaches the registry.** Every finding in
+`docs/security-review-2026-08-30.md` — the F, V and S series, across seven sessions including
+two independent falsification passes, one over the findings and one over the fixes — plus three
+`oxaudit.md` tooling items (OX-L8, L17, L18) and the README restructure.
+
+**Upgrading from the published 1.7.2 delivers v1.7.3 as well.** v1.7.3 was tagged 2026-09-01 and
+never published; its section below is left as the record of what was tagged rather than folded in
+here. `DriftCoverage.symbolBearingItems` changes meaning there, on **254 of 580** corpus rows —
+read that section if anything you own parses the trace.
+
+**Numbered a patch although output moved. That is an explicit call at ship time, not the rule
+changing.** §53's threshold for a minor is *"the same command over the same input emits different
+bytes"*, and four changes here clear it: S-02 and F-06 escape envelope labels, S-03 and F-05
+rebuild trace messages from a fixed vocabulary, and OX-L8 stops a signal truncating the MCP
+stream. The patch digit was chosen so a `~1.7.2` range picks this up without intervention,
+because it is a security release. **Do not read it as evidence that nothing moved** — v1.6.1 is
+the precedent and carries the same caveat.
+
+**What changes behaviour, before what was fixed:**
+
+- **The Gateway refuses an upstream redirect** (S-04), returning a 502 naming the status where it
+  previously followed one. Demonstrated end to end delivering `x-api-key` to a stand-in metadata
+  listener. Neither `api.openai.com` nor `api.anthropic.com` redirects an API POST, so nothing
+  anyone does today changes; an endpoint that does redirect needs its destination configured as
+  the upstream URL.
+- **A Gateway request to an unknown route no longer mints a session** (S-01) — reachable from a
+  web page, which is the attacker the origin gate exists for, because a no-cors GET sends no
+  `Origin` header at all.
+- **`GatewaySessionStore.getContent` refuses a ref shorter than 12 characters** (F-02). No
+  shipping caller is narrowed; the only producer emits a 12-character prefix.
+- **`--diff-html` writes its report `0600`** (F-04), where it previously landed at 644.
+
 Fixes from the 2026-08-30 security review (`docs/security-review-2026-08-30.md`), which ran seven
 sessions including two independent falsification passes — one over the findings, one over the
 fixes. Findings are cited by their report ID.

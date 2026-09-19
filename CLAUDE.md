@@ -196,11 +196,11 @@ and takes precedence over budget-derived knapsack selection.
 **The plan is `docs/superpowers/specs/2026-09-09-tokendamper-v2-roadmap-design.md`, decided in
 DECISIONS §75, scheduled in `ROADMAP.md`.** Four releases, named rather than numbered (§53):
 
-- **R1 — ship the backlog. It blocks everything, and it is where the project actually is.**
-  `npm view tokendamper version` returns **1.7.2** while tags run to **v1.7.3**, and
-  `CHANGELOG.md` `[Unreleased]` holds the whole 2026-08-30 security remediation (§73–§74)
-  including S-04's behavioural change. **Check the registry, not the tag list** — this file has
-  warned about that since v1.7.1 and it is live again.
+- **R1 — ship the backlog. Cut as v1.7.4 on 2026-09-19; the npm publish is the user's step.**
+  It carries the whole 2026-08-30 security remediation (§73–§74) *and* v1.7.3, which was tagged
+  and never published. **Check the registry, not the tag list** — `npm view tokendamper version`
+  is the only thing that says what a consumer actually gets, and this file has warned about that
+  since v1.7.1. **Until that command returns 1.7.4, R1 is not done.**
 - **R2 — the constraint gate's two open axes, plus the per-file latency harness that does not
   exist.** Both are preconditions for *measuring* R3–R4, not features competing with them.
 - **R3 — the `ParserAdapter` seam and the Deep path on the four languages that already work.**
@@ -229,7 +229,18 @@ with **zero** new fallbacks and **zero** files that stopped reducing; 522 rows a
 because subdivision is confined to the ceiling path. Current measured baseline: python file
 **17.95%**, typescript file **18.52%** — status doc §2, not the figures a prior session may quote.
 
-**v1.7.3 was tagged 2026-09-01 and is _not_ on npm — the registry serves 1.7.2.** §71: `DriftCoverage.symbolBearingItems` counts symbols
+**v1.7.4 was cut 2026-09-19 and ships the 2026-08-30 security remediation** — every finding in
+`docs/security-review-2026-08-30.md` (§73–§74), three `oxaudit.md` tooling items (OX-L8, L17,
+L18) and the README restructure. **It is a patch number over moved output, by explicit call at
+ship time.** S-02/F-06 escape envelope labels, S-03/F-05 rebuild trace messages from a fixed
+vocabulary, and OX-L8 stops a signal truncating the MCP stream — all of which clear §53's
+threshold for a minor. The patch digit was chosen so a `~1.7.2` range picks up a security
+release without intervention; **v1.6.1 is the precedent and carries the same caveat. Do not read
+the digit as evidence that nothing moved.** Because the registry served 1.7.2, v1.7.4 also
+delivers v1.7.3 to every consumer.
+
+**v1.7.3 was tagged 2026-09-01 and was never published on its own — it reaches consumers inside
+v1.7.4.** §71: `DriftCoverage.symbolBearingItems` counts symbols
 rather than validator coverage. **A patch number that moves a trace field on 254 of 580 corpus
 rows**, numbered that way because `outputSha` is identical on all 580 and stdout does not
 move — the change is confined to the trace. Anything parsing `driftCoverage` should treat
