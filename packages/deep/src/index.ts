@@ -1,5 +1,6 @@
 import { Language, Parser } from 'web-tree-sitter';
 
+import { issuesFromTree, type DeepIssue } from './check';
 import { DEEP_LANGUAGES, grammarWasmPath, type DeepLanguage } from './grammars';
 import { symbolsFromTree } from './symbols';
 
@@ -25,12 +26,19 @@ export { DEEP_LANGUAGES, type DeepLanguage } from './grammars';
  * plausible reason Deep could be unusable at the CLI while fine at the Gateway.
  */
 
+/** What a backend answers. Structurally compatible with core's `ParserAdapter`. */
+export interface DeepCheckResult {
+  readonly valid: boolean;
+  readonly issues: ReadonlyArray<DeepIssue>;
+  readonly durationMs: number;
+}
+
 /** Minimal structural view of what a backend must answer. Kept local to the package. */
 export interface DeepBackend {
   readonly name: string;
   readonly language: DeepLanguage;
   symbols(content: string): Set<string>;
-  check(content: string): never;
+  check(content: string): DeepCheckResult;
   regions(content: string): never;
 }
 
@@ -77,7 +85,25 @@ async function createBackend(language: DeepLanguage): Promise<DeepBackend> {
         tree.delete();
       }
     },
-    check: (): never => notImplemented('check()', language),
+    check(content: string): DeepCheckResult {
+      const started = performance.now();
+      const tree = parser.parse(content);
+      if (tree === null) {
+        // The parser declining to produce a tree at all is not a pass. Returning
+        // `valid: true` here would be the §60 failure in its purest form.
+        return {
+          valid: false,
+          issues: [{ line: 1, column: 0, message: 'Parser returned no tree', code: 'DEEP_NO_TREE' }],
+          durationMs: performance.now() - started,
+        };
+      }
+      try {
+        const issues = issuesFromTree(tree);
+        return { valid: issues.length === 0, issues, durationMs: performance.now() - started };
+      } finally {
+        tree.delete();
+      }
+    },
     regions: (): never => notImplemented('regions()', language),
   };
 }
