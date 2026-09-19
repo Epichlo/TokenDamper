@@ -607,8 +607,15 @@ of 159.1ms). Any Deep target must say which of the three it names.
 **Recorded, not fixed:** `topology-pruner` dominating cold engine time is off R2’s scope. R2
 exists to build the instrument, not to act on its first reading.
 
-- **Exit:** both axes measured two-sided per language with retention at 100%; a pinned latency
-  baseline for the current engine on the frozen corpus, which is what R3 and R4 compare against.
+- **Exit: MET 2026-09-19.** Axis A was measured two-sided per language with retention at 100%
+  (§77). Axis B was measured and **closed without implementing** (§78) — its ceiling is 1 file of
+  188, and `must` is 49% of the remaining segments and genuinely imperative, so the retention side
+  would refuse a narrowing whatever it bought. The timing baseline is pinned at corpus `fcb6718`
+  (§76). **R3 is unblocked.**
+
+  **An axis closed on measurement is not an axis deleted.** §78 names the three things that would
+  reopen it — a corpus that is not this repository and pip, a language whose comment idiom differs,
+  or the gate ceasing to be the dominant fallback cause. §51 and §55 are why that sentence is here.
 
 ---
 
@@ -836,7 +843,7 @@ remediation track was inserted. Corrected below; the numbering now matches the c
 | v1.7.1 · v1.7.2 | Prior releases | A test fix; then the build narrows to `tsconfig.build.json` while typecheck stays on `tsconfig.json` | Package 508 → 223 entries, 3.08 → 1.65 MB | Shipped 2026-09-01 — **v1.7.2 is what npm serves** |
 | v1.7.3 | Prior release | §71 — `symbolBearingItems` counts symbols; a trace field moves on 254 of 580 rows | `outputSha` identical on all 580 | Tagged 2026-09-01 — never published on its own; ships inside v1.7.4 |
 | **v1.7.4** | **R1 — ship the backlog** | The 2026-08-30 security remediation, §73–§74 (S-01–S-04) · three `oxaudit.md` tooling items · the README restructure · v1.7.3 carried with it | No corpus run — R1 adds no code | **Cut 2026-09-19.** A patch over moved output, by explicit call; publish is the user's step |
-| **R2** | **A trustworthy instrument** | **Latency harness: done** (§76). **Constraint gate Axis A: done** (§77 — 10 files recovered, 0 new fallbacks, retention 100%). **Axis B: held** | Retention side at 100%; a pinned latency baseline | Both exits met for Axis A; Axis B is the remaining axis |
+| **R2** | **A trustworthy instrument** | **DONE 2026-09-19.** Latency harness (§76) · Axis A shipped (§77 — 10 files recovered, 0 new fallbacks, retention 100%) · Axis B closed without implementing (§78 — ceiling 1 file of 188) | Retention side at 100%; a pinned latency baseline | **Exit met.** R3 unblocked |
 | **R3** | **The seam** | `ParserAdapter` + Deep path on the 4 existing languages; staged negative control | Steps 1–2 byte-identical; step 3 classified | No new dependency, no new language |
 | *unnumbered* | Selection quality | BM25 + graph hybrid scorer, dual-path MMR | `<10ms` pipeline selection | ⛔ **Both preconditions measured false** — holds no number |
 | ~~*unnumbered*~~ | ~~Folding & cache~~ | **Split 2026-09-09.** Folding → the R1–R4 spine (Deep is coverage, not precision); `cache_control` → Milestone 8 | — | ↪ **Replaced.** Fast was already shipped in `elision/regions.ts` |
