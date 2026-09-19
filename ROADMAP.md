@@ -1,9 +1,10 @@
 # TokenDamper Product Roadmap — v1.1.0 → v2.0.0
 
-**Baseline:** **v1.7.3** — *tagged, and the registry is one release behind it.* `npm view
-tokendamper version` returns **1.7.2**, and `CHANGELOG.md` `[Unreleased]` holds the whole
-2026-08-30 security-review remediation (**§73–§74**, findings S-01–S-04) including S-04's
-behavioural change. **Shipping that is R1**, and it precedes every feature below. On top of
+**Baseline:** **v1.7.4** — *cut 2026-09-19; R1 is done when the registry says so, not when the
+tag exists.* It ships the whole 2026-08-30 security-review remediation (**§73–§74**, findings
+S-01–S-04) including S-04's behavioural change, and carries **v1.7.3** with it, which was tagged
+2026-09-01 and never published. **Check `npm view tokendamper version`** — it must read
+**1.7.4**. On top of
 **v1.7.2** (the build narrows to `tsconfig.build.json`; the package goes 508 → 223 entries),
 **v1.7.1** (`oxaudit.md` closed in full) and **v1.7.0** (**§70** the last
 four findings, three of them decisions — bench stops executing dataset code, an exposed Gateway
@@ -92,14 +93,14 @@ v1.1.0 (tag @ 807f6f0) — never published to npm
        ├── v1.4.0  SHIPPED 2026-08-12 — sub-region elision; the target adheres (§50)
        ├── v1.5.0  SHIPPED 2026-08-12 — a comment narrates as well as instructs (§52)
        │
-       ├── v1.6.0 · v1.6.1 · v1.7.0 · v1.7.1 · v1.7.2 · v1.7.3
+       ├── v1.6.0 · v1.6.1 · v1.7.0 · v1.7.1 · v1.7.2 · v1.7.3 · v1.7.4
        │      max_audit.md, oxaudit.md and the security review all closed.
        │
        └── THE ROAD TO v2.0 — named R1–R4, numbered at ship time (§53)
              │
              ├── R1  ship the backlog ─────────► npm matches the tag
-             │       v1.7.3 is tagged; npm has 1.7.2; [Unreleased] holds
-             │       the security remediation. Blocks everything.
+             │       CUT as v1.7.4 (2026-09-19); carries v1.7.3 with it.
+             │       Done when `npm view` reads 1.7.4, not at the tag.
              │
              ├── R2  constraint gate (2 axes, two-sided)
              │       + per-file latency harness ──► a trustworthy instrument
@@ -524,21 +525,26 @@ and PHP. One tree-sitter grammar supplies all three seams from one artifact:
 
 ### R1 — Ship the backlog
 
-**Nothing in this plan gets built first.** `npm view tokendamper version` returns **1.7.2** while
-tags run to **v1.7.3**, and `CHANGELOG.md` `[Unreleased]` holds the entire security-review
-remediation (§73–§74, findings S-01–S-04) *including a behavioural change* — S-04 makes the
-Gateway refuse an upstream redirect with a 502 — plus the README restructure. None of it has
-reached a consumer.
+**Cut as v1.7.4 on 2026-09-19.** It carries the entire security-review remediation (§73–§74,
+findings S-01–S-04) *including a behavioural change* — S-04 makes the Gateway refuse an upstream
+redirect with a 502 — plus the README restructure, and it delivers **v1.7.3** along with it,
+which was tagged 2026-09-01 and never published.
 
-This is the failure the `release` skill exists to prevent and it is currently live: work landed
-on `main` after the tag, which is the sequence that cost v1.6.1 and v1.7.0 their publishes.
+This was the failure the `release` skill exists to prevent, and it was live: work landed on
+`main` after the tag, the sequence that cost v1.6.1 and v1.7.0 their publishes.
 
-- **Scope:** run the `release` skill. S-04 changes behaviour for any caller whose upstream
-  redirects, so this is a **minor** under this project's usual threshold, not a patch.
-- **Measurement:** none. R1 adds no code, and §12.9 already recorded why S-03 and S-04 move no
+- **Scope:** run the `release` skill. **Done.**
+- **The number was a judgement call and went against this document's own draft.** The draft said
+  minor, on S-04. It shipped as a **patch**, decided at ship time under §53: the patch digit lets
+  a `~1.7.2` range pick up a security release without intervention, which was judged to outweigh
+  the signalling. Output *did* move — S-02/F-06, S-03/F-05 and OX-L8 all clear the minor
+  threshold — so the release notes say so explicitly. **v1.6.1 is the precedent**; it too was a
+  patch over moved output, and the rule itself is unchanged for the next release.
+- **Measurement:** none. R1 added no code, and §12.9 already recorded why S-03 and S-04 move no
   optimized byte.
-- **Exit:** `npm view tokendamper version` matches the tag, and `npm pack --dry-run` was read
-  *before* publishing rather than after.
+- **Exit:** `npm view tokendamper version` reads **1.7.4**, and `npm pack --dry-run` was read
+  *before* publishing rather than after. **The publish is the user's step (2FA), so the exit
+  condition is not satisfied by this repository alone.**
 
 ---
 
@@ -809,8 +815,8 @@ remediation track was inserted. Corrected below; the numbering now matches the c
 | v1.6.1 | Prior release | §59–§61 Go elides · §62 two withdrawn dials · §64 `debtScore` measures · §65–§68 four Gateway defects · §63/§69 the float pool and the OX LOW table | 574/574 rows identical on the main corpus; application Go 27.46% | Tagged 2026-08-30 — GitHub release only, never published to npm |
 | v1.7.0 | Prior release | §70 — the last four OX findings: bench stops executing dataset code (M15), an exposed bind must be authenticated (M8), Origin/Host validation (M9 + L13), two inert dials documented (M13) | `oxaudit.md` closed in full; 95 files / 859 tests green | Shipped 2026-09-01 |
 | v1.7.1 · v1.7.2 | Prior releases | A test fix; then the build narrows to `tsconfig.build.json` while typecheck stays on `tsconfig.json` | Package 508 → 223 entries, 3.08 → 1.65 MB | Shipped 2026-09-01 — **v1.7.2 is what npm serves** |
-| **v1.7.3** | **Baseline (tagged)** | §71 — `symbolBearingItems` counts symbols; a trace field moves on 254 of 580 rows | `outputSha` identical on all 580 | **Tagged; NOT published.** See R1 |
-| **R1** | **Ship the backlog** | The 2026-08-30 security remediation, §73–§74 (S-01–S-04) — currently sitting in `[Unreleased]` | npm matches the tag; `npm pack --dry-run` read first | ⏭ **Next, and it blocks everything** |
+| v1.7.3 | Prior release | §71 — `symbolBearingItems` counts symbols; a trace field moves on 254 of 580 rows | `outputSha` identical on all 580 | Tagged 2026-09-01 — never published on its own; ships inside v1.7.4 |
+| **v1.7.4** | **R1 — ship the backlog** | The 2026-08-30 security remediation, §73–§74 (S-01–S-04) · three `oxaudit.md` tooling items · the README restructure · v1.7.3 carried with it | No corpus run — R1 adds no code | **Cut 2026-09-19.** A patch over moved output, by explicit call; publish is the user's step |
 | **R2** | **A trustworthy instrument** | The constraint gate's two open axes (two-sided) + the per-file latency harness that does not exist | Retention side at 100%; a pinned latency baseline | Preconditions for R3–R4's *numbers* |
 | **R3** | **The seam** | `ParserAdapter` + Deep path on the 4 existing languages; staged negative control | Steps 1–2 byte-identical; step 3 classified | No new dependency, no new language |
 | *unnumbered* | Selection quality | BM25 + graph hybrid scorer, dual-path MMR | `<10ms` pipeline selection | ⛔ **Both preconditions measured false** — holds no number |
