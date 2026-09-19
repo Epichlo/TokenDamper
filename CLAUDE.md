@@ -211,8 +211,12 @@ DECISIONS §75, scheduled in `ROADMAP.md`.** Four releases, named rather than nu
   implementing** (§78: `must` is 49% of the remaining segments and genuinely imperative, and the
   measured ceiling on the whole axis is **1 file of 188**). Read §78 before reopening it — it names
   what would change the answer.
-- **R3 — the `ParserAdapter` seam and the Deep path on the four languages that already work.**
-  No new dependency, no new language, no reduction change. The deliverable is a measurement.
+- **R3 — the `ParserAdapter` seam and the Deep path on the four languages that already work.
+  NEXT, and not started — `src/core/parser/` does not exist.** No new dependency, no new language,
+  no reduction change; the deliverable is a measurement. **Start at `docs/r3-start-here.md`**, which
+  carries the state R3 begins from, the three things that do *not* survive a session (the frozen
+  corpus, the timing baseline, the Go corpus) and the traps specific to measuring a second backend.
+  Delete that file when R3 lands.
 - **v2.0.0 — `tokendamper-deep` ships**, N languages reduce, and `--mode` is withdrawn
   (`optimize|bench` today, where `optimize` is the identity and `bench` duplicates the positional
   command) so the name can mean `fast|deep`.
