@@ -11,6 +11,41 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **A per-file latency harness (DECISIONS §76).** `tools/corpus-harness/timing-run.js`. R2's second
+  half: `stageTraces[].durationMs` is per stage, and no field anywhere carried an end-to-end
+  figure, so `ROADMAP.md`'s `<1ms` Fast / `~15ms` Deep targets were not merely unvalidated but
+  unvalidatable. **A separate invocation from `measure.js`, which is not organisation** — wall clock
+  is noisy and machine-dependent, byte-identity is deterministic and load-bearing, and folding them
+  together would make a green identity result depend on machine load. `measure.js` is untouched.
+
+  **It reports three numbers, because one would be wrong.** `cold` (git cache cleared per file,
+  models the CLI), `warm` (cache retained, models the Gateway and MCP) and `fixed` (Node boot plus
+  module load). Measured **cold p50 159.1ms against warm p50 3.8ms — a 41.48x ratio**, caused by
+  `globalGitCache`'s 2000ms TTL. A harness that timed N files in one process and called the result
+  per-file latency would have under-reported CLI cost forty-fold.
+
+  Baseline: 292 files pinned at corpus `fcb6718`, ratio 0.3, **292/292 route parity**. Per stage,
+  `pruning:topology-pruner` is **153.8ms of the 159.1ms** — 97%, and all of it `git status`; every
+  other stage is sub-millisecond. Recorded rather than fixed, as off R2's scope.
+
+  **The `<1ms` target was not wrong, it was unqualified**, which is the more useful finding: it
+  resolves to 159.1ms end-to-end cold, 3.8ms end-to-end warm, or ~0.7ms for the reduction stages
+  alone, and the roadmap never said which. A target that does not name its quantity can be neither
+  validated nor falsified.
+
+  The instrument refuses three things, each added because the run producing it looked fine: an
+  empty sample, a coverage gap between the two routes, and **a run that attributed no stage** —
+  which the first baseline run did on all 292 files, because `timeOnce` read `result.trace` and
+  `runCli` returns an exit code. No `src/` change, so no corpus run is owed.
+
+### Changed
+- **Corpus recipe: typescript 62→63, prose 17→21.** Entirely pre-existing drift, surfaced because
+  R2 is the first corpus run since v1.6.1 — `src/core/validation/ast/go-validator.ts` (DECISIONS
+  §60) plus four documents. Reduction aggregates from here are over the new counts and are not
+  comparable to earlier ones. `collect.js` refusing its own recipe is it working.
+
+
 ## [v1.7.4] - 2026-09-19
 
 **The 2026-08-30 security remediation reaches the registry.** Every finding in

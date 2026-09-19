@@ -5795,3 +5795,113 @@ baseline. §59/§60/§61 staged Go exactly this way and the staging is why the h
   reason as well.
 - **No corpus was run for this entry**, because nothing was implemented. Everything numeric here
   is cited from §52, §56, §59–§61 or the status doc, and none of it was re-measured today.
+
+## 76. The Latency Instrument Reports Three Numbers, Because One Of Them Would Be Wrong
+
+**Date:** 2026-09-19 · **Status:** accepted, implemented · **Scope:** R2's second half — the
+per-file wall clock that did not exist
+
+Design: `docs/superpowers/specs/2026-09-09-tokendamper-v2-roadmap-design.md` §3.3. That section
+asked for "per-file p50/p95/max, per stage and end-to-end". Measured, *end-to-end* is not one
+quantity, and reporting it as one would have made every R3/R4 comparison misleading.
+
+### The decision
+
+`tools/corpus-harness/timing-run.js` is a **separate invocation** from `measure.js`, and reports:
+
+| name | what it is | what it models |
+|---|---|---|
+| `cold` | engine time with the git workspace cache cleared before each file | the **CLI** — every invocation is a fresh process |
+| `warm` | engine time with the cache left populated | the **Gateway and MCP** — long-lived processes |
+| `fixed` | spawned wall clock minus `cold` | Node boot plus module load |
+
+**The split is forced by `globalGitCache`** (`src/core/topology/git-inspector.ts`, 2000 ms TTL).
+Timing N files in one process lets files 2..N hit a warm cache. Measured, that is not a rounding
+difference: **cold p50 159.1 ms against warm p50 3.8 ms, a 41.48x ratio.** A harness that timed
+files in one process and called the result "per-file latency" would have under-reported CLI cost
+by a factor of forty, and would have made any future parser look proportionally enormous against
+a denominator that had quietly vanished.
+
+It is also the axis §75 lists as unestablished — a per-process cost can make a backend unusable at
+the CLI while fine at the Gateway. Cold and warm are that question, now measurable.
+
+### The baseline
+
+Corpus frozen at **fcb6718**, `dist` **9560079950fd**, **292 files**, ratio **0.3**, clean tree.
+Node **v26.4.0**, **win32-x64**, warmup 5, one run.
+
+```
+parity           292/292 agree
+cold  engine     p50 159.1ms  p95 194.0ms  max 254.3ms
+warm  engine     p50   3.8ms  p95  16.0ms  max  43.8ms
+CLI   wall       p50 313.0ms  p95 355.0ms  max 402.0ms
+fixed per-proc   p50 151.4ms
+cold unaccounted p50   2.9ms   (validation + planning + render)
+
+cleanup:constraint-preservation   p50   0.3ms  p95   2.5ms
+pruning:topology-pruner           p50 153.8ms  p95 182.6ms
+compression:token-hashing         p50   0.4ms  p95   3.3ms
+compression:delta-compression     p50   0.0ms  p95   0.0ms
+```
+
+### `<1ms` was not wrong, it was unqualified — and that is the more useful finding
+
+`ROADMAP.md` carried `<1ms` Fast and `~15ms` Deep. Against the table above the claim resolves
+three different ways, and the roadmap never said which:
+
+- **end-to-end cold (the CLI):** 159.1 ms — off by ~160x
+- **end-to-end warm (Gateway/MCP):** 3.8 ms — off by ~4x
+- **the reduction stages alone** (constraint-preservation + token-hashing + delta-compression):
+  **~0.7 ms p50** — consistent with `<1ms`
+
+So the number was defensible for the work the project thinks of as its own, and wildly wrong for
+what a caller experiences. A target that does not name its quantity cannot be validated or
+falsified, which is why it survived this long.
+
+### `pruning:topology-pruner` is 97% of cold engine time
+
+153.8 ms of 159.1 ms, and it is `git status` rather than any analysis. Every other stage is
+sub-millisecond. **Recorded, not fixed** — it is off R2's scope, and R2 exists to produce the
+instrument rather than to act on its first reading. Two consequences worth carrying:
+
+- A reduction-latency budget spent on the elision stages is spending against 0.4% of the cost.
+- The Gateway and MCP pay this once per cache window rather than per file, which is most of the
+  41x and is the strongest measured argument for those entry modes on latency grounds.
+
+### What the instrument refuses to report
+
+Three refusals, each added because the run that produced them looked fine:
+
+- **`percentiles` throws on an empty sample.** A p95 of `0` over no observations reads as a
+  measurement and describes nothing.
+- **`routeParityFailures` asserts coverage**, not the intersection. Every file is run in-process
+  *and* spawned and the output bytes compared; **292/292 agree**, which is what licenses timing
+  in-process at all. A file on one side only is a failure, because comparing the intersection is
+  how a diff reports `compared N rows, differing: 0` and reads exactly like agreement.
+- **`assertStageAttribution` refuses a run that attributed no stage.** This one is not
+  hypothetical: **the first baseline run of this harness produced an empty per-stage table on all
+  292 files** and reported a clean-looking end-to-end number on top of it. `timeOnce` read
+  `result.trace`, and `runCli` returns an exit code — there is no `.trace` on a number. The
+  instrument had the failure mode it was built to detect, so the refusal lives in the tool rather
+  than in a reviewer's attention.
+
+`timeOnce` also refuses a **pending** result, because `runCli` is typed `number | Promise<number>`
+and stopping the clock on a promise measures scheduling rather than work — a fast number meaning
+the opposite of fast.
+
+### What this does **not** establish
+
+- **One machine, one platform, one run.** `win32-x64`, Node v26.4.0, no repeated trials. p95 and
+  max carry OS scheduling noise. A figure from another machine is a different corpus in the sense
+  `recipe.json` already means it, and is visibly so rather than silently so.
+- **Cold and warm model the CLI and the Gateway by proxy**, through the git cache. Neither the
+  Gateway nor MCP was actually driven. The proxy is good for the dominant cost and says nothing
+  about per-turn session work.
+- **There is nothing to compare against yet.** No Deep backend exists. This is a baseline whose
+  entire purpose is to be compared against later, and a baseline is not a result.
+- **`web-tree-sitter` init remains unmeasured.** §75's concern is intact; what changed is that
+  there is now a place to put the number — it lands in `fixed`, which is already 151.4 ms at the
+  CLI, and its parse cost lands against the ~0.7 ms the reduction stages occupy.
+- **Axis A and Axis B of the constraint gate are not in this entry.** R2's other half is held
+  until this half is merged, by explicit decision — the two are independent instruments and
+  bundling them would make a failure unattributable.

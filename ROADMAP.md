@@ -585,13 +585,27 @@ Python because all four recovered files were this repo's own narrative source, a
 ~94% TypeScript. That is the corpus-bias trap arriving as a favourable number, which is the
 direction that is hardest to notice.
 
-**The latency instrument.** The `<1ms` / `~15ms` targets are unvalidated and *cannot* be
-validated today: `stageDurationsMs` (`src/core/engine/index.ts:102-123`) is per stage, and there
-is no per-file wall clock anywhere. Extend `tools/corpus-harness/measure.js` with a timing run —
-**a separate invocation from the byte-identity run**, because wall clock is noisy and
-byte-identity is the harness's load-bearing deterministic output. Mixing them makes a green
-identity result depend on machine load, the mistake `ast-sla-determinism.test.ts` exists to
-prevent for `slaExceeded`.
+**The latency instrument — DONE 2026-09-19, DECISIONS §76.** `tools/corpus-harness/timing-run.js`,
+a separate invocation from the byte-identity run. `measure.js` was deliberately not touched:
+wall clock is noisy and byte-identity is the load-bearing deterministic output, and mixing them
+makes a green identity result depend on machine load — the mistake `ast-sla-determinism.test.ts`
+exists to prevent for `slaExceeded`.
+
+**It reports three numbers, because one would be wrong.** `cold` (git cache cleared per file,
+models the CLI), `warm` (cache retained, models the Gateway and MCP) and `fixed` (Node boot plus
+module load). Measured **cold p50 159.1ms against warm p50 3.8ms — 41.48x**, so a harness timing
+N files in one process and calling that "per-file latency" would under-report CLI cost forty-fold.
+
+**The `<1ms` / `~15ms` targets were not wrong, they were unqualified**, and that is the finding.
+Against the baseline the claim resolves three ways and this document never said which: end-to-end
+cold **159.1ms** (off ~160x), end-to-end warm **3.8ms** (off ~4x), and the reduction stages alone
+**~0.7ms** (consistent). A target that does not name its quantity can be neither validated nor
+falsified, which is how it survived. **Restated:** the Fast reduction stages are sub-millisecond;
+per-file CLI latency is ~160ms and is **97% `git status`** in `pruning:topology-pruner` (153.8ms
+of 159.1ms). Any Deep target must say which of the three it names.
+
+**Recorded, not fixed:** `topology-pruner` dominating cold engine time is off R2’s scope. R2
+exists to build the instrument, not to act on its first reading.
 
 - **Exit:** both axes measured two-sided per language with retention at 100%; a pinned latency
   baseline for the current engine on the frozen corpus, which is what R3 and R4 compare against.
@@ -822,7 +836,7 @@ remediation track was inserted. Corrected below; the numbering now matches the c
 | v1.7.1 · v1.7.2 | Prior releases | A test fix; then the build narrows to `tsconfig.build.json` while typecheck stays on `tsconfig.json` | Package 508 → 223 entries, 3.08 → 1.65 MB | Shipped 2026-09-01 — **v1.7.2 is what npm serves** |
 | v1.7.3 | Prior release | §71 — `symbolBearingItems` counts symbols; a trace field moves on 254 of 580 rows | `outputSha` identical on all 580 | Tagged 2026-09-01 — never published on its own; ships inside v1.7.4 |
 | **v1.7.4** | **R1 — ship the backlog** | The 2026-08-30 security remediation, §73–§74 (S-01–S-04) · three `oxaudit.md` tooling items · the README restructure · v1.7.3 carried with it | No corpus run — R1 adds no code | **Cut 2026-09-19.** A patch over moved output, by explicit call; publish is the user's step |
-| **R2** | **A trustworthy instrument** | The constraint gate's two open axes (two-sided) + the per-file latency harness that does not exist | Retention side at 100%; a pinned latency baseline | Preconditions for R3–R4's *numbers* |
+| **R2** | **A trustworthy instrument** | **Latency harness: done** (§76 — cold/warm/fixed, 292 files pinned at fcb6718). **Constraint gate: held** until the harness half merges | Retention side at 100%; a pinned latency baseline | Latency baseline exists; the gate's two axes remain |
 | **R3** | **The seam** | `ParserAdapter` + Deep path on the 4 existing languages; staged negative control | Steps 1–2 byte-identical; step 3 classified | No new dependency, no new language |
 | *unnumbered* | Selection quality | BM25 + graph hybrid scorer, dual-path MMR | `<10ms` pipeline selection | ⛔ **Both preconditions measured false** — holds no number |
 | ~~*unnumbered*~~ | ~~Folding & cache~~ | **Split 2026-09-09.** Folding → the R1–R4 spine (Deep is coverage, not precision); `cache_control` → Milestone 8 | — | ↪ **Replaced.** Fast was already shipped in `elision/regions.ts` |
