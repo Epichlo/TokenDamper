@@ -11,6 +11,33 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- **A present-tense descriptive `never`/`always` is no longer a directive (DECISIONS §77).** §52
+  exempted only *perfect and past* constructions, so `// Should never happen, but we ...` — the
+  shape recorded as dominating Go's fallbacks — fell straight through. Surveyed first: **322**
+  such segments are unexempt on the frozen corpus and only **3** are caught today.
+
+  Three rules, each provable from the words present rather than from tone. **A third-person `-s`
+  cannot be an imperative**, because an English imperative is a bare infinitive — so
+  `never returns` describes while `never return` instructs (99 of 322). A **copula** states a
+  property (39). And **non-agentive verbs** (`happen`, `occur`, `exist`, `arise`, `matter`) have
+  no imperative form at all, which exempts `should never happen` without trusting the modal.
+  **Modals keep firing**, 38 segments, on purpose: `should never call this` instructs.
+
+  **Measured two-sided, per language, engine varied and input frozen.** Main corpus 584 rows,
+  Go 160 rows on the separate 80-file corpus: **10 files recovered, 0 new fallbacks**, 734 of 744
+  rows byte-identical. Per bucket — python 32→34 reduced (fallbacks 12→10), typescript 38→41
+  (18→15), go-app 32→34 (8→6), go-stdlib 25→26 (12→11).
+
+  **Paired over the 507 rows that reduce under both arms, the mean is unchanged and zero of them
+  changed a byte.** Nothing that already worked moved; the whole gain is fallbacks becoming
+  reductions. Unlike §52, which gained 6pp on TypeScript and zero on Python, **all four buckets
+  gain**, and 4 of 7 main-corpus recoveries are pip's own source rather than this repository's.
+
+  Also a **correction to §52**: `isNarrativeUse` tested the whole segment, so one narrative
+  construction anywhere exempted everything in it — `the value is always set, so always check it
+  first` was already losing its instruction. The check is now per occurrence and unanimous.
+
 ### Added
 - **A per-file latency harness (DECISIONS §76).** `tools/corpus-harness/timing-run.js`. R2's second
   half: `stageTraces[].durationMs` is per stage, and no field anywhere carried an end-to-end

@@ -5905,3 +5905,135 @@ the opposite of fast.
 - **Axis A and Axis B of the constraint gate are not in this entry.** R2's other half is held
   until this half is merged, by explicit decision — the two are independent instruments and
   bundling them would make a failure unattributable.
+
+## 77. Axis A: A Third-Person `-s` Cannot Be An Imperative
+
+**Date:** 2026-09-19 · **Status:** accepted, implemented · **Scope:** R2's constraint-gate half —
+the first of the two axes §75 left open
+
+§52 exempted a *narrative* `never`/`always` on a perfect or past construction. Present-tense
+description fell straight through, and CLAUDE.md records `// Should never happen, but we` as
+dominating Go's fallbacks at **18 of 20**.
+
+### Surveyed before it was designed
+
+Over the frozen corpus, **322** `never`/`always` segments are unexempt, and only **3** in the
+entire corpus are caught by §52 today. Their shapes:
+
+| shape | count |
+|---|---|
+| third-person `-s` verb | **99** |
+| copula + keyword | 39 |
+| modal + keyword | 38 |
+| bare verb — genuinely imperative | **10** |
+
+The rule follows the counts rather than an intuition about how comments read.
+
+### Three rules, each provable from the words present
+
+That is §52's standard, and it is what keeps this from being a judgement about tone.
+
+- **Third-person `-s`.** An English imperative is a bare infinitive and *cannot* take `-s`. So
+  `never returns a placeholder` describes and `never return a placeholder` instructs, and the
+  difference is visible in the string. The largest group, 99 of 322.
+- **Copula.** `is always deterministic` states a property. 39 of 322.
+- **Non-agentive verbs** — `happen`, `occur`, `exist`, `arise`, `matter`. You cannot instruct
+  something not to happen; these are unaccusative, so there is no imperative form to collide with.
+  This is what exempts `should never happen` **without trusting the modal**, and the list is
+  deliberately short because every addition is a verb somebody could turn out to use imperatively.
+
+**Modals are left firing, 38 segments, on purpose.** `should never happen` describes and
+`should never call this` instructs; both are modal + `never` + bare verb, so a modal cannot
+discriminate them. That is the blurry line §52 declined to cross and Axis A declines too.
+
+### Also a correction to §52, not only an extension
+
+`isNarrativeUse` tested the **whole segment**, so one narrative construction anywhere exempted
+everything in it. That was already live rather than theoretical: `the value is always set, so
+always check it first` lost its instruction, because `set` is in `PAST_TENSE_IRREGULARS`. Axis A
+matches far more shapes and would have turned a latent hazard into a common one.
+
+The check is now **per occurrence and unanimous** — the same rule `extractImperativeDirectives`
+already applies across keywords, where one `must` keeps the segment, now applied *within* the two
+keywords that can do both jobs. The mixed case resolves toward firing, which is the direction that
+cannot delete content.
+
+### The negative control earned its keep, and this is the entry's most useful sentence
+
+The first version of the `-s` rule was `\w+s`, and it exempted:
+
+```
+always pass the ledger explicitly, or turn 2 falls back
+```
+
+A real instruction, taken verbatim from this repository's own source, and one the test file had
+been asserting since §52. `pass` is a bare verb that merely ends in `s`. The rule is now
+`\w*[^s\W]s` — a third-person form is stem + `s` where the stem does not itself end in `s` —
+which keeps `pass`, `miss`, `cross`, `discuss`, `address` and `express` firing. `focus` is the one
+common single-`s` imperative that survives the shape test, so it is named explicitly.
+
+**The retention side caught this before any corpus ran.** That is the whole argument for gating a
+content-protecting change on a two-sided measurement rather than on a reduction figure.
+
+### Measured — both sides, per language
+
+Engine varied, input frozen, `dist/` rebuilt from `tsconfig.build.json` and **verified to contain
+the intended code on both arms** (`THIRD_PERSON_AFTER` present/absent) before each run.
+
+**Recovery side.** Main corpus pinned at **fcb6718**, 292 files / 584 rows. Go measured separately
+on the 80-file corpus §60/§61 used, 160 rows, because the main recipe has no Go bucket.
+
+| corpus | rows | recovered | **new fallbacks** | byte-identical |
+|---|---|---|---|---|
+| main (292 files) | 584 | **7** | **0** | 577 |
+| Go (80 files) | 160 | **3** | **0** | 157 |
+
+Per bucket, file route:
+
+| bucket | reduced | fallbacks | mean per-file |
+|---|---|---|---|
+| python | 32 -> **34** | 12 -> **10** | 23.90% -> **25.39%** |
+| typescript | 38 -> **41** | 18 -> **15** | 22.74% -> **25.20%** |
+| go-app | 32 -> **34** | 8 -> **6** | 38.21% -> **40.02%** |
+| go-stdlib | 25 -> **26** | 12 -> **11** | 22.50% -> **23.27%** |
+
+The baseline arm reads go-stdlib at **19.42%** on the harness's token-weighted figure, which is
+§61's recorded number to two decimals — an unplanned cross-check that the baseline build really
+was the old engine.
+
+**Retention side, 100% before and after.** The negative-control list in
+`narrative-directive-scope.test.ts` is the planted-directive set: 16 instructions, several verbatim
+from this repository and from pip. All 16 pass under the baseline engine and all 16 pass under
+Axis A. During the red phase, 31 tests passed and the 9 failures were *only* the new Axis A
+expectations — so the control set was never in the red for the right reason, and once for the
+wrong one, which is what found the `pass` defect.
+
+### The shape of the gain is the reassuring part
+
+**Paired over rows that reduce under both arms — 367 on the main corpus, 140 on Go — the mean is
+unchanged to four significant figures (9.67% -> 9.67%, 17.34% -> 17.34%) and *zero* of those rows
+changed a byte.** Nothing that already worked moved at all. The entire gain is fallbacks becoming
+reductions, which is the only shape in which a content-protecting gate can be loosened safely.
+
+**And it clears §52's caveat rather than repeating it.** §52 gained 6pp on TypeScript and **zero**
+on Python, because all four files it recovered were this repository's own unusually narrative
+source. Here **all four buckets gain**, and 4 of the 7 main-corpus recoveries are pip's
+`spinners.py` and `commands/cache.py` — third-party code that does not narrate itself the way this
+repository does. Three of the seven *are* this repository's own source, including, with some irony,
+`src/stages/cleanup/constraint-preservation.ts` itself at 0.00% -> 65.63%.
+
+### What this does **not** establish
+
+- **Axis B is untouched and still fires.** `do not support`, `required by`, `critical path` and the
+  other keyword families are out of scope by explicit decision — they were held until Axis A was
+  measured, because bundling them would make a failure unattributable. §75's §3.2 lists both.
+- **38 modal segments still fall back**, by design. If that population matters, it needs a
+  discriminator this entry does not have.
+- **The Go corpus is not the main corpus and its manifest is not a `collect.js` pin.** It is the
+  80-file tree §60/§61 froze, re-hashed in place because re-flattening its already-flattened names
+  exceeds the Windows path limit. Same files, same hashes; a weaker provenance record.
+- **The per-bucket means above are per-file means over every file in the bucket**, including
+  fallbacks at 0.00%. They are not the harness's token-weighted `saved%` and should not be compared
+  against figures quoted from it.
+- **No claim about prose.** The prose bucket is 21 documents that already reduce 0.00% for reasons
+  unrelated to this gate, and it is 0 recovered / 0 regressed here.
