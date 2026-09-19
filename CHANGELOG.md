@@ -11,6 +11,43 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **The `ParserAdapter` seam, and the Deep backend's `symbols()` — R3 step 1 of three (DECISIONS
+  §79).** `src/core/parser/` ships the interface and the registry and **bundles no
+  implementation**, the shape `TokenizerAdapter` already uses. `selectValidator` takes an
+  `EngineMode`: `fast` is the default and never reads the registry, `deep` reads it and falls
+  back to the same shipped chain. Deep keys off the language the shipped chain resolves, so it
+  adds **no new language**.
+
+  `packages/deep/` (`tokendamper-deep`, private) carries `web-tree-sitter` and four grammars.
+  **Core's `devDependencies` are unchanged**; the only edit to core's `package.json` is
+  `"workspaces"`. `npm pack --dry-run` reports 229 files / 2.0 MB with zero `packages/deep` or
+  tree-sitter matches — the +6 over the documented 223 is exactly `dist/src/core/parser/`.
+
+  **Nothing on the optimize route moved: 586/586 corpus rows byte-identical on all 15 compared
+  fields.** `check()` and `regions()` *throw* rather than returning `valid: true` or `[]`, because
+  both are indistinguishable from a backend that examined nothing.
+
+  **Step 1's assertion as written is wrong, and the corpus is what showed it.** §3.5 asks that
+  `S_k` never fall; it fell on **9 of 75** transformed files, five to `0.0000`. Every one was
+  read, and none is §59's hazard: all nine are Deep *declining* to harvest symbols the shipped
+  regexes invented out of English prose in comments. `src/core/validation/language-support.ts`
+  scores `driftScore: 0.1667` entirely on `type:keeps`, matched out of *"the content type keeps
+  the message concrete"*. The criterion that replaces the wording — a symbol Deep **has** that
+  Fast saw destroyed and Deep retained — measures **0 files**.
+
+  **Three disagreements were refused rather than adopted**, all cases where Deep is more correct
+  and adopting it would *lower* drift because the symbol survives body elision by construction:
+  Go **grouped** `const/type/import ( … )` blocks (**142 symbols** on the 80-file Go corpus, the
+  largest by far), the 20 annotated top-level constants the shipped `var:` regex cannot reach, and
+  typed blank-identifier assertions. Go extras end at **0**.
+
+  **Go inverts the drift effect and that is what makes the story coherent**: `S_k` *rose* on 36 of
+  60 Go files and fell on 1, because Go doc comments sit *above* functions and are retained, where
+  this repository’s TypeScript comments sit *inside* bodies and are destroyed. Hazard count across
+  TypeScript, Python and Go: **0**. New: `tools/corpus-harness/deep-parity.js` and
+  `deep-drift-control.js`, both of which refuse an empty or untransformed comparison set.
+
 ### Changed
 - **A present-tense descriptive `never`/`always` is no longer a directive (DECISIONS §77).** §52
   exempted only *perfect and past* constructions, so `// Should never happen, but we ...` — the

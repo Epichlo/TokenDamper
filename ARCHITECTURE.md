@@ -146,6 +146,23 @@ Implements the **Compression & Ledger Subsystem**.
   - **Agent Loop Circuit Breaker:** Integrates with `DebtTracker` to track turn-over-turn similarity and tool call repetition. If $N \ge 5$ consecutive turns show near-identical tool output signatures with high token volume, it triggers a `LOOP_REPETITION_WARNING` or throttles execution to prevent billing runaway.
   - **Atom-Aware Semantic Drift Tracking:** `DriftTracker` evaluates **Critical Atom Recall** (preserving imperative directives like `TD_PRESERVE`, file paths, line numbers, API URLs). The drift formula is $S_k = 1.0 - \left( w_{\text{AST}} \cdot R_{\text{AST}} + w_{\text{struct}} \cdot R_{\text{struct}} + w_{\text{atom}} \cdot R_{\text{atom}} \right)$. A hard threshold of $S_k \le 0.40$ triggers an explicit fallback to `rawInput`.
 
+### `src/core/parser`
+
+Defines the **`ParserAdapter` seam** — the interface a second parsing backend implements, and
+the registry it registers into. Core ships the interface and **bundles no implementation**, the
+same shape `TokenizerAdapter` / `createTiktokenAdapter` uses, so core keeps zero runtime
+dependencies.
+
+- `ParserAdapter` answers exactly three questions and no others: `symbols()` feeds
+  `DriftTracker.extractSymbols`, `check()` satisfies the `AstValidator` shape, `regions()` feeds
+  `selectElisionRegions`. One artifact supplying all three is the premise of Deep mode.
+- **The surface is synchronous.** `AstValidator.validate` is sync and so is every caller down
+  the chain, so a backend needing async setup (`await Parser.init()`, `await Language.load()`)
+  does that work **at registration**, before the pipeline runs.
+- `EngineMode` is `fast | deep`. `fast` is the default and **never reads the registry**; `deep`
+  reads it and falls back to the same shipped lexer chain when nothing is registered for the
+  language. Deep keys off the language the shipped chain resolves, so it adds no new language.
+
 ### `src/adapters/cli`
 
 Defines the direct CLI adapter. It parses raw input into normalized requests and formats the final output.
@@ -525,6 +542,11 @@ docs/
 
 ## Architectural Invariants
 
+- **determinism is per-configuration: same input, same *mode*, same bytes out.** This
+  qualification arrived with the `ParserAdapter` seam and is not a weakening. Fast and Deep
+  producing different output for the same file is the feature Deep exists for — what would be a
+  violation is either mode being non-deterministic *within itself*. Every statement of
+  "deterministic" elsewhere in this document is read under this qualification.
 - `ContextBundle` is the core normalized content model
 - `OptimizationBudget` is the core constraint model
 - the planner is stateless

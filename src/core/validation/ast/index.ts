@@ -1,4 +1,6 @@
 import type { ContentType, ContextBundle, ContextItem } from '../../model/types';
+import { resolveParserBackend } from '../../parser/registry';
+import { DEFAULT_ENGINE_MODE, type EngineMode, type ParserAdapter } from '../../parser/types';
 import { GoValidator } from './go-validator';
 import { JsonValidator } from './json-validator';
 import { PythonValidator } from './python-validator';
@@ -92,8 +94,66 @@ const CONTENT_TYPE_VALIDATORS: Readonly<Record<ContentType, AstValidator | null>
  *
  * `null` means "no validator covers this item". It does **not** mean the item is fine — read
  * `AstValidatorResult.validated` for that distinction.
+ *
+ * ## Modes
+ *
+ * The design (§3.4) states the rule twice in apparently opposite directions — *"a registry
+ * lookup with the hardcoded chain as its fallback"* and *"the existing if-chain stays and
+ * stays first"*. Both hold, because the switch is the **mode**:
+ *
+ *  - `fast`, the default, resolves through the chain below and **never reads the registry**.
+ *    Fast must not change behaviour because Deep exists, and the shipped path must not
+ *    depend on a registry being populated.
+ *  - `deep` resolves the language through the same chain, then hands the item to a
+ *    registered backend for that language — falling back to the chain's own validator when
+ *    none is registered.
+ *
+ * **Deep keys off the chain's answer rather than resolving the language itself**, which is
+ * what confines R3 to the four languages Fast already covers. Two item-to-language rules can
+ * disagree about what a file is, and that disagreement would surface as a *parser*
+ * difference in the step-2 measurement — a backend blamed for a classification defect.
  */
-export function selectValidator(item: ContextItem): AstValidator | null {
+export function selectValidator(
+  item: ContextItem,
+  mode: EngineMode = DEFAULT_ENGINE_MODE,
+): AstValidator | null {
+  const fast = selectFastValidator(item);
+  if (mode !== 'deep' || fast === null) {
+    return fast;
+  }
+
+  const backend = resolveParserBackend(fast.language);
+  return backend ? validatorForBackend(backend) : fast;
+}
+
+/**
+ * Bridges a `ParserAdapter` onto the `AstValidator` shape the pipeline consumes.
+ *
+ * Memoised per backend so repeated `selectValidator` calls return the same object: identity
+ * is not load-bearing for correctness, but a fresh wrapper per item would allocate once per
+ * item per validation pass, and `validateBundleAst` runs over every item of every bundle.
+ */
+const backendValidators = new WeakMap<ParserAdapter, AstValidator>();
+
+function validatorForBackend(backend: ParserAdapter): AstValidator {
+  const existing = backendValidators.get(backend);
+  if (existing) {
+    return existing;
+  }
+  const validator: AstValidator = {
+    language: backend.language,
+    validate: (content, options) => backend.check(content, options),
+  };
+  backendValidators.set(backend, validator);
+  return validator;
+}
+
+/**
+ * The shipped lexer chain: `language` -> `path` -> `contentType`, in that order of
+ * precedence. Unchanged from before the seam existed, and deliberately so — this function
+ * is what `fast` mode returns verbatim.
+ */
+function selectFastValidator(item: ContextItem): AstValidator | null {
   const lang = item.language?.toLowerCase();
   if (lang) {
     if (['ts', 'typescript', 'js', 'javascript', 'jsx', 'tsx'].includes(lang)) {
