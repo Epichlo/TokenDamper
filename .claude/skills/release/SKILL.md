@@ -92,7 +92,29 @@ repeatedly ended up with a document confidently describing a build that no longe
 ## npm publish is the user's step
 
 `npm publish` requires the user's 2FA one-time code. **Do not attempt it**; run the checks and
-hand over a ready command:
+hand over a ready command.
+
+**Say which directory to run it in, and say it every time.** The user's shell is usually the main
+checkout, and releases are cut on a branch — often in a worktree. A main checkout that has not
+pulled the merge still carries the *old* `package.json`, so `npm publish` there succeeds and
+publishes the **previous** number over a tree that is not what that number was tagged from. This
+has happened (v1.7.4: the publish ran in the un-pulled main checkout and put the security
+remediation on the registry as **1.7.3**, 663 insertions away from the `v1.7.3` tag). Hand over
+both commands, in order:
+
+```bash
+git pull origin main
+```
+
+```bash
+npm publish
+```
+
+**And tell them to read the version in the banner before confirming the 2FA prompt.**
+`prepublishOnly`’s first line is `> tokendamper@X.Y.Z prepublishOnly`, printed well before
+anything irreversible — it is the last free check that the right number is going out, and it
+costs one glance. A publish cannot be undone after 72 hours, and the version can never be
+reused even then.
 
 ```bash
 npm publish
@@ -109,6 +131,13 @@ worth checking rather than assuming, because a failed 2FA leaves everything else
 - **`dist/` is what ships.** `package.json` `files` publishes `dist`, `test/fixtures/bench` and
   the docs. A stale `dist/` means the published bytes disagree with the tagged source; step 6
   exists for that.
+- **The wrong *directory* is the same failure as a stale `dist/`, and step 6 does not catch it.**
+  Step 6 verifies the artifact in the tree you are standing in. It cannot tell you the user will
+  publish from a different one. v1.7.4 passed every check here — three version reporters agreeing,
+  `npm pack --dry-run` read first, CI green on three Node versions — and then went out as 1.7.3,
+  because the publish ran in a checkout that predated the merge. **Verifying the artifact and
+  verifying that the publish will happen in that artifact’s directory are two checks.** This is
+  invariant 10 pointed at the release: a green result from a tree nobody published.
 - **Do not add a `format` script back.** DECISIONS §49 — it never passed, nothing invoked it, and
   making it pass meant rewriting the repository. `lint` is the style gate.
 - **Line endings.** The repo is uniformly CRLF. A scripted edit to `CHANGELOG.md` or `CLAUDE.md`

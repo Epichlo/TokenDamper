@@ -239,6 +239,20 @@ release without intervention; **v1.6.1 is the precedent and carries the same cav
 the digit as evidence that nothing moved.** Because the registry served 1.7.2, v1.7.4 also
 delivers v1.7.3 to every consumer.
 
+**Registry 1.7.3 is not the `v1.7.3` tag, and it is deprecated — read this before trusting any
+version number in this project.** The v1.7.4 publish was first run in a main checkout that had
+not pulled the release merge, so npm read the *old* `package.json` and published the pre-merge
+tree as **1.7.3**: the security remediation under a number whose tag holds a tree **663
+insertions** away. The bytes were correct code, so nothing unsafe shipped, but one number now
+names two trees. **This file’s standing warning has an inverse: a tag does not imply a registry
+version, and a registry version does not imply its tag.** Every check in the release passed —
+three version reporters agreeing, `npm pack --dry-run` read first, CI green on three Node
+versions — because they all ran in the *release* tree and the publish ran somewhere else.
+**Verifying the artifact and verifying where the publish happens are two checks**, which is
+invariant 10 aimed at the release process. The `release` skill now carries both, plus the free
+one that would have caught it: read the version in `prepublishOnly`’s banner before confirming
+2FA.
+
 **v1.7.3 was tagged 2026-09-01 and was never published on its own — it reaches consumers inside
 v1.7.4.** §71: `DriftCoverage.symbolBearingItems` counts symbols
 rather than validator coverage. **A patch number that moves a trace field on 254 of 580 corpus
