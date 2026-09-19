@@ -1,0 +1,20 @@
+{
+  "name": "tokendamper-deep",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Deep-mode ParserAdapter backends for TokenDamper, backed by tree-sitter (WASM). Unpublished in R3: it exists to be measured against the shipped Fast path.",
+  "license": "MPL-2.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "tree-sitter-go": "^0.25.0",
+    "tree-sitter-javascript": "^0.25.0",
+    "tree-sitter-python": "^0.25.0",
+    "tree-sitter-typescript": "^0.23.2",
+    "web-tree-sitter": "^0.27.0"
+  }
+}
