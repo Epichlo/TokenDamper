@@ -200,7 +200,9 @@ DECISIONS §75, scheduled in `ROADMAP.md`.** Four releases, named rather than nu
   It carries the whole 2026-08-30 security remediation (§73–§74) *and* v1.7.3, which was tagged
   and never published. **Check the registry, not the tag list** — `npm view tokendamper version`
   is the only thing that says what a consumer actually gets, and this file has warned about that
-  since v1.7.1. **Until that command returns 1.7.4, R1 is not done.**
+  since v1.7.1. **It returns 1.7.4 as of 2026-09-19, so R1 is closed** — verified by unpacking the
+  published tarball, whose `dist/src` is byte-identical to a local build of the tag. Don't take a
+  version number as evidence on its own; see the 1.7.3 mislabel below for why.
 - **R2 — the constraint gate's two open axes, plus the per-file latency harness that does not
   exist.** Both are preconditions for *measuring* R3–R4, not features competing with them.
 - **R3 — the `ParserAdapter` seam and the Deep path on the four languages that already work.**
