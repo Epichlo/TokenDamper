@@ -6037,3 +6037,121 @@ repository does. Three of the seven *are* this repository's own source, includin
   against figures quoted from it.
 - **No claim about prose.** The prose bucket is 21 documents that already reduce 0.00% for reasons
   unrelated to this gate, and it is 0 recovered / 0 regressed here.
+
+## 78. Axis B Is Closed Without Implementing, Because `must` Means `must`
+
+**Date:** 2026-09-19 · **Status:** accepted, **nothing implemented** · **Scope:** R2's second
+constraint-gate axis, and the close of R2
+
+§75's §3.2 named two open axes on the constraint gate. §77 implemented Axis A. Axis B is the other
+seven keyword families of `IMPERATIVE_KEYWORD_SOURCE` used descriptively — `must`, `must not`,
+`do not`, `required`, `only if`, `except when`, `make sure to`, `critical`.
+
+**It is closed on measurement, not built.** The precondition was surveyed the way §77's was, and it
+fails.
+
+### The survey
+
+Over the frozen corpus and the 80-file Go corpus, restricted to the four buckets that can actually
+reduce — a rule tuned on tcl or perl helps nothing, since those are 0.00% for reasons unrelated to
+this gate — and run against the **post-Axis-A** engine, so what remains is genuinely Axis B's
+population:
+
+| | |
+|---|---|
+| reducing-bucket files scanned | 188 |
+| files still raising ≥1 directive | 82 |
+| surviving directive segments | **248** |
+| segments the most permissive defensible rules would exempt | **18 (7.3%)** |
+| files where *all* surviving directives would be exempt | 4 |
+| **of those 4, files that currently fall back** | **1** |
+
+Three of the four already reduce (`index_collector.py` 18.16%, `capi_job.go` 56.38%,
+`zip_reader_test.go` 31.09%). **The measured ceiling on Axis B is one file — `agent_task.go` — out
+of 188**, and even that assumes it falls back solely on its single `do not` directive rather than
+also on drift, which was not verified because it did not need to be.
+
+Segment counts by family, in the reducing buckets:
+
+| family | segments | disposition |
+|---|---|---|
+| `must` / `must not` | **121** | genuinely imperative — see below |
+| `do not` | 41 | 8 descriptive, 14 clause-initial imperative |
+| `required` | 11 | mostly this repository discussing its own keyword list |
+| `only if` | 5 | too few to matter |
+| `critical` | 3 | all three are this repository's own source |
+| `except when` | **0** | absent |
+| `make sure to` | **0** | absent |
+
+### `must` is 49% of the population and cannot be narrowed
+
+This is the finding that closes the axis. Sampled verbatim:
+
+```
+we must initialize this before the tempdir manager, otherwise the ...
+dependencies must be installed before we can call the backend
+get_not_required must be called firstly in order to find and ...
+the name of the file must be "pyproject.toml"
+Build dependencies specified by PEP 518 must be already installed
+This must be done in a second pass, as the pyproject metadata is not yet known
+we must be able to determine the requirement name
+```
+
+Every one is a real constraint. **Two of them are already in the negative-control list** in
+`narrative-directive-scope.test.ts`, put there by §52 precisely because they must keep firing. There
+is no descriptive-`must` population to recover; narrowing `must` deletes instructions, and the
+retention side of the gate would refuse the change whatever it bought.
+
+§52 already knew half of this — it deliberately excluded `must` from the perfect-tense test, because
+*"must have been called before"* is a requirement about a past state rather than a narrative. This
+entry is that observation carried to the rest of the family.
+
+### Why the rest is not worth the risk
+
+`except when` and `make sure to` have **zero** segments in the reducing buckets — there is nothing
+to narrow. `critical` has three, all of them this repository's own source *discussing the keyword
+list*, which is corpus bias in its purest form. `required` has eleven, and the samples are dominated
+by the same self-reference (`` `required` and `critical` are ordinary ``, `` `readonly required?` ``).
+
+Only `do not` has a clean discriminator: a relative pronoun or personal pronoun before it marks a
+subject, so `schemes that do not support lookup` describes while `Do not import and use main()`
+instructs. That is eight segments, and on its own it recovers no file that is not already reducing.
+
+**This is the H5 condition**, and the fourth time this project has recorded it: BM25 had no query to
+score against, MMR found 0 of 1,486 pairs above its threshold, §51's per-item drift accounted for 0
+of 117 fallbacks. Correct code, negligible effect — and here with a content-deletion risk attached,
+which the others did not have.
+
+### What would reopen it
+
+**An open item is a claim about the current build and it expires** (§51's lesson, and §55's). The
+measurement above is not a permanent property of the gate. Re-measure if any of these change:
+
+- **The corpus gains code that is not this repository or pip.** `required` and `critical` are
+  currently almost entirely self-reference; a third-party corpus using them descriptively would move
+  the counts. This is §52's corpus-bias caveat pointing at the *reason to defer* rather than at a
+  favourable number.
+- **A language lands whose comment idiom differs.** Go's `do not` behaviour is already visible here;
+  Rust, Java or C++ may not follow it.
+- **The gate stops being the dominant fallback cause.** It accounts for 24% of TypeScript fallbacks
+  and 18 of 20 Go. If R3/R4 change that ranking, the arithmetic changes with it.
+
+### What this does **not** establish
+
+- **Not that Axis B is unimplementable** — only that its measured ceiling is one file, so the
+  effort and the content risk are not justified *now*.
+- **The 18-segment exemption count is from probe regexes, not a shipped rule.** It is an upper bound
+  on what a real rule would exempt, and a real rule would be narrower.
+- **No corpus A/B was run**, because nothing was implemented. Every figure here is a survey over
+  frozen inputs, which is the same instrument §77 used and not a substitute for an A/B.
+- **`agent_task.go` was not diagnosed.** It is counted as recoverable on the strength of its
+  directive set alone; whether the constraint gate is its only fallback cause is unknown and was not
+  worth establishing to reject a one-file gain.
+
+### R2 is closed
+
+Latency harness §76, Axis A §77, Axis B closed here. §75's exit for R2 was *"both axes measured
+two-sided per language with the retention side at 100%; the timing harness produces a pinned
+baseline"*. Axis A was measured two-sided per language with retention at 100%; Axis B was measured
+and dispositioned; the timing baseline is pinned at corpus fcb6718. **R3 — the `ParserAdapter` seam
+— is unblocked.**

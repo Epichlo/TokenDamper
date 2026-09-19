@@ -203,8 +203,14 @@ DECISIONS §75, scheduled in `ROADMAP.md`.** Four releases, named rather than nu
   since v1.7.1. **It returns 1.7.4 as of 2026-09-19, so R1 is closed** — verified by unpacking the
   published tarball, whose `dist/src` is byte-identical to a local build of the tag. Don't take a
   version number as evidence on its own; see the 1.7.3 mislabel below for why.
-- **R2 — the constraint gate's two open axes, plus the per-file latency harness that does not
-  exist.** Both are preconditions for *measuring* R3–R4, not features competing with them.
+- **R2 — CLOSED 2026-09-19.** The latency harness exists (§76: `cold` 159.1ms models the CLI,
+  `warm` 3.8ms models the Gateway/MCP, a **41.48x** ratio caused by the git cache — and
+  `topology-pruner` is 97% of cold engine time, all of it `git status`). **Axis A shipped** (§77:
+  a third-person `-s` cannot be an imperative; 10 files recovered, **0 new fallbacks**, retention
+  100%, and zero movement on any row that already reduced). **Axis B is closed without
+  implementing** (§78: `must` is 49% of the remaining segments and genuinely imperative, and the
+  measured ceiling on the whole axis is **1 file of 188**). Read §78 before reopening it — it names
+  what would change the answer.
 - **R3 — the `ParserAdapter` seam and the Deep path on the four languages that already work.**
   No new dependency, no new language, no reduction change. The deliverable is a measurement.
 - **v2.0.0 — `tokendamper-deep` ships**, N languages reduce, and `--mode` is withdrawn
