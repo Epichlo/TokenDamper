@@ -45,7 +45,12 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
-const { percentiles, timeOnce, routeParityFailures } = require('./timing');
+const {
+  percentiles,
+  timeOnce,
+  routeParityFailures,
+  assertStageAttribution,
+} = require('./timing');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const CLI = path.join(REPO_ROOT, 'dist', 'src', 'cli', 'main.js');
@@ -159,6 +164,10 @@ function main() {
     if (cold) clearGitWorkspaceCache();
     const out = capture();
     const err = capture();
+    // `traceOf` rather than the return value: `runCli` hands back an exit code, so there is no
+    // `.trace` to read. It is called after the clock stops, so parsing is not charged to the
+    // engine.
+    let trace = null;
     const timed = timeOnce({
       optimize: () =>
         runCli(
@@ -166,8 +175,12 @@ function main() {
           { stdout: out.stream, stderr: err.stream },
           REPO_ROOT,
         ),
+      traceOf: () => {
+        trace = parseTrace(err.text());
+        return trace;
+      },
     });
-    return { ...timed, outputSha: sha256(out.bytes()), trace: parseTrace(err.text()) };
+    return { ...timed, outputSha: sha256(out.bytes()), trace };
   };
 
   // V8 warms up. Without this the first files pay JIT cost and land in p95/max as an artifact
@@ -219,6 +232,10 @@ function main() {
     console.error(`measured ${rows.length} of ${files.length} files — refusing to report`);
     process.exit(1);
   }
+
+  // An empty per-stage table next to a real end-to-end number reads as "these stages cost
+  // nothing". Refused, because this harness emitted exactly that on its first run.
+  assertStageAttribution(rows.map((row) => ({ stageMs: row.coldStageMs })));
 
   const parity = routeParityFailures(inProcessShas, cliShas);
   if (parity.length > 0) {

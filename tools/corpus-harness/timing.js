@@ -57,7 +57,7 @@ function percentiles(samples) {
  * one 41 KB file, stages summed to 138 ms inside a 270 ms process. Anything comparing two
  * backends needs to see that gap rather than average it away.
  */
-function timeOnce({ optimize, request }) {
+function timeOnce({ optimize, request, traceOf }) {
   if (typeof optimize !== 'function') {
     throw new Error('timeOnce: `optimize` must be a function');
   }
@@ -73,7 +73,11 @@ function timeOnce({ optimize, request }) {
     throw new Error('timeOnce: `optimize` returned a pending value — the clock measured nothing');
   }
 
-  const trace = result && result.trace;
+  // `traceOf` runs *after* the clock stops, so extracting the trace is never charged to the
+  // engine. It exists because `runCli` returns an exit code, not a result — reading `.trace`
+  // off a number yields `{}` for every file and a per-stage table that is silently empty. This
+  // harness shipped that bug once and reported a clean-looking baseline on top of it.
+  const trace = typeof traceOf === 'function' ? traceOf() : result && result.trace;
   const stageTraces = trace && Array.isArray(trace.stageTraces) ? trace.stageTraces : [];
 
   const stageMs = {};
@@ -131,4 +135,29 @@ function routeParityFailures(inProcess, cli) {
   return failures;
 }
 
-module.exports = { percentiles, timeOnce, routeParityFailures };
+/**
+ * Refuses a run in which not one row attributed a stage.
+ *
+ * The per-stage breakdown is a deliverable, and an empty one printed next to a real end-to-end
+ * number reads as "these stages cost nothing" rather than "nothing was measured". That is
+ * invariant 10 with the instrument itself as the thing that lied, and it is not hypothetical:
+ * the first baseline run of this harness produced exactly that, on all 292 files.
+ *
+ * Individual empty rows are fine — a file that falls back before any stage runs has no stages.
+ */
+function assertStageAttribution(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    throw new Error('assertStageAttribution: no rows to check');
+  }
+  const attributed = rows.filter(
+    (row) => row.stageMs && Object.keys(row.stageMs).length > 0,
+  ).length;
+  if (attributed === 0) {
+    throw new Error(
+      `assertStageAttribution: no stage was attributed on any of ${rows.length} rows — ` +
+        'the per-stage report would be silently empty',
+    );
+  }
+}
+
+module.exports = { percentiles, timeOnce, routeParityFailures, assertStageAttribution };

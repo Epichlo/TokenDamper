@@ -22,12 +22,17 @@ const timing = require(
     max: number;
     mean: number;
   };
-  timeOnce(options: { optimize: () => unknown; request?: unknown }): {
+  timeOnce(options: {
+    optimize: () => unknown;
+    request?: unknown;
+    traceOf?: () => unknown;
+  }): {
     engineMs: number;
     stageSumMs: number;
     stageMs: Record<string, number>;
     unaccountedMs: number;
   };
+  assertStageAttribution(rows: ReadonlyArray<{ stageMs: Record<string, number> }>): void;
   routeParityFailures(
     inProcess: ReadonlyArray<{ corpusPath: string; outputSha: string }>,
     cli: ReadonlyArray<{ corpusPath: string; outputSha: string }>,
@@ -165,5 +170,51 @@ describe('routeParityFailures — is the in-process route the same computation?'
 
   it('refuses two empty inputs rather than calling that agreement', () => {
     expect(() => timing.routeParityFailures([], [])).toThrow(/empty|nothing/i);
+  });
+});
+
+describe('attributing stages when the timed call does not return the trace', () => {
+  it('reads stages from traceOf when the result is an exit code', () => {
+    // `runCli` returns `number | Promise<number>`, so there is no `.trace` on the result at all.
+    // Reading stages off an exit code yields `{}` for every file and a per-stage table that is
+    // silently empty — which is what the first baseline run of this harness actually produced.
+    const result = timing.timeOnce({
+      optimize: () => 0,
+      traceOf: () => ({ stageTraces: [{ stageId: 'pruning:topology-pruner', durationMs: 42 }] }),
+    });
+
+    expect(result.stageMs['pruning:topology-pruner']).toBe(42);
+    expect(result.stageSumMs).toBe(42);
+  });
+
+  it('does not charge traceOf to the measured duration', () => {
+    const fast = timing.timeOnce({ optimize: () => 0, traceOf: () => ({ stageTraces: [] }) });
+    const slowTrace = timing.timeOnce({
+      optimize: () => 0,
+      traceOf: () => {
+        busyWait(60);
+        return { stageTraces: [] };
+      },
+    });
+
+    // Extracting the trace is the harness's own bookkeeping, not the engine's work.
+    expect(slowTrace.engineMs).toBeLessThan(fast.engineMs + 40);
+  });
+});
+
+describe('assertStageAttribution', () => {
+  it('accepts rows where stages were attributed', () => {
+    expect(() =>
+      timing.assertStageAttribution([{ stageMs: {} }, { stageMs: { 'a:b': 1 } }]),
+    ).not.toThrow();
+  });
+
+  it('refuses a run where no row attributed a single stage', () => {
+    // The per-stage half of the report is a deliverable. Emitting it empty next to a real
+    // end-to-end number reads as "these stages cost nothing", which is invariant 10 with the
+    // harness itself as the thing that lied.
+    expect(() => timing.assertStageAttribution([{ stageMs: {} }, { stageMs: {} }])).toThrow(
+      /no stage was attributed/i,
+    );
   });
 });
