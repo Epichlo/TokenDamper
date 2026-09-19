@@ -2874,6 +2874,45 @@ Three smaller items in the same file:
   single revision actually implemented, because negotiation claiming more than the code does
   would be this same finding with extra steps.
 
+### Go, where §59 found the hazard — and where Deep turns out to be *stricter*
+
+The 80-file Go corpus survives after all (`go-app` 40 + `go-stdlib` 40), so step 1 was measured
+on it rather than deferred. It is the important language here: §56 and §59 found the hazard on
+Go, and the main `recipe.json` has no Go bucket.
+
+First run: **142 extra symbols**, by far the worst of the three languages. The cause is one
+shape — Go writes most package-level declarations in **grouped blocks**, and a grouped block
+puts `(` where the name would be, so every shipped rule misses it:
+
+```
+const Single = 1     const_declaration row 7, const_spec row 7   both see it
+const (              const_declaration row 2
+    TypeReg = '0'    const_spec        row 3                     only Deep sees it
+)
+```
+
+The discriminator is therefore *structural and exact*, not a heuristic: **a spec is visible to
+the shipped extractor only when it sits on the same line as its keyword.** With that rule, plus
+the typed blank-identifier case (`var _ Reader = (*reader)(nil)`, the annotation again defeating
+the `var:` regex), Go extras go **142 -> 0**.
+
+The remaining 88 Go disagreements are all `lost`, and all are the same comment-prose false
+positives the other two languages show — verified at source, not inferred:
+
+- `fn:F` from `// … When a function F calls panic, normal execution of F stops`
+- `type:T` from `// If the argument is a type T, then new(T) allocates a variable of type T`
+- `fn:Index` from `// … special case in Index()`
+
+**And Go inverts the drift effect, which is the finding that makes the phantom story
+coherent.** On Go, `S_k` **rose** on 36 of 60 transformed files and fell on 1 — the reverse of
+TypeScript and Python. The reason is where the comments sit: Go doc comments sit *above* the
+function by convention, so their phantoms are **retained** and were inflating Fast’s `R_AST`;
+this repository’s TypeScript carries much of its commentary *inside* bodies, so those phantoms
+are **destroyed** and were inflating Fast’s drift. Dropping phantoms moves the score in
+whichever direction the comments happened to sit, and **neither direction is §59’s hazard** —
+which is exactly why the criterion has to name the symbol rather than compare the number.
+
+Across all three languages the hazard count is **0**.
 ### Measurement
 
 **594 of 594 corpus rows are identical to the pre-Wave-2 engine**, across `outputSha`,
@@ -6155,3 +6194,156 @@ two-sided per language with the retention side at 100%; the timing harness produ
 baseline"*. Axis A was measured two-sided per language with retention at 100%; Axis B was measured
 and dispositioned; the timing baseline is pinned at corpus fcb6718. **R3 — the `ParserAdapter` seam
 — is unblocked.**
+
+## 79. R3 Step 1: The Seam, And A Drift Signal That Was Partly English
+
+**Date:** 2026-09-19 · **Status:** accepted, implemented (seam + step 1 of three) · **Scope:**
+`src/core/parser/`, `packages/deep/`, and the symbol-parity measurement
+
+Design: `docs/superpowers/specs/2026-09-09-tokendamper-v2-roadmap-design.md` §3.4 and §3.5, and
+§75. This entry covers the seam and **step 1 only**. Steps 2 (validator) and 3 (regions) are not
+implemented.
+
+### The seam, and how two contradictory sentences are both true
+
+§3.4 says `selectValidator` becomes *"a registry lookup with the hardcoded chain as its fallback"*
+and, four lines later, that *"the existing if-chain stays and stays first"*. Both hold, because
+the switch is the **mode**:
+
+- `fast` — the default — resolves through the shipped chain and **never reads the registry**.
+- `deep` — resolves the language through the same chain, then hands the item to a registered
+  backend for that language, falling back to the chain's own validator when none is registered.
+
+**Deep keys off the chain's answer rather than resolving the language itself.** That is what
+confines R3 to the four languages Fast already covers, and it removes a whole class of false
+finding: two item-to-language rules can disagree about what a file is, and that disagreement
+would have surfaced in the step-2 measurement as a *parser* difference — a backend blamed for a
+classification defect.
+
+`ARCHITECTURE.md` gains the sentence §3.4 asked for: determinism is per-configuration. Same
+input, same **mode**, same bytes out. Fast and Deep differing on one file is the feature; either
+one being non-deterministic within itself is the violation.
+
+### Where the backend lives, and why core's `package.json` moved by one key
+
+`packages/deep/`, name `tokendamper-deep`, `private: true`, its own tsconfig — §3.6's layout,
+created unpublished. R4 then *publishes* it rather than inventing it.
+
+**`web-tree-sitter` and the four grammars are dependencies of that package, not of core.** Core's
+`devDependencies` are byte-identical to before this work. The only change to core's
+`package.json` is `"workspaces": ["packages/*"]`, which is additive and which `files` already
+excludes from the tarball. Verified rather than assumed: `npm pack --dry-run` reports **229 files
+/ 2.0 MB unpacked** with **zero** matches for `packages/deep` or `tree-sitter`. The 229 is 223 plus
+exactly the six entries of `dist/src/core/parser/` (two modules times `.js`/`.d.ts`/`.js.map`).
+
+`tree-sitter-wasms` was tried first and rejected on measurement, not taste: its grammars are built
+with `tree-sitter-cli@^0.20.8` and fail `getDylinkMetadata` against `web-tree-sitter@0.27`. The
+official per-language packages ship a matched prebuilt `.wasm` and are resolved by specifier via
+`require.resolve`, never by a path built from `__dirname` — that would work in this repository and
+break in any other layout, at load time rather than visibly.
+
+### Step 1's assertion is wrong as written, and the corpus is what showed it
+
+§3.5 says *"Symbol sets equal or superset. Per-file `S_k` must not fall on a hand-elided control
+file."* Run over the frozen corpus, `S_k` **fell on 9 of 75 transformed files** — five of them all
+the way to `0.0000`. Taken literally, step 1 fails.
+
+Read individually, **none of the nine is §59's hazard**, and the two things a raw comparison
+conflates are opposite in kind:
+
+- **The hazard** — the backend *invents* a signature-level symbol that survives body elision by
+  construction, so `R_AST` rises for the same transform. This is how 32 real Go files elided at
+  `S_k = 0.0000` with both gates green, one losing 78.4% of its tokens.
+- **Not the hazard** — the backend *declines to invent* a symbol the shipped regexes harvested
+  from **English prose in a comment**. When that phantom sat inside an elided body, Fast scored it
+  as destroyed, so dropping it lowers `S_k` while losing no information at all.
+
+What separates them is whether Deep **had** the symbol and retained it anyway. The criterion that
+replaces the wording, and the one `tools/corpus-harness/deep-drift-control.js` enforces:
+
+> A symbol in Deep's before-set that Fast saw destroyed and Deep did not.
+
+Measured: **0 files**. All nine falls are phantom-only.
+
+### The finding worth carrying: part of the drift signal on code is English
+
+`src/core/validation/language-support.ts` reduces 4,441 to 3,376 bytes at ratio 0.3 with
+`driftScore: 0.1667`, `astMeasured: true`, `fallbackUsed: false`. **Its entire drift signal is one
+phantom symbol.** Fast harvests `type:keeps` from the comment
+
+> `// Falling back to the content type keeps the message concrete for an undeclared item rather`
+
+because `(?:class|interface|type|enum|struct)\s+([A-Za-z_$]...)` matches `type keeps`. That comment
+sits inside an elided region, so Fast scores 5 of 6 symbols retained. Not one real symbol was
+lost — `selectElisionRegions` retains signatures by construction — and Deep, which knows a comment
+is a comment, scores `S_k = 0.0000`, which is the **true** value under this project's own
+definition.
+
+Four more of the nine are the same shape end to end: `type:annotation`, `fn:since`, `fn:existed`,
+`type:methods type:or type:was`. On the other four, Fast destroyed a mix and **Deep destroyed
+exactly the real ones** — 1/1, 1/1, 2/2, 2/2.
+
+This compounds a caveat already in `CLAUDE.md`: on real Python **86% of elided function bodies
+contribute no symbols**, so the drift gate is nearly inert there. It is more inert than that
+implies, on TypeScript too, because part of what remains is noise. **A consequence for R4: if
+Deep's symbols ever feed the live drift gate, drift on code falls toward zero and the gate stops
+discriminating.** That is a design question, not a bug, and it is not answered here.
+
+### Three disagreements refused on purpose, and they are Fast defects
+
+Deep is *more correct* in all three and reproduces the shipped behaviour anyway, because R3's
+constraint is **no reduction change** and each would move files across the drift gate:
+
+| shipped behaviour | what Deep found | why refused |
+|---|---|---|
+| `jsImportRegex` cannot match a grouped Go `import ( ... )` | `import:math`, `import:fmt` | `import:` survives body elision, so adding it *lowers* `S_k`. Measured 0.6 against 0.5 on the control |
+| the `var:` rule needs `=` right after the name, so an annotated declaration does not match | 20 of this repo's own module constants — `DEFAULT_TOKENIZER`, `TOOL_DEFINITIONS`, `SUPPORTED_FLAGS` | a top-level `const` is inside no region the selector picks, so same direction |
+| `@dataclass` then `class CandidatePreferences:` yields `type:class` — the regex matches the `class` inside `@dataclass`, consumes it, and never sees the real declaration | `type:CandidatePreferences` | left as the one remaining `extra`; it is a recovered *name*, not an added retained symbol |
+| every shipped rule needs the keyword and the name adjacent, so a Go **grouped** `const ( … )`, `type ( … )` or `import ( … )` block is invisible | **142 symbols** over the 80-file Go corpus — 122 `var:`, 20 `type:` | all top-level, so all retained by construction. The single largest instance of the same direction, on the language §59 found it |
+
+One genuine **Deep** bug was found and fixed: `from __future__ import annotations` parses to a
+`future_import_statement` node carrying no `module_name` field, so `import:__future__` was dropped
+on every pip file that opens with it. A lost symbol raises drift rather than lowering it, so it
+failed safe — but it is the backend disagreeing with itself about what an import is.
+
+### Measurement
+
+Corpus frozen at **849f8c7**, dist **dc4465c6ec49**, **293 files**, ratio **0.3**. The tree was
+dirty on `tools/corpus-harness/recipe.json` alone, which is not engine code. `recipe.json`'s prose
+bucket went 21 to 22: the file is `docs/r3-start-here.md`, the R3 handoff counting itself. **That
+one reverses** — the handoff is written to be deleted when R3 lands, and `expect` goes back to 21
+in the same commit.
+
+```
+corpus A/B       586/586 rows byte-identical on all 15 compared fields
+suite            962 -> 989 passing, 2 skipped, 102 files
+symbol parity    108 files · typescript 7 agree / 56 disagree · python 26 / 19
+                 lost 191 (all Fast false positives), extra 1 (the @dataclass case)
+symbol parity Go  80 files · 57 agree / 23 disagree · lost 88, extra 0 (was 142)
+drift control    75 transformed · S_k fell 9, rose 2, same 64 · HAZARD FILES 0
+drift control Go  60 transformed · S_k fell 1, ROSE 36, same 23 · HAZARD FILES 0
+timing baseline  cold p50 114.0ms · warm p50 3.3ms · ratio 34.49x · parity 293/293
+```
+
+§76's numbers (159.1 / 3.8 / 41.48x) did not reproduce and were not expected to — they are
+machine- and run-specific by that entry's own statement. The *shape* holds:
+`pruning:topology-pruner` is 109.3 ms of 114.0 ms cold, still ~96%.
+
+### What this does **not** establish
+
+- **Steps 2 and 3 are not done.** `check()` and `regions()` **throw** rather than returning a
+  passing or empty result, deliberately: `valid: true` and `[]` are both indistinguishable from a
+  backend that examined the content and found nothing, which is invariant 10's exact failure.
+- **`--mode deep` is not reachable from the CLI.** The seam carries the mode and nothing passes
+  it. R3's exit requires this and it is step 3's work.
+- **JavaScript symbols are unmeasured on a corpus.** The main `recipe.json` has no JS bucket, so
+  `javascript` is covered only by the unit tests. Go **is** measured — §77’s 80-file corpus
+  survived and was used, with its manifest generated in place rather than re-frozen, which is a
+  weaker provenance record than a `collect.js` pin and is stated as such.
+- **No disagreement rate over 5,000+ files per language.** That is step 2's standard, for
+  `check()`. Step 1's 108 files are this repository plus pip.
+- **`web-tree-sitter`'s per-process init is still unmeasured**, which §75 lists as a plausible
+  reason Deep is unusable at the CLI while fine at the Gateway. Nothing in step 1 runs it inside
+  the engine.
+- **Whether Deep's symbols *should* feed the drift gate is undecided**, and the phantom finding
+  above is the reason it is now a real question rather than a formality.

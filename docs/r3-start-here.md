@@ -28,23 +28,47 @@ accumulate.
 | npm `latest` | **1.7.4** (1.7.3 is published-but-deprecated; see CLAUDE.md) |
 | R1 | done — the backlog reached the registry |
 | R2 | done — §76 harness, §77 Axis A, §78 Axis B closed on measurement |
-| R3 | **not started.** `src/core/parser/` does not exist |
-| suite | 962 passing / 2 skipped across 100 files |
+| R3 | **step 1 of three done** (DECISIONS §79). Seam + `packages/deep` `symbols()`. Steps 2 and 3 open |
+| suite | 986 passing / 2 skipped across 102 files |
 
 ## What does **not** survive, and must be rebuilt first
 
 All three lived in session-scoped temp directories and are gone:
 
-- **The frozen corpus.** Re-run `collect.js`. Expect the recipe to refuse if this repository has
+- **The frozen corpus.** Re-run `collect.js`. *(Rebuilt 2026-09-19 at `849f8c7`, 293 files, dist `dc4465c6ec49`; `recipe.json` prose `expect` went 21 -> 22 for `docs/r3-start-here.md` itself, and goes back to 21 when this file is deleted.)* Expect the recipe to refuse if this repository has
   gained a `src/*.ts` or a root/`docs` `*.md` since 2026-09-19 — that refusal is the harness
   working, and the convention is to update `expect` *and* name the file that moved it in
   `recipe.json`'s `$comment`.
-- **The timing baseline.** Re-run `timing-run.js`. **§76's numbers are machine-specific** —
+- **The timing baseline.** Re-run `timing-run.js`. *(Re-baselined 2026-09-19 on this machine: cold p50 **114.0ms**, warm p50 **3.3ms**, ratio **34.49x**, parity 293/293. §76’s 159.1/3.8/41.48x did not reproduce and was not expected to.)* **§76's numbers are machine-specific** —
   win32-x64, Node v26.4.0, one run, no repeated trials. Re-baseline on the machine before comparing
   anything to them.
-- **The Go corpus.** §60/§61/§77 used an 80-file tree that was already flattened by an earlier
-  freeze. If it is gone, re-source it; the main `recipe.json` has **no Go bucket**, which is why
-  §77 measured Go separately.
+- **The Go corpus. Checked 2026-09-19 and it is still there** — 80 files, `gosrc` + `gostdlib`,
+  at the path the `go-corpus-location` memory records. Step 1 used it. Its filenames are already
+  flattened, so **do not re-freeze it with `collect.js`**; generate a manifest in place instead
+  (walk for `*.go`, hash, bucket by whether the path contains `gostdlib`). The main
+  `recipe.json` still has **no Go bucket and no JS bucket**, so JavaScript remains unmeasured.
+
+## Where step 1 left off (2026-09-19)
+
+Read **DECISIONS §79** first; this is the two-line version.
+
+- **Done:** `src/core/parser/{types,registry}.ts`; `selectValidator(item, mode)` with `fast`
+  never reading the registry; `packages/deep/` (`tokendamper-deep`, private, its own tsconfig,
+  owns the tree-sitter dependency); `symbols()` for ts/js/python/go; `ARCHITECTURE.md`’s
+  per-configuration determinism sentence. 586/586 corpus rows byte-identical.
+- **`check()` and `regions()` throw.** That is deliberate — `valid: true` and `[]` are both
+  indistinguishable from a backend that examined nothing. Step 2 replaces the first, step 3
+  the second.
+- **Step 1’s assertion was rewritten against evidence.** "`S_k` must not fall" fails on 9 of
+  75 files; every one is Deep declining to harvest a phantom the shipped regexes took from
+  English in a comment. The criterion that holds is *a symbol Deep **has**, that Fast saw
+  destroyed and Deep retained* — measured 0. `tools/corpus-harness/deep-drift-control.js`.
+- **Open, in order:** step 1 on JavaScript (no corpus exists); step 2
+  (`check()`, >=5,000 files per language, every disagreement read, plus §60’s inverse
+  control per language); step 3 (`regions()` behind `--mode deep`, which does not exist yet).
+- **One question step 1 opened and did not answer:** part of the shipped drift signal on code
+  is phantom symbols from comment prose. If Deep’s symbols ever feed the live gate, drift on
+  code falls toward zero and the gate stops discriminating. Decide that before wiring it.
 
 ## Traps specific to R3
 
@@ -68,6 +92,15 @@ All three lived in session-scoped temp directories and are gone:
 
 ## What R3 is not
 
-No new dependency, no new language, no new grammar, **no reduction change**. The companion package
-does not exist yet. The deliverable is a measurement showing a second backend reproduces the
-shipped one on languages that can still be hand-checked — which is the whole reason R3 precedes R4.
+No new language, no new grammar, **no reduction change**. The deliverable is a measurement
+showing a second backend reproduces the shipped one on languages that can still be hand-checked
+— which is the whole reason R3 precedes R4.
+
+**Two clauses of the original wording were resolved rather than kept, and DECISIONS §79 records
+both.** *"No new dependency"* now means no new dependency **in core**: `web-tree-sitter` and the
+four grammars belong to `packages/deep/`, core’s `devDependencies` are unchanged, and the
+tarball is verified clean. Taken literally it could not be satisfied at all — the only second
+backend needing no new dependency is one wrapping the shipped lexers, which agrees with itself
+by construction and is the vacuous control §60 warns about. And *"the companion package does not
+exist yet"* is now false by one directory: `packages/deep/` exists, unpublished, so R4
+*publishes* it rather than inventing it.
