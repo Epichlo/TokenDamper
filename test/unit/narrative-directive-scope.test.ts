@@ -81,12 +81,75 @@ describe('the narrowing is scoped to never/always only', () => {
     expect(directivesFor(line)).toHaveLength(1);
   });
 
-  it('leaves descriptive present-tense uses firing, deliberately', () => {
-    // "is always" and "do not support" describe behaviour rather than instruct, but the line
-    // between describing a constraint and stating one is blurry, and a wrong call here deletes
-    // a real directive. Under-narrowing costs reduction; over-narrowing costs content.
-    expect(directivesFor('the spinner is always non-interactive under logging')).toHaveLength(1);
+  it('leaves Axis B firing, deliberately', () => {
+    // `do not support` describes behaviour rather than instructs, but it is one of the seven
+    // keyword families §52 never touched and Axis A does not either. Under-narrowing costs
+    // reduction; over-narrowing costs content, and this gate protects content.
     expect(directivesFor('check for VCS schemes that do not support lookup')).toHaveLength(1);
+    expect(directivesFor('the field is required by the schema')).toHaveLength(1);
+  });
+});
+
+describe('Axis A: present-tense descriptive never/always', () => {
+  // A third-person `-s` verb cannot be an imperative. English imperatives are bare infinitives,
+  // so `never happens` is provably a description in the way §52 required: from the words present,
+  // not from a judgement about tone. 99 of 322 unexempted never/always segments on the frozen
+  // corpus take this shape.
+  const thirdPerson = [
+    'the planner never returns an empty stageIds array here',
+    'the cache always expires after the TTL window',
+    'that branch never reaches the wire on a loopback bind',
+    'the fallback always echoes the caller bytes',
+  ];
+
+  for (const line of thirdPerson) {
+    it(`does not raise a directive for a third-person description: ${line.slice(0, 40)}...`, () => {
+      expect(directivesFor(line)).toHaveLength(0);
+    });
+  }
+
+  // A copula states a property. 39 of 322 take this shape.
+  const copula = [
+    'the spinner is always non-interactive under logging',
+    'the estimator is never exact for cache boundaries',
+    'these two fields are always populated together',
+  ];
+
+  for (const line of copula) {
+    it(`does not raise a directive for a stated property: ${line.slice(0, 40)}...`, () => {
+      expect(directivesFor(line)).toHaveLength(0);
+    });
+  }
+
+  it('exempts a verb that has no imperative at all', () => {
+    // `happen`, `occur`, `exist` are unaccusative — they have no agent, so there is no one to
+    // instruct and no imperative form to confuse. You cannot tell code "never happen". This is
+    // the shape CLAUDE.md records as dominating Go's fallbacks (`// Should never happen, but we`),
+    // and it is exempted by the verb rather than by the modal in front of it.
+    expect(directivesFor('this should never happen, but we guard it anyway')).toHaveLength(0);
+    expect(directivesFor('a cycle can never occur in a linear pipeline')).toHaveLength(0);
+  });
+
+  it('leaves a modal alone, because should-never is both moods', () => {
+    // `should never happen` describes; `should never call this` instructs. Both are modal +
+    // never + bare verb, so a modal cannot discriminate them. 38 segments are left firing on
+    // purpose - this is the blurry line §52 declined to cross and Axis A declines too.
+    expect(directivesFor('you should never call this without the lock held')).toHaveLength(1);
+    expect(directivesFor('callers must always drain the stream first')).toHaveLength(1);
+  });
+
+  it('keeps a bare-verb imperative firing next to the -s rule', () => {
+    // The discriminator is the `-s`, so the imperative form of the same verb must survive.
+    expect(directivesFor('never return a placeholder from this path')).toHaveLength(1);
+    expect(directivesFor('this never returns a placeholder')).toHaveLength(0);
+  });
+
+  it('refuses to exempt a segment where only one occurrence is narrative', () => {
+    // §52 tested the whole segment, so any narrative construction anywhere exempted everything
+    // in it. Axis A matches far more shapes, which turns that into a live way to delete an
+    // instruction: here `never happens` would have carried `never call it` out with it.
+    expect(directivesFor('it never happens, so never call it directly')).toHaveLength(1);
+    expect(directivesFor('the value is always set, so always check it first')).toHaveLength(1);
   });
 });
 
