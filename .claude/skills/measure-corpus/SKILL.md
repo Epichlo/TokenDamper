@@ -35,22 +35,33 @@ default ratio unless you have a reason; the recorded baselines are at 0.3.
 Put the scratch dir outside the repo. Both scripts assert their own counts, which is the point of
 using them.
 
-## Build the comparison engine with an src-only tsconfig
-
-```json
-{"extends": "./tsconfig.json", "include": ["src"]}
-```
+## Build the comparison engine, and verify which engine you built
 
 ```bash
-npx tsc -p tsconfig.src.json    # NOT npm run build
+npx tsc -p tsconfig.build.json    # or `npm run build` - same thing since v1.7.2
 ```
 
-`npm run build` typechecks `test/` too. On a branch whose new tests reference new APIs it fails,
-**emits nothing, and leaves the previous `dist/` in place** — so the measurement compares an
-engine against itself and reports a perfect match. A perfect match is exactly what a real match
-looks like, which is why this one is worth guarding rather than noticing.
+**No temp tsconfig. That instruction was stale and this section used to carry it.** It said to
+hand-roll a `tsconfig.src.json` because `npm run build` also typechecked `test/`, and on a branch
+whose new tests reference new APIs it would fail, **emit nothing, and leave the previous `dist/` in
+place** — comparing an engine against itself and reporting a perfect match. Since **v1.7.2** the
+build script is `tsc -p tsconfig.build.json`, which is `src/`-only, so the failure mode is gone and
+the temp file was pure cost: an extra step plus a dirty tree in the next `collect.js` run if you
+forgot to delete it.
 
-Delete the temp tsconfig afterwards, or it shows up as a dirty tree in the next `collect.js` run.
+**The guard the stale instruction bought is still worth having, so keep it and make it direct.**
+After building each arm, assert the built artifact contains the code you think it does, rather than
+assuming the build ran:
+
+```bash
+node -e "console.log(require('fs').readFileSync('dist/src/<file>.js','utf8').includes('<new symbol>'))"
+```
+
+`true` on the candidate and `false` on the baseline. Two lines, and it checks the thing that
+actually matters — a perfect match is exactly what a real match looks like, so the only way to tell
+them apart is to look at the engine rather than at the result. §77 used this on both arms and the
+baseline independently reproduced §61's recorded Go figure to two decimals, which is what a
+correctly-built baseline looks like.
 
 ## Diff per-row, and check the diff itself ran
 
