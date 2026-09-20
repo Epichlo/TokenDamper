@@ -19,6 +19,18 @@ export type EngineMode = 'fast' | 'deep';
 export const DEFAULT_ENGINE_MODE: EngineMode = 'fast';
 
 /**
+ * Options a region scan honours.
+ *
+ * Exists because `--keep-docstrings` (DECISIONS §58) is a caller-opted retention/size trade
+ * that Fast implements *inside* `scanPythonDefBodies`. A one-argument `regions(content)` would
+ * make deep mode silently ignore a flag the user passed, which is the same class of defect as
+ * a check that never ran.
+ */
+export interface ParserRegionOptions {
+  readonly keepDocstrings?: boolean;
+}
+
+/**
  * A parser backend, answering exactly the three questions a language needs.
  *
  * Modelled on `TokenizerAdapter` / `createTiktokenAdapter` (`src/core/hashing/tokenizer.ts`),
@@ -55,5 +67,5 @@ export interface ParserAdapter {
   check(content: string, options?: AstValidatorOptions): AstCheckResult;
 
   /** Feeds `selectElisionRegions`. */
-  regions(content: string): ReadonlyArray<ElisionRegion>;
+  regions(content: string, options?: ParserRegionOptions): ReadonlyArray<ElisionRegion>;
 }
