@@ -6347,3 +6347,125 @@ machine- and run-specific by that entry's own statement. The *shape* holds:
   the engine.
 - **Whether Deep's symbols *should* feed the drift gate is undecided**, and the phantom finding
   above is the reason it is now a real question rather than a formality.
+
+## 80. R3 Step 2: Both Validators Are Wrong, In Opposite Directions
+
+**Date:** 2026-09-20 · **Status:** accepted, implemented (step 2 of three) · **Scope:**
+`packages/deep/src/check.ts`, and the validator disagreement measurement
+
+Design: `docs/superpowers/specs/2026-09-09-tokendamper-v2-roadmap-design.md` §3.5, step 2.
+Continues §79. Step 3 (`regions()`) is **not** implemented.
+
+### What shipped
+
+`check()` reads tree-sitter's own complaints — `ERROR` nodes and `MISSING` nodes — and reports
+them as `AstCheckResult`. tree-sitter is error-tolerant, so "did this parse" is a question about
+the tree's contents rather than about whether parsing threw. Issues are capped at 32 per file,
+which never changes the **verdict** (decided by whether any error node exists) and keeps a
+5,000-file report readable.
+
+**§46 and §75 are not reversed.** The Fast path's advertised guarantee stays bracket/quote
+integrity and `test/unit/validator-guarantee.test.ts` stays exactly as written. Deep being
+stricter is Deep's property; the two are compared, never merged.
+
+### The inverse control, per language, because a rate is not evidence
+
+§60's standard has two halves and the second is the one that gets skipped: **0 findings is also
+what a validator that examines nothing reports.** So every language gets a mutation its grammar
+must reject, asserted in `test/unit/deep-backend-validator.test.ts`.
+
+Brace deletion is §60's and is **meaningless for Python**, which has no braces — reusing it there
+would have produced a file Python's grammar accepts and a control that silently proved nothing.
+Python gets the structural equivalent, a `def` header with its colon removed. All four pass.
+
+### The measurement
+
+| language | files | agree | disagree | rate | deep-only | fast-only |
+|---|---|---|---|---|---|---|
+| python | **13,897** | 12,781 | 1,116 | 8.03% | 6 | **1,110** |
+| go | **8,251** | 8,181 | 70 | **0.85%** | 70 | 0 |
+| typescript | 1,164 | 1,056 | 108 | 9.28% | 108 | 0 |
+| javascript | 1,823 | 1,821 | 2 | 0.11% | 0 | 2 |
+
+Go at 0.85% over 8,251 files is the same shape §60 measured (9,181 files, 73 against 1). The Go
+corpus was re-sourced by cloning `golang/go` at HEAD, sparse to `/src`; the 80-file tree §77 used
+is unchanged and was kept for the §79 drift control.
+
+### Both validators are wrong, and not about the same things
+
+**Fast rejects 1,110 valid Python files — 8% of the CPython stdlib and site-packages.** All are
+`AST_INDENTATION_ERROR`, and the cause was classified across every one of them rather than
+generalised from an example:
+
+| | |
+|---|---|
+| 1,105 (99.5%) | **backslash line continuation.** `x = \` followed by a more-indented line reads as an unexpected indent |
+| 4 | the indent bookkeeping is lost after a closing `"""` |
+| 1 | a nested f-string (3.12) |
+
+`argparse.py` is the clean case: CPython compiles it, and the shipped validator rejects it at
+L1701 on `self._has_negative_number_optionals = \`. **Fast rejects 2 valid JavaScript files** for
+the same *kind* of reason — JSX in a `.js` file, where the lexer counts `<` and `>` as brackets.
+
+**Deep rejects valid source too, and every case is the grammar lagging the language.** Minimal
+repros, bisected rather than fingerprinted — a first pass blamed 86 TypeScript files on
+`import("m").T` and was wrong, because that construct parses; the type *arguments* are what break:
+
+| language | construct the grammar rejects | valid since |
+|---|---|---|
+| typescript | `import("m").R<A, B>` — a **generic** import type (≈75 files) | long-standing; standard `tsc` `.d.ts` output |
+| typescript | `global { }` nested inside `declare module` (12) | long-standing |
+| typescript | `export type * from` / `export type * as NS from` (2) | TS 3.8 / 5.0 |
+| typescript | `abstract` used as a property name (2) | long-standing |
+| go | `new(expr)` — confirmed at `types2/builtins.go:647`, "new(T) or new(expr)" | Go at HEAD, 2026-09 |
+| go | generic methods — `func (r *Rand) N[Int intType](n Int) Int` | Go at HEAD |
+| python | starred expression in a return or assignment — `return *[None] * 3, *g_xs` | PEP 448 |
+
+**Go's 70 disagreements are almost entirely fixtures, which is why its rate is 0.85%**: 61 are
+under `testdata/` (the compiler's deliberately-malformed corpus — exactly §60's finding), 5 are
+`_test.go`, and only **4 are real source**. All four are the two new language features above.
+
+**And Deep is right twice.** `badsyntax_future8.py` (`from __future__ import *`) and
+`badsyntax_3131.py` (`€ = 2`) are rejected by CPython and **passed by Fast**. Every Python verdict
+in this entry was adjudicated against `py_compile`, not against opinion.
+
+### The finding that changes what a grammar is
+
+**A tree-sitter grammar is a versioned artifact that trails the language it parses, and the lag
+surfaces as a validator false positive.** That is a new failure mode for this project: every Fast
+lexer is hand-written against a language the author knew, and drifts only when someone edits it.
+A grammar drifts when the *language* moves.
+
+It fails safe — a false "invalid" means a fallback, not a corruption — but it is a reduction loss
+that arrives silently and is invisible to any test written against today's syntax. **R4 needs a
+grammar-version policy**, and `new(expr)` landing in `golang/go` two weeks before this measurement
+is the proof it is not hypothetical.
+
+### What this cost on the corpus: nothing, and that is L7's lesson again
+
+586/586 rows byte-identical; nothing in `src/` changed. More interestingly, the Python
+indentation defect — 8% of 13,897 real files — accounts for **0 of the 10 Python fallbacks** in
+the frozen corpus. Three of the 45 corpus files contain a backslash continuation followed by an
+indented line and **none of them trips the rule**.
+
+So an 8% defect on real Python is worth **zero** measured here. That is L7 exactly (a fix that
+moved 0 of 576 rows because 0 of 45 files had the shape), and it is the reason the survey was run
+over 13,897 files rather than over the corpus. **Fixing it is a reduction change and therefore
+out of scope for R3** — recorded for R4, with its size measured on a corpus that can see it.
+
+### What this does **not** establish
+
+- **Two of four languages miss §3.5's ≥5,000 bar.** TypeScript scored **1,164** and JavaScript
+  **1,823**, both from `node_modules` on this machine. TypeScript is the more important shortfall
+  because the main corpus is ~94% TypeScript. The harness prints the shortfall on every run
+  rather than leaving the reader to check.
+- **The TypeScript sample is `node_modules`, which is mostly `.d.ts`.** Declaration files are real
+  TypeScript and are what the corpus's dependencies actually contain, but they are not a neutral
+  sample of hand-written application TypeScript — the generic-import-type construct that
+  dominates the findings is `tsc` output, not something a person types often.
+- **Step 3 is not done.** `regions()` still throws.
+- **`--mode deep` is still not reachable from the CLI.**
+- **No latency figure for `check()`.** §76's baseline exists and Deep was not timed against it;
+  `web-tree-sitter`'s per-process init remains unmeasured, which is §75's open concern.
+- **The disagreement counts are verdict-level, not issue-level.** Two validators agreeing that a
+  file is invalid are counted as agreeing even if they blame different lines.

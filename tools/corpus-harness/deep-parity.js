@@ -6,7 +6,7 @@
  *
  * Usage:
  *   node tools/corpus-harness/deep-parity.js <corpus-dir> --step symbols [--bucket ts,python]
- *   node tools/corpus-harness/deep-parity.js --files <dir> --language go [--limit 5000]
+ *   node tools/corpus-harness/deep-parity.js --files <dir> --language go --out <dir> [--limit N]
  *
  * ## Why this is a separate tool from `measure.js`
  *
@@ -51,7 +51,7 @@ function req(rel) {
 }
 
 function parseArgs(argv) {
-  const out = { positional: [], step: 'symbols', buckets: null, files: null, language: null, limit: Infinity };
+  const out = { positional: [], step: 'symbols', buckets: null, files: null, language: null, limit: Infinity, out: null };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--step') out.step = argv[++i];
@@ -59,6 +59,7 @@ function parseArgs(argv) {
     else if (a === '--files') out.files = argv[++i];
     else if (a === '--language') out.language = argv[++i];
     else if (a === '--limit') out.limit = Number(argv[++i]);
+    else if (a === '--out') out.out = argv[++i];
     else out.positional.push(a);
   }
   return out;
@@ -123,16 +124,62 @@ async function main() {
 
   const backends = new Map((await createDeepBackends()).map((b) => [b.language, b]));
   const drift = new DriftTracker();
+  const isValidatorStep = args.step.startsWith('validator');
+  const { selectValidator } = isValidatorStep ? req('dist/src/core/validation/ast/index.js', 'npm run build') : {};
 
   const stats = {};
   const disagreements = [];
   let parseFailures = 0;
 
   for (const row of rows) {
-    const s = (stats[row.language] ??= { files: 0, agree: 0, disagree: 0, symbolFree: 0, lost: 0, extra: 0 });
+    const s = (stats[row.language] ??= isValidatorStep
+      ? { files: 0, agree: 0, disagree: 0, uncovered: 0, deepOnly: 0, fastOnly: 0 }
+      : { files: 0, agree: 0, disagree: 0, symbolFree: 0, lost: 0, extra: 0 });
     s.files++;
     const content = fs.readFileSync(row.abs, 'utf8');
     const backend = backends.get(row.language);
+
+    if (isValidatorStep) {
+      // **Step 2, §3.5.** The disagreement rate against the *shipped* validator, per language,
+      // with every disagreement written out so it can be read. §60's standard, and its second
+      // half — the inverse control — lives in `test/unit/deep-backend-validator.test.ts`,
+      // because 0 findings is also what a validator that examines nothing reports.
+      const item = createContextItem({ id: 'x', kind: 'file', content, language: row.language });
+      const fastValidator = selectValidator(item);
+      if (!fastValidator) {
+        // Nothing to compare against. Counted rather than scored — an uncovered item agreeing
+        // with anything is the vacuity §23 exists to surface.
+        s.uncovered++;
+        continue;
+      }
+      let fastResult;
+      let deepResult;
+      try {
+        fastResult = fastValidator.validate(content);
+        deepResult = backend.check(content);
+      } catch (e) {
+        parseFailures++;
+        disagreements.push({ label: row.label, language: row.language, parseError: String(e && e.message) });
+        continue;
+      }
+      if (fastResult.valid === deepResult.valid) {
+        s.agree++;
+      } else {
+        s.disagree++;
+        if (!deepResult.valid) s.deepOnly++;
+        else s.fastOnly++;
+        disagreements.push({
+          label: row.label,
+          language: row.language,
+          bytes: content.length,
+          fastValid: fastResult.valid,
+          deepValid: deepResult.valid,
+          fastCodes: [...new Set(fastResult.issues.map((i) => i.code))],
+          deepIssues: deepResult.issues.slice(0, 3).map((i) => ({ line: i.line, column: i.column, code: i.code })),
+        });
+      }
+      continue;
+    }
 
     let deep;
     try {
@@ -169,19 +216,43 @@ async function main() {
     ? `corpus ${manifest.engine.commit.slice(0, 7)}${manifest.engine.dirty ? ' (DIRTY)' : ''} dist ${manifest.engine.distHash.slice(0, 12)}`
     : `tree ${args.files}`;
   console.log(`deep-parity step=${args.step} · ${rows.length} files · ${pin}\n`);
-  console.log('language      files  scored  agree  disagree  symbol-free   lost  extra');
-  for (const [lang, s] of Object.entries(stats).sort()) {
-    const scored = s.agree + s.disagree;
-    console.log(
-      `${lang.padEnd(12)} ${String(s.files).padStart(5)}  ${String(scored).padStart(6)}  ${String(s.agree).padStart(5)}  ` +
-        `${String(s.disagree).padStart(8)}  ${String(s.symbolFree).padStart(11)}  ${String(s.lost).padStart(5)}  ${String(s.extra).padStart(5)}`,
-    );
+  if (isValidatorStep) {
+    console.log('language      files  scored  agree  disagree      rate  deep-only  fast-only  uncovered');
+    for (const [lang, s] of Object.entries(stats).sort()) {
+      const scored = s.agree + s.disagree;
+      const rate = scored === 0 ? 'n/a' : ((100 * s.disagree) / scored).toFixed(2) + '%';
+      console.log(
+        `${lang.padEnd(12)} ${String(s.files).padStart(5)}  ${String(scored).padStart(6)}  ${String(s.agree).padStart(5)}  ` +
+          `${String(s.disagree).padStart(8)}  ${rate.padStart(8)}  ${String(s.deepOnly).padStart(9)}  ${String(s.fastOnly).padStart(9)}  ${String(s.uncovered).padStart(9)}`,
+      );
+      if (scored < 5000) {
+        console.log(
+          `${' '.repeat(12)} NOTE: §3.5 asks for >=5,000 scored files for this language; this run scored ${scored}.`,
+        );
+      }
+    }
+  } else {
+    console.log('language      files  scored  agree  disagree  symbol-free   lost  extra');
+    for (const [lang, s] of Object.entries(stats).sort()) {
+      const scored = s.agree + s.disagree;
+      console.log(
+        `${lang.padEnd(12)} ${String(s.files).padStart(5)}  ${String(scored).padStart(6)}  ${String(s.agree).padStart(5)}  ` +
+          `${String(s.disagree).padStart(8)}  ${String(s.symbolFree).padStart(11)}  ${String(s.lost).padStart(5)}  ${String(s.extra).padStart(5)}`,
+      );
+    }
   }
   if (parseFailures > 0) console.log(`\nparse failures: ${parseFailures}`);
 
-  // Next to the tree that was scanned, never `process.cwd()` — which is the repository root in
-  // practice and silently drops an untracked report into it.
-  const outPath = path.join(args.files ?? args.positional[0], `deep-parity-${args.step}.json`);
+  // **Never `process.cwd()` and never the scanned tree.** Both were tried and both were wrong:
+  // cwd is the repository root in practice, and the scanned tree in `--files` mode is somebody
+  // else's — a first run of this dropped a report inside a CPython installation. A corpus
+  // directory is ours to write in; anything else requires `--out`.
+  const outDir = args.out ?? (args.files ? null : args.positional[0]);
+  if (outDir === null) {
+    console.error('REFUSED: --files needs --out <dir>. The scanned tree is not ours to write into.');
+    process.exit(2);
+  }
+  const outPath = path.join(outDir, `deep-parity-${args.step}.json`);
   fs.writeFileSync(outPath, JSON.stringify({ pin, stats, disagreements }, null, 2));
   console.log(`\n${disagreements.length} disagreeing files -> ${outPath}`);
 }
