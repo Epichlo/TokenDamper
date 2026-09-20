@@ -32,3 +32,35 @@ describe('deep regions() — typescript', () => {
     expect(ts.regions('const f = (x: number) => x + 1;\n')).toHaveLength(0);
   });
 });
+
+describe('deep regions() — python', () => {
+  it('spans first-body-char to end of last body line', async () => {
+    const backends = await createDeepBackends();
+    const py = backends.find((b) => b.language === 'python')!;
+    const src = 'def add(a, b):\n    return a + b\n';
+    const regions = py.regions(src);
+
+    expect(regions).toHaveLength(1);
+    // Starts at `return`, not at the indent — scanPythonDefBodies uses
+    // `firstBody.start + bodyIndent`. Ends at the end of the line, excluding `\n`.
+    expect(src.slice(regions[0]!.start, regions[0]!.end)).toBe('return a + b');
+  });
+
+  it('keeps the docstring outside the region when asked', async () => {
+    const backends = await createDeepBackends();
+    const py = backends.find((b) => b.language === 'python')!;
+    const src = 'def f():\n    """Doc."""\n    return 1\n';
+    const kept = py.regions(src, { keepDocstrings: true });
+
+    expect(kept).toHaveLength(1);
+    expect(src.slice(kept[0]!.start, kept[0]!.end)).toBe('return 1');
+  });
+
+  it('emits no region for a body that is only a docstring when docstrings are kept', async () => {
+    const backends = await createDeepBackends();
+    const py = backends.find((b) => b.language === 'python')!;
+    // Keeping the docstring leaves nothing to elide. An empty span here would be a region
+    // that removes zero bytes and still writes a marker — strictly worse than the original.
+    expect(py.regions('def f():\n    """Only a doc."""\n', { keepDocstrings: true })).toHaveLength(0);
+  });
+});

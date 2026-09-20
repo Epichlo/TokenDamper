@@ -87,10 +87,50 @@ function goRegions(root: Node): DeepRegion[] {
   return regions;
 }
 
-function pythonRegions(_root: Node, _tree: Tree, _options: DeepRegionOptions): DeepRegion[] {
-  // Implemented in Task 2. Returning [] here would be indistinguishable from "found nothing",
-  // which is the §60 failure — so it throws until it is real.
-  throw new Error('tokendamper-deep: python regions() lands in Task 2');
+/**
+ * Extends `index` to the end of the line containing it, excluding the `\n`.
+ *
+ * Reproduces `scanPythonDefBodies`'s `lineAt(last).end`, which is `nextLineStart - 1`. On a
+ * CRLF file that position is the `\r`, so the region includes it — matching Fast exactly,
+ * because a region that stopped one byte earlier would differ on every CRLF row for a reason
+ * unrelated to discovery. This repository's own corpus is CRLF (DECISIONS §45).
+ */
+function endOfLineContaining(content: string, index: number): number {
+  const newline = content.indexOf('\n', index);
+  return newline === -1 ? content.length : newline;
+}
+
+/** Whether a block's first statement is a bare string expression — i.e. a docstring. */
+function firstStatementIsDocstring(block: Node): boolean {
+  const first = block.namedChild(0);
+  if (!first || first.type !== 'expression_statement') return false;
+  const inner = first.namedChild(0);
+  return inner !== null && inner.type === 'string';
+}
+
+function pythonRegions(root: Node, tree: Tree, options: DeepRegionOptions): DeepRegion[] {
+  const content = tree.rootNode.text;
+  const regions: DeepRegion[] = [];
+
+  walk(root, (node) => {
+    if (node.type !== 'function_definition') return;
+    const block = node.childForFieldName('body');
+    if (!block || block.type !== 'block') return;
+
+    // The block's first token is already the first non-whitespace character of the body,
+    // which is what `firstBody.start + bodyIndent` computes lexically.
+    let first = block.namedChild(0);
+    if (options.keepDocstrings && firstStatementIsDocstring(block)) {
+      first = block.namedChild(1);
+    }
+    if (!first) return;
+
+    const start = first.startIndex;
+    const end = endOfLineContaining(content, block.endIndex - 1);
+    if (end > start) regions.push({ start, end });
+  });
+
+  return regions;
 }
 
 /** Converts a parse tree into candidate elision spans. Pure. */
