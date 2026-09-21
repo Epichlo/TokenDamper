@@ -1,3 +1,5 @@
+import type { EngineMode } from '../../parser/mode';
+
 /**
  * Supported target languages for AST validation.
  */
@@ -64,6 +66,13 @@ export interface AstValidatorOptions {
    * Maximum allowed execution duration in milliseconds. Defaults to 5ms SLA per item.
    */
   readonly maxTimeMs?: number;
+  /**
+   * Which backend answers. `fast` (the default) never reads the parser registry.
+   *
+   * Threaded rather than read from a module global so two bundles validated in one process
+   * cannot silently share a mode.
+   */
+  readonly mode?: EngineMode;
 }
 
 /**

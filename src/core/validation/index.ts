@@ -14,6 +14,7 @@ import { extractConstraintDirectives } from '../../stages/cleanup/constraint-pre
 import { ELISION_HASH_PREFIX_LENGTH } from '../elision';
 import { hashContent } from '../model/constructors';
 import { DriftTracker } from '../ledger/drift-tracker';
+import type { EngineMode } from '../parser/types';
 import { validateBundleAst } from './ast';
 import { describeLanguageSupport } from './language-support';
 
@@ -22,6 +23,8 @@ export * from './language-support';
 
 export interface ValidationOptions {
   readonly maxDriftThreshold?: number | undefined;
+  /** Which backend answers AST validation. Drift keeps the shipped extractor regardless. */
+  readonly mode?: EngineMode | undefined;
 }
 
 /**
@@ -38,7 +41,7 @@ export function validate(
   const issues: ValidationIssue[] = [];
 
   // 1. Run AST Validation on optimized bundle
-  const astResult = validateBundleAst(after);
+  const astResult = validateBundleAst(after, options?.mode ? { mode: options.mode } : undefined);
   const unchecked = new Set(astResult.unvalidatedItemIds);
   const astCoverage: AstCoverage = {
     checked: after.items.length - unchecked.size,
