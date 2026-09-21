@@ -179,3 +179,168 @@ describe('deep regions() agree with Fast on straightforward source', () => {
     expect(deep).toEqual(fast);
   });
 });
+
+// A nested function — a local helper in TypeScript, a closure in Python — is where the
+// previous describe block's premise ("no construct either scanner finds ambiguous") stops
+// holding. This block pins what actually happens there, on purpose, as a characterization
+// rather than a defect.
+//
+// **Why this is not a bug.** `backend.regions()` (`packages/deep/src/regions.ts`) is discovery
+// only: `walk` visits every node in the tree, so a `function_declaration`/`function_definition`
+// nested inside another one is visited and matched just like the outer one — there is no
+// "already inside a match" state to skip it. `selectElisionRegions`
+// (`src/core/elision/regions.ts`) is discovery *and* a selection policy: `scanBraceSpans` and
+// `scanPythonDefBodies` emit the same nested candidate Deep does (nothing in either scanner
+// tracks nesting either), but the caller then runs `dropOverlapping` (`regions.ts:410-422`) over
+// the candidate list, and that function's whole job is to keep the outer/earlier region and drop
+// anything nested inside it — "kept" in `selectElisionRegions`'s own return statement is
+// `dropOverlapping(candidates).filter(...)` (`regions.ts:1104`). Deep's candidate list is not
+// run through that filter this release, so its nested candidate survives to the return value.
+//
+// **Why the fix is not in `regions.ts`.** Making `walk` skip a function nested inside an
+// already-matched one would special-case Deep to imitate one caller's policy, permanently —
+// even though `dropOverlapping` already does exactly that job, generically, for whichever
+// candidate list it is handed, Fast's own included. A later task routes Deep's candidates through
+// `selectElisionRegions` itself, at which point `dropOverlapping` discards Deep's nested region
+// the same way it discards Fast's, with no change to either scanner. Until then, Deep's raw
+// discovery finding one more candidate than Fast's post-filter list is not a disagreement about
+// what a function body is — it is a discovery pass being compared to a discovery-plus-policy
+// pass. **If you "fix" `regions.ts` to make `deep.length` below read 1, you have made discovery
+// worse (a real candidate a future sub-region caller may want is now gone) to paper over this
+// comparison, and this test will fail on that line to tell you so.**
+describe('deep regions() vs Fast — nested functions (a discovery/policy divergence, not a bug)', () => {
+  it('typescript: Deep finds the outer body and the nested one; Fast keeps only the outer', async () => {
+    const backends = await createDeepBackends();
+    const ts = backends.find((b) => b.language === 'typescript')!;
+    const src =
+      'export function outer(a: number) {\n' +
+      '  function inner(b: number) {\n' +
+      '    return b + 1;\n' +
+      '  }\n' +
+      '  const x0 = a + 0;\n' +
+      '  const x1 = a + 1;\n' +
+      '  const x2 = a + 2;\n' +
+      '  const x3 = a + 3;\n' +
+      '  const x4 = a + 4;\n' +
+      '  return inner(x0) + x1 + x2 + x3 + x4;\n' +
+      '}\n';
+    const item = createContextItem({
+      id: 'nested-ts',
+      kind: 'file',
+      content: src,
+      path: '/tmp/nested.ts',
+      language: 'typescript',
+    });
+
+    const deep = ts.regions(src);
+    const fast = selectElisionRegions(item);
+
+    // Deep: outer's body (193 bytes, comfortably past the 104-byte floor Fast applies and
+    // Deep does not) and, nested inside it, `inner`'s own body.
+    expect(deep).toHaveLength(2);
+    expect(src.slice(deep[0]!.start, deep[0]!.end)).toBe(
+      '\n  function inner(b: number) {\n    return b + 1;\n  }\n  const x0 = a + 0;\n' +
+        '  const x1 = a + 1;\n  const x2 = a + 2;\n  const x3 = a + 3;\n  const x4 = a + 4;\n' +
+        '  return inner(x0) + x1 + x2 + x3 + x4;\n',
+    );
+    expect(src.slice(deep[1]!.start, deep[1]!.end)).toBe('\n    return b + 1;\n  ');
+
+    // Fast: `scanBraceSpans` finds the identical nested candidate (its header,
+    // `function inner(b: number) {`, passes `FUNCTION_HEADER` just like the outer one does).
+    // `dropOverlapping` sorts candidates by ascending start, keeps the outer one first (its
+    // start is earliest) and advances its cursor to the outer's end; when it then reaches the
+    // nested candidate, that candidate's start is still behind the cursor, so it is dropped.
+    // One region survives, and it is byte-identical to Deep's outer region — not a coincidence,
+    // since both scanners found the same outer span.
+    expect(fast).toHaveLength(1);
+    expect(fast[0]).toEqual(deep[0]);
+  });
+
+  it('python: Deep finds the outer body and the nested one; Fast keeps only the outer', async () => {
+    const backends = await createDeepBackends();
+    const py = backends.find((b) => b.language === 'python')!;
+    const src =
+      'def outer(a):\n' +
+      '    def inner(b):\n' +
+      '        return b + 1\n' +
+      '    x0 = a + 0\n' +
+      '    x1 = a + 1\n' +
+      '    x2 = a + 2\n' +
+      '    x3 = a + 3\n' +
+      '    x4 = a + 4\n' +
+      '    return inner(x0) + x1 + x2 + x3 + x4\n';
+    const item = createContextItem({
+      id: 'nested-py',
+      kind: 'file',
+      content: src,
+      path: '/tmp/nested.py',
+      language: 'python',
+    });
+
+    const deep = py.regions(src);
+    const fast = selectElisionRegions(item);
+
+    // Deep: outer's body (150 bytes, past the same 104-byte floor) and, nested inside it,
+    // `inner`'s own body.
+    expect(deep).toHaveLength(2);
+    expect(src.slice(deep[0]!.start, deep[0]!.end)).toBe(
+      'def inner(b):\n        return b + 1\n    x0 = a + 0\n    x1 = a + 1\n' +
+        '    x2 = a + 2\n    x3 = a + 3\n    x4 = a + 4\n    return inner(x0) + x1 + x2 + x3 + x4',
+    );
+    expect(src.slice(deep[1]!.start, deep[1]!.end)).toBe('return b + 1');
+
+    // Fast: `scanPythonDefBodies` matches every `^\s*def\s.*:\s*$` line, nested ones included,
+    // for the same reason `scanBraceSpans` does above — nothing in the scanner tracks nesting.
+    // `dropOverlapping` then subsumes `inner`'s region into `outer`'s. One region survives, and
+    // it is byte-identical to Deep's outer region.
+    expect(fast).toHaveLength(1);
+    expect(fast[0]).toEqual(deep[0]);
+  });
+
+  it('go: a closure is func_literal, matched by neither side, so nesting is not this test', async () => {
+    const backends = await createDeepBackends();
+    const go = backends.find((b) => b.language === 'go')!;
+    const src =
+      'package main\n\n' +
+      'func outer(a int) int {\n' +
+      '\thandler := func(b int) int {\n' +
+      '\t\treturn b + 1\n' +
+      '\t}\n' +
+      '\tx0 := a + 0\n' +
+      '\tx1 := a + 1\n' +
+      '\tx2 := a + 2\n' +
+      '\tx3 := a + 3\n' +
+      '\tx4 := a + 4\n' +
+      '\treturn handler(x0) + x1 + x2 + x3 + x4\n' +
+      '}\n';
+    const item = createContextItem({
+      id: 'nested-go',
+      kind: 'file',
+      content: src,
+      path: '/tmp/nested.go',
+      language: 'go',
+    });
+
+    const deep = go.regions(src);
+    const fast = selectElisionRegions(item);
+
+    // Go has no equivalent of a nested named function — the closest a closure gets is a
+    // `func_literal` assigned to a variable, and that node type is in neither side's function
+    // set: `GO_FUNCTION_NODES` (packages/deep/src/regions.ts) is `function_declaration` and
+    // `method_declaration` only, and Fast's `GO_FUNCTION_HEADER = /^func\b/`
+    // (src/core/elision/regions.ts) requires the keyword to *start* the header line, which
+    // `handler := func(b int) int {` does not (documented at that regex's definition as
+    // deliberate: a closure's body "sit[s] inside an enclosing function body that is already a
+    // candidate"). Both sides therefore see the outer function only, and the two agree exactly
+    // — this is what stops a reader of the two tests above from concluding Deep/Fast diverge on
+    // every nested construct; the divergence is specific to named nested functions in
+    // TypeScript and Python, and Go has none.
+    expect(deep).toHaveLength(1);
+    expect(fast).toHaveLength(1);
+    expect(src.slice(deep[0]!.start, deep[0]!.end)).toBe(
+      '\n\thandler := func(b int) int {\n\t\treturn b + 1\n\t}\n\tx0 := a + 0\n\tx1 := a + 1\n' +
+        '\tx2 := a + 2\n\tx3 := a + 3\n\tx4 := a + 4\n\treturn handler(x0) + x1 + x2 + x3 + x4\n',
+    );
+    expect(fast[0]).toEqual(deep[0]);
+  });
+});
