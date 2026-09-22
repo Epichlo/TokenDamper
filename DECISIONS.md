@@ -6469,3 +6469,164 @@ out of scope for R3** — recorded for R4, with its size measured on a corpus th
   `web-tree-sitter`'s per-process init remains unmeasured, which is §75's open concern.
 - **The disagreement counts are verdict-level, not issue-level.** Two validators agreeing that a
   file is invalid are counted as agreeing even if they blame different lines.
+
+---
+
+## 81. R3 Step 3: Deep Chooses Regions, And Cannot Validate Its Own Output
+
+**Status: decided and measured, 2026-09-23.** Closes R3. Steps 1 and 2 are §79 and §80.
+
+### What shipped
+
+`ParserAdapter.regions()` is real for TypeScript, Python and Go, and reachable from the CLI as
+`tokendamper optimize <file> --engine-mode deep`. Deep replaces **candidate span discovery only** —
+`dropOverlapping`, `MIN_REGION_BYTES`, `isSubstantiveRegion`, `trimRegionsToCeiling` and
+`splitRegionIntoStatements` all stay in core and run over the backend's candidates unchanged. That
+is what makes a differing corpus row attributable: one thing moved.
+
+Three decisions, taken deliberately:
+
+- **Deep answers `regions()` and `check()`; `symbols()` stays Fast.** §79 measured that part of the
+  shipped drift signal on code is phantom symbols harvested from English in comments. Feeding
+  Deep's symbols to the live gate would drop drift on code toward zero and stop the retention gate
+  discriminating. Deep's `symbols()` therefore remains harness-only.
+- **`--engine-mode fast|deep`, not a third `--mode` value.** `--mode` already carries
+  `optimize|bench`, a different axis that 2.0 withdraws. A third value would make bench-under-deep
+  unrepresentable by construction. The flag applies to `optimize` **only** — `bench`'s runner does
+  not read the mode, and a flag that registers backends without changing what the benchmark
+  measures is accepted-then-ignored with a side effect (§30).
+- **Zero registered backends under `--engine-mode deep` is a hard error.** A deep run that
+  silently ran Fast is a green result from a path that never executed. §54 is the precedent.
+
+### The finding that changed the release: Deep cannot validate TokenDamper's own output
+
+Wiring `check()` live made deep mode reduce **nothing**. Measured on
+`src/core/parser/coverage.ts` at ratio 0.3, through the built CLI:
+
+| configuration | tokens | fallback |
+|---|---|---|
+| fast | 292 -> **211** | no |
+| deep regions + deep `check()` | 292 -> **292** | **yes**, `AST Error … Parse error` |
+
+The elision marker — `[TokenDamper: N function-body lines elided, N bytes, sha256:…]` spliced into
+a function body — is not valid TypeScript or Python. Confirmed at unit level: tree-sitter rejects
+it in both languages while a clean control passes.
+
+**This is documented behaviour becoming reachable, not a new defect.** The Issue 2 entry in
+`CLAUDE.md` already states that the load-bearing mechanism is correct-by-construction rendering
+rather than the post-condition check, and that "Only `JsonValidator` rejects a bare placeholder;
+the TS and Python AST-lite validators accept it, so `post_condition_rejected` is unreachable
+today." Deep makes it reachable for the first time, and our own output fails it.
+
+So the axes separate. `engineMode` drives region discovery; `validationMode` drives validation and
+**defaults to `fast`**. Deep validation stays reachable in the API — it is real, and §80 measured
+it over thousands of files per language — but it cannot be combined with elision until the marker
+is rendered validly per language, which moves emitted bytes on the Fast path and belongs to its
+own release with its own measurement.
+
+`ValidationOptions` gained `coverageMode` so `trace.parserCoverage` keeps naming the mode that
+chose the **regions**. Passing the validation mode to both reported `fast` on a run whose regions
+came from Deep — a coverage block asserting something the run did not measure, which is the defect
+class that block was added to prevent.
+
+### The measurement
+
+One frozen corpus, 297 files, engine `268898d`, ratio 0.3, both arms.
+
+| bucket | fast | deep | files reducing |
+|---|---|---|---|
+| python (file) | 17.75% | **22.26%** | 34 -> 37 |
+| python (stdin) | 17.39% | **21.89%** | 32 -> 35 |
+| typescript (file) | 20.35% | 20.20% | 42 -> 41 |
+
+Every other bucket reads 0.00% in both arms, unchanged.
+
+Per-row: **594 rows, 540 identical, 54 differing**, 154 backend answers.
+
+| verdict | rows | |
+|---|---|---|
+| `differs-deep-smaller` | 21 | python 18, typescript 3 |
+| `differs-deep-larger` | 20 | python 20 |
+| `recovered` | 8 | python — fell back under Fast, reduces under Deep |
+| `new-fallback-region` | 5 | python 4, typescript 1 |
+| `new-fallback-validator` | **0** | as predicted: both arms validate through the same Fast lexer |
+
+**Target adherence improves, which is the axis §3.5 cares about.** Rows landing in the 25–35% band
+went **12 -> 20** of 54; mean over differing rows 26.01% -> 35.84%. `cli/autocompletion.py` went
+from 67.3% — a massive overshoot of the 0.3 target — to 36.6%. `build_env/venv.py` and `cache.py`
+went from 0% (fallback) to 69.4% and 36.7%.
+
+**Go, measured separately over the frozen 80-file corpus:** 160 rows, **158 identical, 2
+differing** (both `differs-deep-smaller`), **zero** new fallbacks, 80 backend answers. `go-stdlib`
+file route reads 20.56% in both arms.
+
+### The gate fails on 5 rows, and what that turned out to mean
+
+§3.5 says fallbacks must not rise. Five rows rose. All five are `CONSTRAINT_DIRECTIVE_LOST`, and
+none of them is a region defect.
+
+**Deep's regions are a strict superset of Fast's on every failing file:**
+
+| file | fast | deep | only-in-deep | only-in-fast |
+|---|---|---|---|---|
+| `src/core/constraints/directives.ts` | 4 | 5 | 1 | 0 |
+| pip `build_env/installer.py` | 2 | 5 | 3 | 0 |
+| pip `locations/_distutils.py` | 1 | 3 | 3 | 0 |
+
+The TypeScript case is the cleanest demonstration of parser-over-lexer this project has produced,
+and it is pointed at itself. The function Fast misses is **`extractImperativeDirectives`** — the
+function that implements the constraint gate. Its signature carries a multi-line object return
+type, so the header text before the body's `{` ends with `}`, and Fast's `FUNCTION_HEADER` regex
+`/\)\s*(?::\s*[^{;=]+)?$|=>$/` cannot match it. Tree-sitter identifies it as a
+`function_declaration` regardless. Its body contains comments discussing `must`, `never` and
+`always`, which the constraint gate then reads as directives and refuses.
+
+So each of the five is **a discovery improvement producing an outcome regression**, through §52's
+known constraint-gate false-positive axis — narrative prose about directives being read as
+directives. R2's Axis B (§78) already measured that gate's remaining ceiling at 1 file of 188 and
+closed it on measurement. **Net fallbacks fell**: 8 recovered against 5 new.
+
+Recorded rather than fixed, by explicit decision. Making Deep skip directive-bearing regions would
+make its discovery deliberately worse to satisfy a gate whose own false-positive rate is the known
+problem — laundering the improvement the release exists to demonstrate.
+
+### Latency
+
+Re-baselined on this machine, because §76's figures are machine-specific and did not reproduce:
+
+- fast: cold engine p50 **137.8ms**, warm p50 **2.2ms**, ratio **63.24x**; CLI wall p50 248.0ms;
+  fixed per-process 109.8ms.
+- `pruning:topology-pruner` p50 **135.0ms — 98% of cold engine time**, all of it `git status`.
+- Deep's added cost, over five cold processes: `require` 7.2–7.6ms, `Parser.init()` plus four
+  grammars 14.6–15.6ms — **~22ms per process**, landing in `fixed` rather than engine time.
+  Corpus wall went 31s -> 36s (+17%) over 594 rows, consistent with ~22ms on a 248ms CLI wall.
+
+**§75's concern is answered.** `web-tree-sitter` init was flagged as a plausible reason Deep could
+be unusable at the CLI while fine at the Gateway. It is 22ms, and it is invisible against a
+pruner that costs 135ms.
+
+### What this does **not** establish
+
+- **JavaScript is not registered and therefore not measured through the live path.** No Fast
+  validator ever returns the language `javascript` — `.js` resolves to the TypeScript validator,
+  whose `language` is `typescript` — so a backend registered under that key could never be
+  resolved. R3 covers **three** languages through the live path, not four. §80's 0.11% JavaScript
+  figure remains valid as an off-registry measurement.
+- **Step 2's ≥5,000-file shortfall stands.** TypeScript sampled 1,164 files and JavaScript 1,823,
+  both under §3.5's bar, and the TypeScript sample was `node_modules` — mostly `.d.ts`. Not
+  reopened here.
+- **Deep mode still subdivides with the Fast statement splitter.** `splitRegionIntoStatements`
+  resolves its language through the Fast chain with no mode plumbed, so the ceiling path is
+  Fast-driven even under `--engine-mode deep`.
+- **Drift still uses the shipped regex extractor**, so §79's open question — what happens to the
+  drift signal on code if Deep's symbols ever feed the live gate — is deferred, not answered.
+- **Deep was not profiled per stage.** `timing-run.js` has no `--engine-mode` passthrough; the
+  deep latency figures above are process-level init plus corpus wall time.
+- **The Go corpus has weaker provenance than the main one.** Its manifest was generated in place
+  because its filenames are already flattened and `collect.js` would re-flatten them past the
+  Windows path limit. It is not a `collect.js` pin.
+- **The corpus denominator moved.** `.superpowers` was excluded (agent scratch had taken 19 of 40
+  prose slots — the `.agents` lesson repeating) and the typescript bucket went 63 -> 67 files with
+  its `limit` raised 64 -> 80, because for the first time the limit BOUND and was silently
+  dropping files rather than refusing. Aggregates here are **not** comparable to the 63-file R2
+  baselines; per-row over one frozen corpus still is.

@@ -211,12 +211,30 @@ DECISIONS §75, scheduled in `ROADMAP.md`.** Four releases, named rather than nu
   implementing** (§78: `must` is 49% of the remaining segments and genuinely imperative, and the
   measured ceiling on the whole axis is **1 file of 188**). Read §78 before reopening it — it names
   what would change the answer.
-- **R3 — the `ParserAdapter` seam and the Deep path on the four languages that already work.
-  NEXT, and not started — `src/core/parser/` does not exist.** No new dependency, no new language,
-  no reduction change; the deliverable is a measurement. **Start at `docs/r3-start-here.md`**, which
-  carries the state R3 begins from, the three things that do *not* survive a session (the frozen
-  corpus, the timing baseline, the Go corpus) and the traps specific to measuring a second backend.
-  Delete that file when R3 lands.
+- **R3 — CLOSED 2026-09-23 (DECISIONS §79, §80, §81).** The `ParserAdapter` seam, and Deep
+  answering `symbols()`, `check()` and `regions()`. Reachable as
+  `tokendamper optimize <file> --engine-mode deep`. **Three languages through the live path, not
+  four** — no Fast validator ever returns the language `javascript` (a `.js` file resolves to the
+  TypeScript validator, whose `language` is `typescript`), so a JavaScript backend could never be
+  resolved and is deliberately left unregistered.
+  - **Deep reduces more on Python and is flat on TypeScript.** Over one frozen 297-file corpus at
+    ratio 0.3: python file route **17.75% → 22.26%**, typescript **20.35% → 20.20%**. Per-row, 540
+    of 594 identical. Target adherence improves — rows landing in the 25–35% band went **12 → 20**
+    of 54 differing, because Fast was overshooting (one file went 67.3% → 36.6%).
+  - **The headline finding: Deep cannot validate TokenDamper's own output.** The elision marker
+    spliced into a function body is not valid TypeScript or Python, so wiring Deep's `check()`
+    live made deep mode reduce **nothing** (292 → 292 tokens with a fallback, against 292 → 211
+    for the same file in fast mode). This is Issue 2's post-condition becoming reachable for the
+    first time, not a new defect. `validationMode` is therefore a **separate axis from
+    `engineMode` and defaults to `fast`** — do not wire them together again without reading §81.
+  - **Five rows fail §3.5's "fallbacks must not rise", and they are recorded rather than fixed.**
+    All five are `CONSTRAINT_DIRECTIVE_LOST` on regions Deep found and Fast missed — its regions
+    are a strict superset on every failing file. The cleanest case is
+    `extractImperativeDirectives`, the function that *implements* the constraint gate: its
+    multi-line object return type means the header before `{` ends with `}`, which Fast's
+    `FUNCTION_HEADER` regex cannot match. Net fallbacks fell, 8 recovered against 5 new.
+  - `Parser.init()` plus four grammars is **~22ms per process**, answering §75's concern that it
+    might make Deep unusable at the CLI. `topology-pruner` is 98% of cold engine time.
 - **v2.0.0 — `tokendamper-deep` ships**, N languages reduce, and `--mode` is withdrawn
   (`optimize|bench` today, where `optimize` is the identity and `bench` duplicates the positional
   command) so the name can mean `fast|deep`.

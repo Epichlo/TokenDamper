@@ -660,8 +660,15 @@ the improvement the feature exists for. §59/§60/§61 staged Go the same way:
 Steps 1 and 2 are true negative controls and their assertion is identity. Step 3 is not, and
 pretending otherwise would either block the feature or launder a regression as an improvement.
 
-- **Exit:** all three steps on all four existing languages; Deep reachable via `--mode deep`, with
-  every difference from Fast read by a person.
+- **Exit — MET 2026-09-23, with two deviations recorded in DECISIONS §81.** All three steps
+  measured, Deep reachable via **`--engine-mode deep`** (not `--mode deep`: `--mode` still carries
+  `optimize|bench` until 2.0, and a third value would make bench-under-deep unrepresentable), and
+  every one of the 54 differing corpus rows read by a person.
+  - **Three languages through the live path, not four.** A JavaScript backend cannot be resolved,
+    because no Fast validator returns the language `javascript`.
+  - **Five rows fail "fallbacks must not rise" and are recorded rather than fixed.** All five are
+    the constraint gate refusing regions Deep found and Fast missed; Deep's regions are a strict
+    superset on every failing file, and net fallbacks fell (8 recovered against 5 new).
 
 ---
 
@@ -844,7 +851,7 @@ remediation track was inserted. Corrected below; the numbering now matches the c
 | v1.7.3 | Prior release | §71 — `symbolBearingItems` counts symbols; a trace field moves on 254 of 580 rows | `outputSha` identical on all 580 | Tagged 2026-09-01 — never published on its own; ships inside v1.7.4 |
 | **v1.7.4** | **R1 — ship the backlog** | The 2026-08-30 security remediation, §73–§74 (S-01–S-04) · three `oxaudit.md` tooling items · the README restructure · v1.7.3 carried with it | No corpus run — R1 adds no code | **Cut 2026-09-19.** A patch over moved output, by explicit call; publish is the user's step |
 | **R2** | **A trustworthy instrument** | **DONE 2026-09-19.** Latency harness (§76) · Axis A shipped (§77 — 10 files recovered, 0 new fallbacks, retention 100%) · Axis B closed without implementing (§78 — ceiling 1 file of 188) | Retention side at 100%; a pinned latency baseline | **Exit met.** R3 unblocked |
-| **R3** | **The seam** | `ParserAdapter` + Deep path on the 4 existing languages; staged negative control | Steps 1–2 byte-identical; step 3 classified | No new dependency, no new language |
+| **R3** | **The seam** | **DONE 2026-09-23.** `ParserAdapter` + Deep on **3** live languages (JS unresolvable); `--engine-mode deep` | Steps 1–2 byte-identical; step 3 classified — 540/594 identical, python 17.75%→22.26%, adherence 12→20 rows on target | **Exit met, 2 deviations (§81).** Deep cannot validate its own elision marker, so `validationMode` is a separate axis defaulting to fast |
 | *unnumbered* | Selection quality | BM25 + graph hybrid scorer, dual-path MMR | `<10ms` pipeline selection | ⛔ **Both preconditions measured false** — holds no number |
 | ~~*unnumbered*~~ | ~~Folding & cache~~ | **Split 2026-09-09.** Folding → the R1–R4 spine (Deep is coverage, not precision); `cache_control` → Milestone 8 | — | ↪ **Replaced.** Fast was already shipped in `elision/regions.ts` |
 | *held* | Retrieval | `rehydrate_context` with sub-query matching | Targeted line extraction | ✅ Unblocked (M5b shipped); response shape still to design |
