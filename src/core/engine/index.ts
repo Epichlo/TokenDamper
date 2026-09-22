@@ -386,14 +386,17 @@ export function optimize(
         reason: options.inputNotRepresentable,
         ...(validation.driftReport ? { driftReport: validation.driftReport } : {}),
         ...(validation.astCoverage ? { astCoverage: validation.astCoverage } : {}),
-        // `request.bundle`, not `currentBundle`. This branch is the one genuine "the run falls
-        // back to raw input" path in this file — it exists to say the pipeline was never looking
-        // at the caller's input at all (see the comment above), and `finalBundle` below is
-        // `request.bundle` whenever a fallback happens. `currentBundle` here was built from a
-        // string the adapter has already flagged as a lossy stand-in for the real bytes, so
-        // reporting coverage against it would describe a bundle this run neither emits nor was
-        // honestly looking at.
-        parserCoverage: parserCoverage(request.bundle, options?.engineMode ?? DEFAULT_ENGINE_MODE),
+        // Mirrors `astCoverage` immediately above: carried forward from the validation this run
+        // already did, not recomputed. `astCoverage` and `parserCoverage` answer the same
+        // question — how many items were actually submitted to a validator, and how — about the
+        // same population, and only `currentBundle` (what the last `validate()` call actually
+        // examined) is that population. `request.bundle` is the pre-pruning set: an item the
+        // planner dropped before the first `validate()` call would be counted here as though a
+        // validator had looked at it, when nothing ever did — the exact failure this field exists
+        // to prevent, reproduced on itself. If there is no prior validation result, the field is
+        // correctly absent rather than fabricated as zero: "nothing looked" and "we looked and
+        // found none" are the two states this block exists to keep apart.
+        ...(validation.parserCoverage ? { parserCoverage: validation.parserCoverage } : {}),
         ...(validation.driftCoverage ? { driftCoverage: validation.driftCoverage } : {}),
         ...(validation.languageSupport ? { languageSupport: validation.languageSupport } : {}),
       });
