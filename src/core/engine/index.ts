@@ -64,6 +64,29 @@ export interface EngineOptimizationOptions {
    * What would be a violation is either of them being non-deterministic within itself.
    */
   readonly engineMode?: EngineMode;
+  /**
+   * Which backend **validates** the optimized bundle. Defaults to `fast`, independently of
+   * `engineMode`.
+   *
+   * **The default encodes a measured product limitation, not a preference.** Deep's `check()`
+   * is a real syntax check, and TokenDamper's own elision marker —
+   * `[TokenDamper: N function-body lines elided, N bytes, sha256:…]` spliced into a function
+   * body — is not valid TypeScript or Python. Fast's lexer accepts it because it checks
+   * bracket and quote balance only, which is exactly what the Issue 2 entry in `CLAUDE.md`
+   * records: the post-condition check is unreachable today because the TS and Python
+   * validators accept a bare placeholder. Deep makes it reachable, and our own output fails
+   * it — measured on `src/core/parser/coverage.ts` at ratio 0.3 as **292 -> 292 tokens with a
+   * fallback**, against **292 -> 211** for the same file in fast mode.
+   *
+   * So deep validation and elision cannot currently be combined: every reducing file would
+   * fall back for a reason that has nothing to do with which regions were chosen, which would
+   * make the region comparison this release exists to produce unmeasurable. Deep validation
+   * stays reachable here, because it is real and step 2 measured it over thousands of files
+   * per language (DECISIONS §80) — it is simply not the default until the marker is rendered
+   * validly per language, which changes emitted bytes on the Fast path and belongs to its own
+   * release with its own measurement.
+   */
+  readonly validationMode?: EngineMode;
 }
 
 /**
@@ -185,14 +208,23 @@ export function optimize(
 
     let debtBreakdown = computeDebtBreakdown(debtTracker, currentBundle, options?.confidenceLedger, turn);
 
-    // Shared by every `validate(` call below, so `engineMode` reaches AST validation on the
-    // initial pass, the post-rehydration revalidation and the post-repair revalidation alike —
-    // not just the one that happens to run first.
+    // Shared by every `validate(` call below, so the modes reach AST validation on the initial
+    // pass, the post-rehydration revalidation and the post-repair revalidation alike — not just
+    // the one that happens to run first.
+    //
+    // **Two axes, deliberately.** `mode` selects the validator and comes from `validationMode`,
+    // which defaults to fast for the reason documented on that option. `coverageMode` is what
+    // `trace.parserCoverage` describes and comes from `engineMode`, because that block exists to
+    // witness *region discovery* for this release. Passing `validationMode` to both would make
+    // the trace report `fast` on a run whose regions were chosen by Deep — a coverage block
+    // asserting something the run did not measure, which is the exact defect class the block was
+    // added to prevent.
     const valOptions =
-      options?.maxDriftThreshold !== undefined || options?.engineMode
+      options?.maxDriftThreshold !== undefined || options?.validationMode || options?.engineMode
         ? {
             ...(options?.maxDriftThreshold !== undefined ? { maxDriftThreshold: options.maxDriftThreshold } : {}),
-            ...(options?.engineMode ? { mode: options.engineMode } : {}),
+            ...(options?.validationMode ? { mode: options.validationMode } : {}),
+            ...(options?.engineMode ? { coverageMode: options.engineMode } : {}),
           }
         : undefined;
 

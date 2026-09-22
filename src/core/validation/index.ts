@@ -27,6 +27,17 @@ export interface ValidationOptions {
   readonly maxDriftThreshold?: number | undefined;
   /** Which backend answers AST validation. Drift keeps the shipped extractor regardless. */
   readonly mode?: EngineMode | undefined;
+  /**
+   * Which mode `parserCoverage` should describe, when it differs from the validating one.
+   *
+   * The engine runs region discovery and validation on separate axes — deep regions with fast
+   * validation is the configuration this release measures, because Deep's validator rejects
+   * TokenDamper's own elision marker. Without this field the coverage block would name the
+   * validator's mode and silently misreport which backend chose the regions.
+   *
+   * Defaults to `mode`, so any caller that has only one mode keeps the old behaviour.
+   */
+  readonly coverageMode?: EngineMode | undefined;
 }
 
 /**
@@ -59,7 +70,14 @@ export function validate(
   // rather than only at the engine's failure-branch rewrites — the plain success path (no
   // repair, no rehydration, no fallback) never touches any of those, and it is the commonest
   // outcome a caller will see.
-  const coverage: ParserCoverage = parserCoverage(after, options?.mode ?? DEFAULT_ENGINE_MODE);
+  // `coverageMode`, not `mode`. Since the engine gained separate region and validation axes,
+  // these are no longer the same question: `mode` says which backend *validated*, while this
+  // block exists to witness which backend *discovered regions*. Falls back to `mode` for callers
+  // that pass only one, which is every caller outside the engine.
+  const coverage: ParserCoverage = parserCoverage(
+    after,
+    options?.coverageMode ?? options?.mode ?? DEFAULT_ENGINE_MODE,
+  );
 
   if (!astResult.valid) {
     for (const issue of astResult.issues) {

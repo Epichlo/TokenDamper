@@ -160,3 +160,57 @@ describe('parserCoverage at the inputNotRepresentable trace site (Fix round 1)',
     });
   });
 });
+
+/**
+ * The two axes are separate, and the default on the validation axis is a measured finding.
+ *
+ * Deep's `check()` is a real syntax check, and TokenDamper's own elision marker —
+ * `[TokenDamper: N function-body lines elided, N bytes, sha256:…]` spliced into a function
+ * body — is not valid TypeScript or Python. Fast's lexer accepts it because it checks bracket
+ * and quote balance only; that is exactly what CLAUDE.md's Issue 2 entry records when it says
+ * the post-condition check is unreachable today because the TS and Python validators accept a
+ * bare placeholder. Deep makes it reachable and our own output fails it.
+ *
+ * Measured on `src/core/parser/coverage.ts` at ratio 0.3, through the built CLI:
+ *
+ *   fast:                       292 -> 211 tokens, fallbackUsed false
+ *   deep regions + deep check:  292 -> 292 tokens, fallbackUsed TRUE ("AST Error ... Parse error")
+ *
+ * So deep validation and elision cannot be combined until the marker is rendered validly per
+ * language. If the first test below starts failing, deep validation has leaked back into the
+ * default path. If the second starts failing, either the marker became parseable (good — go
+ * delete this and flip the default) or the deep validator stopped examining anything (bad).
+ */
+describe('validationMode is a separate axis from engineMode', () => {
+  /** Rejects everything. Stands in for Deep refusing TokenDamper's own elision marker. */
+  const rejecting: ParserAdapter = {
+    name: 'always-rejects',
+    language: 'typescript',
+    symbols: () => new Set<string>(),
+    check: () => ({
+      valid: false,
+      issues: [{ line: 1, column: 0, message: 'stub rejection', code: 'STUB' }],
+      durationMs: 0,
+    }),
+    regions: () => [],
+  };
+
+  it('does not validate with the deep backend when only engineMode is deep', () => {
+    registerParserBackend(rejecting);
+    expect(optimize(request(), { engineMode: 'deep' }).fallbackUsed).toBe(false);
+  });
+
+  it('validates with the deep backend when validationMode asks for it', () => {
+    registerParserBackend(rejecting);
+    expect(optimize(request(), { engineMode: 'deep', validationMode: 'deep' }).fallbackUsed).toBe(true);
+  });
+
+  it('reports the REGION mode on parserCoverage, not the validating one', () => {
+    registerParserBackend(rejecting);
+    // Regions deep, validation fast. A coverage block naming `fast` here would describe the
+    // validator while claiming to witness which backend chose the regions.
+    const result = optimize(request(), { engineMode: 'deep' });
+    expect(result.trace.parserCoverage?.mode).toBe('deep');
+    expect(result.trace.parserCoverage?.backendAnswered).toBe(1);
+  });
+});
