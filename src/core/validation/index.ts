@@ -7,6 +7,7 @@ import type {
   LanguageSupportReport,
   OptimizationBudget,
   OptimizationPlan,
+  ParserCoverage,
   ValidationIssue,
   ValidationReport,
 } from '../model';
@@ -14,7 +15,8 @@ import { extractConstraintDirectives } from '../../stages/cleanup/constraint-pre
 import { ELISION_HASH_PREFIX_LENGTH } from '../elision';
 import { hashContent } from '../model/constructors';
 import { DriftTracker } from '../ledger/drift-tracker';
-import type { EngineMode } from '../parser/types';
+import { parserCoverage } from '../parser/coverage';
+import { DEFAULT_ENGINE_MODE, type EngineMode } from '../parser/types';
 import { validateBundleAst } from './ast';
 import { describeLanguageSupport } from './language-support';
 
@@ -50,6 +52,14 @@ export function validate(
       ...new Set(after.items.filter((item) => unchecked.has(item.id)).map((item) => item.contentType)),
     ]),
   };
+
+  // Same "did anything look" question as `astCoverage`, one layer down: whether a Deep backend
+  // actually answered for `after`'s items, as opposed to `--engine-mode deep` producing
+  // byte-identical output because nothing ran. Computed here, over every call to `validate()`,
+  // rather than only at the engine's failure-branch rewrites — the plain success path (no
+  // repair, no rehydration, no fallback) never touches any of those, and it is the commonest
+  // outcome a caller will see.
+  const coverage: ParserCoverage = parserCoverage(after, options?.mode ?? DEFAULT_ENGINE_MODE);
 
   if (!astResult.valid) {
     for (const issue of astResult.issues) {
@@ -248,6 +258,7 @@ export function validate(
     shouldFallback,
     driftReport,
     astCoverage,
+    parserCoverage: coverage,
     driftCoverage,
     languageSupport,
     attribution,

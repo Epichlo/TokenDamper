@@ -1,4 +1,5 @@
 import type { ContextBundle, ContextItem, OptimizationBudget, StageResult } from '../../core/model/types';
+import type { EngineMode } from '../../core/parser/types';
 import { createBundleStatistics, createStageResult, freeze, hashContent } from '../../core/model/constructors';
 import {
   describeContentType,
@@ -41,6 +42,8 @@ export interface TokenHashingStageOptions {
   readonly tokenizer?: TokenizerAdapter;
   /** Keep leading docstrings outside the elided region (Python only). See `SelectRegionsOptions`. */
   readonly keepDocstrings?: boolean;
+  /** Which backend discovers candidate regions. Defaults to `fast`. */
+  readonly mode?: EngineMode;
 }
 
 /**
@@ -187,7 +190,10 @@ export function runTokenHashingStage(
     // `selectElisionRegions` returns nothing for content it cannot segment safely — JSON,
     // prose, logs, truncated code with no complete body — and the whole-item path below
     // still handles those exactly as before.
-    const allRegions = selectElisionRegions(item, { keepDocstrings: options?.keepDocstrings ?? false });
+    const allRegions = selectElisionRegions(item, {
+      keepDocstrings: options?.keepDocstrings ?? false,
+      ...(options?.mode ? { mode: options.mode } : {}),
+    });
     // Trimmed to what the target actually needs.
     //
     // The item-level check above cannot bind on the commonest CLI shape: `optimize one-file.ts`

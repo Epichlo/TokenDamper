@@ -22,6 +22,8 @@ import type { ConfidenceLedger } from '../ledger/confidence-ledger';
 import { DebtTracker, type DebtTrackerOptions } from '../ledger/debt-tracker';
 import type { DeltaCompressionOptions } from '../../stages/compression/delta-compression';
 import type { TokenHashingStageOptions } from '../../stages/compression/token-hashing';
+import { parserCoverage } from '../parser/coverage';
+import { DEFAULT_ENGINE_MODE, type EngineMode } from '../parser/mode';
 
 export interface EngineOptimizationOptions {
   readonly sessionContext?: SessionDedupContext;
@@ -54,6 +56,14 @@ export interface EngineOptimizationOptions {
    * it to `--keep-docstrings`. A retention/size trade the caller opts into — DECISIONS §58.
    */
   readonly keepDocstrings?: boolean;
+  /**
+   * Which backend answers the three language questions. `fast` is the default and the only
+   * value any shipped entry mode passed before R3.
+   *
+   * Invariant 1 is per-*configuration*: fast and deep may legitimately differ on one file.
+   * What would be a violation is either of them being non-deterministic within itself.
+   */
+  readonly engineMode?: EngineMode;
 }
 
 /**
@@ -81,14 +91,18 @@ export function optimize(
     let stageFailed = false;
     let failureReason: string | undefined;
 
-    // `tokenHashingOptions` carries both the (optional) store and `keepDocstrings`, so it is
-    // built whenever *either* is present — the CLI supplies no hasher but can still ask for
-    // docstrings to be kept, which the old `tokenHasher ? …` guard would have dropped.
+    // `tokenHashingOptions` carries the (optional) store, `keepDocstrings` and `engineMode`, so
+    // it is built whenever *any* is present — the CLI supplies no hasher but can still ask for
+    // docstrings to be kept or for deep mode, either of which the old `tokenHasher ? …` guard
+    // would have dropped. Without `engineMode` in this guard, `--engine-mode deep` with no
+    // hasher and no `--keep-docstrings` — the commonest CLI shape — would build no options
+    // object at all, and deep mode would silently do nothing.
     const tokenHashingOptions: TokenHashingStageOptions | undefined =
-      options?.tokenHasher || options?.keepDocstrings
+      options?.tokenHasher || options?.keepDocstrings || options?.engineMode
         ? {
             ...(options?.tokenHasher ? { tokenHasher: options.tokenHasher } : {}),
             ...(options?.keepDocstrings ? { keepDocstrings: true } : {}),
+            ...(options?.engineMode ? { mode: options.engineMode } : {}),
           }
         : undefined;
 
@@ -171,7 +185,16 @@ export function optimize(
 
     let debtBreakdown = computeDebtBreakdown(debtTracker, currentBundle, options?.confidenceLedger, turn);
 
-    const valOptions = options?.maxDriftThreshold !== undefined ? { maxDriftThreshold: options.maxDriftThreshold } : undefined;
+    // Shared by every `validate(` call below, so `engineMode` reaches AST validation on the
+    // initial pass, the post-rehydration revalidation and the post-repair revalidation alike —
+    // not just the one that happens to run first.
+    const valOptions =
+      options?.maxDriftThreshold !== undefined || options?.engineMode
+        ? {
+            ...(options?.maxDriftThreshold !== undefined ? { maxDriftThreshold: options.maxDriftThreshold } : {}),
+            ...(options?.engineMode ? { mode: options.engineMode } : {}),
+          }
+        : undefined;
 
     let validation = createValidationReport(
       validate(request.bundle, currentBundle, selectedPlan, request.budget, valOptions),
@@ -309,6 +332,10 @@ export function optimize(
         reason,
         ...(validation.driftReport ? { driftReport: validation.driftReport } : {}),
         ...(validation.astCoverage ? { astCoverage: validation.astCoverage } : {}),
+        // `currentBundle`: this branch is about `currentBundle` itself — a block-hash or
+        // confidence failure detected on the bundle the pipeline actually produced, independent
+        // of whether a fallback follows.
+        parserCoverage: parserCoverage(currentBundle, options?.engineMode ?? DEFAULT_ENGINE_MODE),
         ...(validation.driftCoverage ? { driftCoverage: validation.driftCoverage } : {}),
         ...(validation.languageSupport ? { languageSupport: validation.languageSupport } : {}),
       });
@@ -331,6 +358,9 @@ export function optimize(
         reason: failureReason ?? 'Stage execution failed',
         ...(validation.driftReport ? { driftReport: validation.driftReport } : {}),
         ...(validation.astCoverage ? { astCoverage: validation.astCoverage } : {}),
+        // `currentBundle`: whatever the stages produced before the failing stage broke, which is
+        // exactly what this report is about.
+        parserCoverage: parserCoverage(currentBundle, options?.engineMode ?? DEFAULT_ENGINE_MODE),
         ...(validation.driftCoverage ? { driftCoverage: validation.driftCoverage } : {}),
         ...(validation.languageSupport ? { languageSupport: validation.languageSupport } : {}),
       });
@@ -356,6 +386,14 @@ export function optimize(
         reason: options.inputNotRepresentable,
         ...(validation.driftReport ? { driftReport: validation.driftReport } : {}),
         ...(validation.astCoverage ? { astCoverage: validation.astCoverage } : {}),
+        // `request.bundle`, not `currentBundle`. This branch is the one genuine "the run falls
+        // back to raw input" path in this file — it exists to say the pipeline was never looking
+        // at the caller's input at all (see the comment above), and `finalBundle` below is
+        // `request.bundle` whenever a fallback happens. `currentBundle` here was built from a
+        // string the adapter has already flagged as a lossy stand-in for the real bytes, so
+        // reporting coverage against it would describe a bundle this run neither emits nor was
+        // honestly looking at.
+        parserCoverage: parserCoverage(request.bundle, options?.engineMode ?? DEFAULT_ENGINE_MODE),
         ...(validation.driftCoverage ? { driftCoverage: validation.driftCoverage } : {}),
         ...(validation.languageSupport ? { languageSupport: validation.languageSupport } : {}),
       });
