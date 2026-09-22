@@ -23,8 +23,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - **Three languages through the live path, not four.** No Fast validator returns the language
     `javascript`, so a JavaScript backend could never be resolved and is left unregistered.
   - **Five rows newly fall back**, all `CONSTRAINT_DIRECTIVE_LOST` on regions Deep found and Fast
-    missed. Recorded rather than fixed — Deep's regions are a strict superset on every failing
-    file, and net fallbacks fell (8 recovered against 5 new).
+    missed. Recorded rather than fixed — a strict superset on two of the three failing files,
+    disjoint on the third, and net fallbacks fell (8 recovered against 5 new).
+  - **Known convention divergence, characterized not fixed:** Deep starts a Python body after a
+    leading `#` comment where Fast includes it. 16 of 45 pip corpus files carry that shape, and
+    in 3 the excluded comment drops the span under `MIN_REGION_BYTES` so Deep declines the region.
 - **`validationMode`, a separate axis from `engineMode`, defaulting to `fast`.** Deep's `check()`
   rejects TokenDamper's own elision marker, so deep validation and elision cannot be combined:
   with both live, a file went **292 → 292 tokens with a fallback** against **292 → 211** in fast
@@ -32,7 +35,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   defect. Deep validation stays reachable in the API and is what §80 measured.
 - **`trace.parserCoverage`**, reporting the mode, the registered languages, and how many items a
   Deep backend answered for — so `--engine-mode deep` producing byte-identical output and
-  `--engine-mode deep` never having run stop being the same observation.
+  `--engine-mode deep` never having run stop being the same observation. **It is emitted on every
+  run, fast included** (reading `mode: "fast"`, `backendAnswered: 0`), so anything parsing the
+  trace sees a new field on the default path even if it never passes `--engine-mode`.
 
 - **Deep `check()`, and the validator disagreement measurement — R3 step 2 of three (DECISIONS
   §80).** `packages/deep` reads tree-sitter's `ERROR` and `MISSING` nodes and reports them as an

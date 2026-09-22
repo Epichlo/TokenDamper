@@ -531,6 +531,12 @@ export function splitRegionIntoStatements(
   region: ElisionRegion,
   options?: SelectRegionsOptions,
 ): ReadonlyArray<ElisionRegion> {
+  // `regionElisionLanguage(item)` with no mode, deliberately — but note the trap in the
+  // signature: this takes the same `SelectRegionsOptions` as `selectElisionRegions`, which
+  // carries `mode`, and **this function ignores it**. Subdivision on the ceiling path is
+  // Fast-driven even under `--engine-mode deep`, which DECISIONS §81 records as a limitation of
+  // that release. The type says a caller may pass a mode; only `minRegionBytes` is read. If you
+  // wire subdivision to the backend, change this line and §81's "does not establish" together.
   const language = regionElisionLanguage(item);
   if (language === undefined) {
     return [];

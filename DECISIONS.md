@@ -6565,13 +6565,40 @@ file route reads 20.56% in both arms.
 §3.5 says fallbacks must not rise. Five rows rose. All five are `CONSTRAINT_DIRECTIVE_LOST`, and
 none of them is a region defect.
 
-**Deep's regions are a strict superset of Fast's on every failing file:**
+**Deep finds regions Fast misses on every failing file, and on two of the three its set is a
+strict superset:**
 
 | file | fast | deep | only-in-deep | only-in-fast |
 |---|---|---|---|---|
 | `src/core/constraints/directives.ts` | 4 | 5 | 1 | 0 |
 | pip `build_env/installer.py` | 2 | 5 | 3 | 0 |
-| pip `locations/_distutils.py` | 1 | 3 | 3 | 0 |
+| pip `locations/_distutils.py` | 1 | 3 | 3 | **1** |
+
+> **The third row is not a superset, and the first draft of this table said it was.** It claimed
+> `only-in-fast 0`, which is arithmetically impossible beside `fast 1` and `deep 3` — a shared
+> region would make Deep 4. The final whole-branch review caught it; the column had been filled
+> in by assumption because the ledger only recorded the only-in-deep figure. **The two sets on
+> that file are disjoint.**
+>
+> The cause is a real convention divergence that the agreement tests did not cover, because
+> every one of their fixtures opens with a statement. `scanPythonDefBodies` scans lines and
+> starts at the first non-blank body line whatever it holds, so a leading `#` comment is inside
+> Fast's span; tree-sitter treats a comment as an extra, so `block.namedChild(0)` is the first
+> statement and the comment stays outside Deep's. Same end, different start. Measured over the
+> frozen 45-file pip corpus, **16 files** contain at least one such pair, and in **3** of them
+> excluding the comment drops the span under `MIN_REGION_BYTES` so Deep declines the region
+> altogether. `_distutils.py` is one of those three: Fast elides from `# XXX: In old virtualenv
+> versions…` at offset 5141, Deep from `prefix = os.path.normpath(…)` at 5273.
+>
+> Recorded rather than changed — Deep keeping the comment is the more conservative slice, and
+> making the two agree would move the numbers above. `deep-backend-regions.test.ts` now pins it.
+>
+> **It weakens one attribution in this section and the weakening is stated rather than buried.**
+> All 8 `recovered` rows fell back under Fast on `CONSTRAINT_DIRECTIVE_LOST`, and Deep *excluding*
+> a leading comment is by itself a mechanism that avoids that gate, independent of discovery. So
+> "net fallbacks fell, 8 against 5" is real as an outcome but is **not** cleanly attributable to
+> better region discovery alone, and neither is an unknown share of the 20 `differs-deep-larger`
+> rows.
 
 The TypeScript case is the cleanest demonstration of parser-over-lexer this project has produced,
 and it is pointed at itself. The function Fast misses is **`extractImperativeDirectives`** — the

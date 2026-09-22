@@ -667,8 +667,10 @@ pretending otherwise would either block the feature or launder a regression as a
   - **Three languages through the live path, not four.** A JavaScript backend cannot be resolved,
     because no Fast validator returns the language `javascript`.
   - **Five rows fail "fallbacks must not rise" and are recorded rather than fixed.** All five are
-    the constraint gate refusing regions Deep found and Fast missed; Deep's regions are a strict
-    superset on every failing file, and net fallbacks fell (8 recovered against 5 new).
+    the constraint gate refusing regions Deep found and Fast missed — a strict superset on two of
+    the three failing files, disjoint on the third. Net fallbacks fell (8 recovered against 5
+    new), though §81 records that the recovered count is not cleanly attributable to discovery
+    alone.
 
 ---
 

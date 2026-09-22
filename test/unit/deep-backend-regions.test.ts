@@ -200,9 +200,12 @@ describe('deep regions() agree with Fast on straightforward source', () => {
 // **Why the fix is not in `regions.ts`.** Making `walk` skip a function nested inside an
 // already-matched one would special-case Deep to imitate one caller's policy, permanently —
 // even though `dropOverlapping` already does exactly that job, generically, for whichever
-// candidate list it is handed, Fast's own included. A later task routes Deep's candidates through
-// `selectElisionRegions` itself, at which point `dropOverlapping` discards Deep's nested region
-// the same way it discards Fast's, with no change to either scanner. Until then, Deep's raw
+// candidate list it is handed, Fast's own included. That routing has since landed —
+// `selectElisionRegions` consults the registry in deep mode, and
+// `test/unit/elision-regions-mode.test.ts` pins that `dropOverlapping` discards Deep's nested
+// region exactly as it discards Fast's, with no change to either scanner. This file still
+// compares raw discovery against a post-filter list, which is why the counts below differ. So
+// read the next paragraph as describing *this* comparison, not an unfinished one: Deep's raw
 // discovery finding one more candidate than Fast's post-filter list is not a disagreement about
 // what a function body is — it is a discovery pass being compared to a discovery-plus-policy
 // pass. **If you "fix" `regions.ts` to make `deep.length` below read 1, you have made discovery
@@ -342,5 +345,67 @@ describe('deep regions() vs Fast — nested functions (a discovery/policy diverg
         '\tx2 := a + 2\n\tx3 := a + 3\n\tx4 := a + 4\n\treturn handler(x0) + x1 + x2 + x3 + x4\n',
     );
     expect(fast[0]).toEqual(deep[0]);
+  });
+});
+
+/**
+ * Fast and Deep disagree about where a Python body STARTS when it opens with a comment, and
+ * the agreement block above does not cover it because all of its fixtures open with a statement.
+ *
+ * `scanPythonDefBodies` scans lines and starts at the first non-blank body line whatever it
+ * holds, so a leading `#` comment is inside Fast's span. tree-sitter treats a comment as an
+ * extra, so `block.namedChild(0)` is the first statement and the comment stays outside Deep's.
+ * Same end, different start.
+ *
+ * Measured over the frozen 45-file pip corpus when R3 step 3 was recorded: 16 files contain at
+ * least one such pair, and in 3 of them excluding the comment drops the span under
+ * `MIN_REGION_BYTES` so Deep declines the region entirely. One of those, `locations/_distutils.py`,
+ * is why DECISIONS §81's superset table has a non-zero only-in-fast column — the two region sets
+ * are disjoint there, not nested.
+ *
+ * This is a characterization test, not a defect report. Deep keeping the comment is the more
+ * conservative slice. If someone makes the two agree, this fails on purpose and §81's numbers
+ * need re-measuring, because the recovered-row attribution partly rests on this behaviour.
+ */
+describe('python bodies that open with a comment', () => {
+  const SRC =
+    'def f(a):\n' +
+    '    # A leading note that is long enough to matter to the size filter downstream.\n' +
+    '    total = a * 2\n' +
+    '    return total\n';
+
+  it('Fast starts at the comment, Deep starts at the first statement', async () => {
+    const backends = await createDeepBackends();
+    const py = backends.find((b) => b.language === 'python')!;
+    const item = createContextItem({ id: 'p', kind: 'file', content: SRC, path: '/tmp/a.py', language: 'python' });
+
+    const fast = selectElisionRegions(item, { minRegionBytes: 0 });
+    const deep = py.regions(SRC);
+
+    expect(fast).toHaveLength(1);
+    expect(deep).toHaveLength(1);
+    // Same end.
+    expect(deep[0]!.end).toBe(fast[0]!.end);
+    // Different start, and this is what the assertion is about.
+    expect(deep[0]!.start).toBeGreaterThan(fast[0]!.start);
+    expect(SRC.slice(fast[0]!.start, fast[0]!.start + 1)).toBe('#');
+    expect(SRC.slice(deep[0]!.start).startsWith('total =')).toBe(true);
+  });
+
+  it('agrees again once the leading comment is gone', async () => {
+    const backends = await createDeepBackends();
+    const py = backends.find((b) => b.language === 'python')!;
+    const noComment = 'def f(a):\n    total = a * 2\n    return total\n';
+    const item = createContextItem({
+      id: 'p2',
+      kind: 'file',
+      content: noComment,
+      path: '/tmp/b.py',
+      language: 'python',
+    });
+
+    const fast = selectElisionRegions(item, { minRegionBytes: 0 }).map((r) => ({ start: r.start, end: r.end }));
+    const deep = py.regions(noComment).map((r) => ({ start: r.start, end: r.end }));
+    expect(deep).toEqual(fast);
   });
 });

@@ -117,8 +117,19 @@ function pythonRegions(root: Node, tree: Tree, options: DeepRegionOptions): Deep
     const block = node.childForFieldName('body');
     if (!block || block.type !== 'block') return;
 
-    // The block's first token is already the first non-whitespace character of the body,
-    // which is what `firstBody.start + bodyIndent` computes lexically.
+    // The block's first *named* child, which is the first statement.
+    //
+    // **This is not the same position Fast starts at when the body opens with a comment**, and
+    // the difference is real rather than an off-by-one. `scanPythonDefBodies` scans lines and
+    // begins at the first non-blank body line whatever it holds, so a leading `#` comment is
+    // inside Fast's span; tree-sitter treats a comment as an extra, so `namedChild(0)` is the
+    // first statement and the comment stays outside Deep's. Measured over the frozen 45-file pip
+    // corpus: 16 files contain at least one such same-end/different-start pair, and in 3 of them
+    // excluding the comment drops the span under `MIN_REGION_BYTES` so Deep declines the region
+    // altogether. DECISIONS §81 records it; `deep-backend-regions.test.ts` pins it.
+    //
+    // Left as is deliberately. Deep keeping the comment is the more conservative slice, and
+    // changing it would move the measurement §81 reports.
     let first = block.namedChild(0);
     if (options.keepDocstrings && firstStatementIsDocstring(block)) {
       first = block.namedChild(1);

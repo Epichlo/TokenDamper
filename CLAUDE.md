@@ -228,8 +228,10 @@ DECISIONS §75, scheduled in `ROADMAP.md`.** Four releases, named rather than nu
     first time, not a new defect. `validationMode` is therefore a **separate axis from
     `engineMode` and defaults to `fast`** — do not wire them together again without reading §81.
   - **Five rows fail §3.5's "fallbacks must not rise", and they are recorded rather than fixed.**
-    All five are `CONSTRAINT_DIRECTIVE_LOST` on regions Deep found and Fast missed — its regions
-    are a strict superset on every failing file. The cleanest case is
+    All five are `CONSTRAINT_DIRECTIVE_LOST` on regions Deep found and Fast missed — a strict
+    superset on two of the three failing files, and disjoint on the third, where Deep starts a
+    Python body *after* a leading comment that Fast includes (§81; 16 of 45 pip files carry that
+    shape). The cleanest case is
     `extractImperativeDirectives`, the function that *implements* the constraint gate: its
     multi-line object return type means the header before `{` ends with `}`, which Fast's
     `FUNCTION_HEADER` regex cannot match. Net fallbacks fell, 8 recovered against 5 new.
