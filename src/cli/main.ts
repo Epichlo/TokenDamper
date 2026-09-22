@@ -631,7 +631,15 @@ export const SUPPORTED_FLAGS: Readonly<Record<'optimize' | 'bench' | 'mcp', Read
     '--language',
     '--input-name',
   ]),
-  bench: new Set([...COMMON_FLAGS, '--report-json', '--quiet', '--evaluate-quality', '--engine-mode']),
+  // `--engine-mode` is deliberately absent here. `src/bench/runner.ts` calls
+  // `optimize(request, { tokenHasher })` with no mode, so accepting the flag on `bench` today
+  // would register deep backends (and could hard-fail if `packages/deep` is unbuilt) while the
+  // benchmark itself still measured fast mode — a flag with a side effect and a possible error,
+  // but not the behaviour its name promises. That is worse than the inert-dial shape
+  // `--minimum-confidence`/`--max-debt` are documented as (M13): those do nothing at all, which
+  // is at least honest. Add `--engine-mode` back here in the same change that threads
+  // `engineMode` into `BenchmarkRunnerConfig`/`runner.ts` — not before.
+  bench: new Set([...COMMON_FLAGS, '--report-json', '--quiet', '--evaluate-quality']),
   mcp: new Set(COMMON_FLAGS),
 };
 
@@ -960,7 +968,6 @@ export function parseArguments(argv: readonly string[], cwd: string): ParsedArgu
       ...(reportJsonPath ? { reportJsonPath } : {}),
       ...(evaluateQuality ? { evaluateQuality } : {}),
       ...(quiet ? { quiet } : {}),
-      ...(engineMode === 'deep' ? { engineMode } : {}),
       execArgs: [],
       ...(configPath ? { configPath } : {}),
       configOverrides: resolvedOverrides,
