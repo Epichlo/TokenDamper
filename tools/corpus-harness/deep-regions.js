@@ -9,17 +9,33 @@
  *
  * ## Why two fallback numbers and not one
  *
- * §3.5 says "fallbacks must not rise". Taken as one number that assertion is unusable here,
- * because step 3 also makes Deep's `check()` live, and §80 measured a 9.28% TypeScript
- * disagreement rate — much of it Deep being *wrong* where the grammar lags the language.
- * Those fallbacks have nothing to do with region discovery. So each new fallback is
- * attributed:
+ * §3.5 says "fallbacks must not rise". This split was designed when Deep's `check()` was meant
+ * to run live on the optimize path: §80 measured a 9.28% TypeScript disagreement rate between
+ * Deep's validator and Fast's, so a `new-fallback-validator` row would usually be Deep's own
+ * validator being *wrong* where the grammar lags the language — expected noise, reported but
+ * not gated.
  *
- *   - **validator-attributable** — the deep row's trace carries an AST issue. Reported,
- *     predicted by §80, and not gated.
- *   - **region-attributable** — everything else. **This is the number §3.5 gates.**
+ * **That premise no longer holds, and this comment used to keep telling the old story.** Deep's
+ * `check()` rejects TokenDamper's own elision marker (`[TokenDamper: N function-body lines
+ * elided, …]` is not valid TypeScript or Python), so deep validation and elision cannot be
+ * combined, and `validationMode` now defaults to `'fast'` for exactly that reason (see the "two
+ * axes" comment in `src/core/engine/index.ts`). **Both arms of this comparison validate through
+ * the identical Fast lexer, regardless of `--engine-mode`. Deep's validator does not run in
+ * either run.**
  *
- * Collapsing them would let a region regression hide behind a known validator disagreement.
+ * So a `new-fallback-validator` row no longer means "Deep's validator disagreed with Fast's" —
+ * that class of disagreement cannot reach this comparison at all. It means the deep arm
+ * produced a fallback whose reason carries an AST error from **Fast's own validator**, on
+ * content the same validator accepted in the fast arm. The only thing that differs between the
+ * two arms is which regions were chosen. That makes it a region defect — Deep picked a boundary
+ * whose elision Fast's validator rejects — surfacing through a different symptom than a
+ * `new-fallback-region` row, and arguably the more serious of the two: the spliced output was
+ * rejected outright rather than merely scored worse.
+ *
+ * The two buckets stay separate because *which* symptom a region defect announces itself as is
+ * still worth knowing. But **both gate at zero for this measurement, not just
+ * region-attributable.** Collapsing them would hide a region regression behind a label that
+ * used to mean "expected" and no longer does.
  *
  * ## What it refuses
  *
@@ -57,8 +73,10 @@ function readRows(dir) {
 
 /**
  * AST validation issues are formatted `AST Error in item [<id>] at line …` by
- * `validation/index.ts`, so a fallback reason carrying that prefix is the deep validator
- * refusing the file — §80's predicted disagreement, not a region defect.
+ * `validation/index.ts`. Both arms validate through the identical Fast lexer (see the module
+ * docstring), so a fallback reason carrying that prefix is **Fast's own validator** rejecting
+ * the deep arm's spliced output — not Deep's validator disagreeing with anything. It is still a
+ * region defect; this only names which symptom it announced itself through.
  */
 function isValidatorFallback(row) {
   return typeof row.fallbackReason === 'string' && row.fallbackReason.includes('AST Error');
@@ -75,7 +93,7 @@ function classify(fastRow, deepRow) {
   return 'differs-same-size';
 }
 
-function main() {
+async function main() {
   const [fastDir, deepDir, ...rest] = process.argv.slice(2);
   const outIndex = rest.indexOf('--out');
   if (!fastDir || !deepDir || outIndex === -1) {
@@ -133,4 +151,7 @@ function main() {
   console.log(JSON.stringify(buckets, null, 2));
 }
 
-main();
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});
