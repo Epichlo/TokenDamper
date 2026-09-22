@@ -214,3 +214,75 @@ describe('validationMode is a separate axis from engineMode', () => {
     expect(result.trace.parserCoverage?.backendAnswered).toBe(1);
   });
 });
+
+/**
+ * A backend shaped like the real one — it finds a region AND judges content — so the two
+ * axes are exercised against content that actually changes, not against stubs that elide
+ * nothing.
+ *
+ * The three tests above use `regions: () => []`, so nothing is ever elided in them. That is
+ * enough to prove the registry was or was not consulted, but it cannot pin the behaviour the
+ * default exists for: a marker that Deep *selected* must survive Fast validation. The task
+ * review that found this gap also found the `coverageMode` defect below it, so both are
+ * pinned here together.
+ */
+describe('the two axes against content that actually changes', () => {
+  /** Finds the whole function body, and rejects any content carrying an elision marker. */
+  const realistic: ParserAdapter = {
+    name: 'realistic',
+    language: 'typescript',
+    symbols: () => new Set<string>(),
+    check: (content: string) =>
+      content.includes('[TokenDamper: ')
+        ? {
+            valid: false,
+            issues: [{ line: 1, column: 0, message: 'marker is not parseable', code: 'STUB_MARKER' }],
+            durationMs: 0,
+          }
+        : { valid: true, issues: [], durationMs: 0 },
+    regions: (content: string) => {
+      const open = content.indexOf('{');
+      const close = content.lastIndexOf('}');
+      return open === -1 || close <= open ? [] : [{ start: open + 1, end: close }];
+    },
+  };
+
+  it('elides with the deep backend and survives fast validation', () => {
+    registerParserBackend(realistic);
+    const result = optimize(request(), { engineMode: 'deep' });
+
+    expect(result.fallbackUsed).toBe(false);
+    expect(result.emittedOutput).not.toBe(SRC);
+    expect(result.emittedOutput).toContain('[TokenDamper: ');
+  });
+
+  it('falls back when deep validation is asked for, because the marker is not parseable', () => {
+    registerParserBackend(realistic);
+    const result = optimize(request(), { engineMode: 'deep', validationMode: 'deep' });
+
+    expect(result.fallbackUsed).toBe(true);
+    expect(result.emittedOutput).toBe(SRC);
+  });
+
+  it('does not claim Deep discovered regions when only validationMode is deep', () => {
+    // The defect this pins: `coverageMode` was spread conditionally on `engineMode`, so this
+    // configuration left it unset and `validate()` fell back to the VALIDATION mode. The trace
+    // then reported `mode: "deep"` for a run whose regions Fast had selected.
+    //
+    // **The backend must ACCEPT, and that is the whole difficulty of testing this.** A
+    // rejecting backend forces a fallback, and the fallback branches rewrite `parserCoverage`
+    // from `options.engineMode` directly — which is correct, and therefore masks the defect
+    // completely. Only the plain success path reads `validate()`'s own coverage field. The
+    // first version of this test used a rejecting backend and passed against the unfixed code.
+    registerParserBackend({
+      ...realistic,
+      regions: () => [],
+      check: () => ({ valid: true, issues: [], durationMs: 0 }),
+    });
+    const result = optimize(request(), { validationMode: 'deep' });
+
+    // Fast selected the region, so nothing Deep did discovered anything.
+    expect(result.fallbackUsed).toBe(false);
+    expect(result.trace.parserCoverage?.mode).toBe('fast');
+  });
+});

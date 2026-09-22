@@ -224,7 +224,15 @@ export function optimize(
         ? {
             ...(options?.maxDriftThreshold !== undefined ? { maxDriftThreshold: options.maxDriftThreshold } : {}),
             ...(options?.validationMode ? { mode: options.validationMode } : {}),
-            ...(options?.engineMode ? { coverageMode: options.engineMode } : {}),
+            // Unconditional, and that is the fix for a real defect rather than tidiness. Spread
+            // conditionally on `engineMode`, a caller passing `validationMode: 'deep'` alone —
+            // the independent-axis use this option's own docstring invites — produced
+            // `{ mode: 'deep' }` with no `coverageMode`, so `validate()` fell back to `mode` and
+            // the trace claimed Deep discovered regions that Fast had actually found. Measured:
+            // output byte-identical to a pure-Fast run, `parserCoverage.mode: "deep"`,
+            // `backendAnswered: 1`, with a backend whose `regions()` returns `[]` and therefore
+            // provably selected nothing.
+            coverageMode: options?.engineMode ?? DEFAULT_ENGINE_MODE,
           }
         : undefined;
 
