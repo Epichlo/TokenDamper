@@ -7,6 +7,7 @@
  * Usage:
  *   node tools/corpus-harness/measure.js <out-dir> [--variant <label>] [--ratio 0.3]
  *                                        [--concurrency 8] [--routes file,stdin]
+ *                                        [--engine-mode fast|deep]
  *
  * Reads  <out-dir>/manifest.json
  * Writes <out-dir>/results-<variant>.jsonl and prints a per-bucket summary.
@@ -65,7 +66,7 @@ function parseTrace(stderr) {
   }
 }
 
-function runOnce({ route, absPath, bytes, ratio }) {
+function runOnce({ route, absPath, bytes, ratio, engineMode }) {
   return new Promise((resolve) => {
     // No `--trace-output stderr` here any more. The flag was withdrawn in audit OX-H5, so passing
     // it is now a parse error — and it never did anything anyway: the trace has always gone to
@@ -75,6 +76,7 @@ function runOnce({ route, absPath, bytes, ratio }) {
       route === 'file'
         ? ['optimize', absPath, '--target-reduction-ratio', String(ratio)]
         : ['optimize', '-', '--target-reduction-ratio', String(ratio)];
+    if (engineMode) args.push('--engine-mode', engineMode);
 
     const child = spawn(process.execPath, [CLI, ...args], { cwd: REPO_ROOT });
 
@@ -138,6 +140,10 @@ function flatten(file, route, run) {
     astChecked: t?.astCoverage?.checked ?? null,
     astUnchecked: t?.astCoverage?.unchecked ?? null,
     uncheckedContentTypes: t?.astCoverage?.uncheckedContentTypes ?? null,
+    parserMode: t?.parserCoverage?.mode ?? null,
+    parserBackendAnswered: t?.parserCoverage?.backendAnswered ?? null,
+    // The only per-row evidence of *why* a fallback happened. Written at trace/index.ts:85.
+    fallbackReason: t?.fallbackReason ?? null,
     driftMeasured: t?.driftCoverage?.measured ?? null,
     driftAstMeasured: t?.driftCoverage?.astMeasured ?? null,
     driftStructMeasured: t?.driftCoverage?.structMeasured ?? null,
@@ -205,7 +211,8 @@ async function main() {
   const outDir = args[0];
   if (!outDir) {
     console.error(
-      'usage: measure.js <out-dir> [--variant <label>] [--ratio 0.3] [--concurrency 8]',
+      'usage: measure.js <out-dir> [--variant <label>] [--ratio 0.3] [--concurrency 8] ' +
+        '[--routes file,stdin] [--engine-mode fast|deep]',
     );
     process.exit(2);
   }
@@ -218,6 +225,14 @@ async function main() {
   const ratio = Number(opt('ratio', '0.3'));
   const concurrency = Number(opt('concurrency', '8'));
   const routes = opt('routes', 'file,stdin').split(',');
+  // Defaults to undefined — passthrough only, never invents a mode the caller didn't ask for.
+  // Validated here rather than left to the CLI: a typo fails every row identically and reads
+  // like a corpus problem instead of the arg-parse error it actually is.
+  const engineMode = opt('engine-mode', undefined);
+  if (engineMode !== undefined && engineMode !== 'fast' && engineMode !== 'deep') {
+    console.error(`--engine-mode must be fast or deep, got ${JSON.stringify(engineMode)}`);
+    process.exit(2);
+  }
 
   const manifest = JSON.parse(fs.readFileSync(path.join(outDir, 'manifest.json'), 'utf8'));
 
@@ -243,7 +258,7 @@ async function main() {
   const rows = await pool(jobs, concurrency, async ({ file, route }) => {
     const abs = path.join(outDir, file.corpusPath);
     const bytes = fs.readFileSync(abs);
-    const run = await runOnce({ route, absPath: abs, bytes, ratio });
+    const run = await runOnce({ route, absPath: abs, bytes, ratio, engineMode });
     done += 1;
     if (done % 100 === 0) {
       process.stderr.write(`  ${done}/${jobs.length}\r`);

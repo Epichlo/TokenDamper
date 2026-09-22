@@ -1,0 +1,136 @@
+#!/usr/bin/env node
+'use strict';
+
+/**
+ * R3 step 3 — classifies every row where deep-mode output differs from fast-mode output.
+ *
+ * Usage:
+ *   node tools/corpus-harness/deep-regions.js <fast-run-dir> <deep-run-dir> --out <file.json>
+ *
+ * ## Why two fallback numbers and not one
+ *
+ * §3.5 says "fallbacks must not rise". Taken as one number that assertion is unusable here,
+ * because step 3 also makes Deep's `check()` live, and §80 measured a 9.28% TypeScript
+ * disagreement rate — much of it Deep being *wrong* where the grammar lags the language.
+ * Those fallbacks have nothing to do with region discovery. So each new fallback is
+ * attributed:
+ *
+ *   - **validator-attributable** — the deep row's trace carries an AST issue. Reported,
+ *     predicted by §80, and not gated.
+ *   - **region-attributable** — everything else. **This is the number §3.5 gates.**
+ *
+ * Collapsing them would let a region regression hide behind a known validator disagreement.
+ *
+ * ## What it refuses
+ *
+ *  - an empty comparison set — the shape a bad glob produces, and it reads as agreement
+ *  - a row present in one run and missing from the other
+ *  - a deep run whose `parserCoverage.backendAnswered` is 0 on every row: that is a deep run
+ *    that never ran deep, and it would report perfect agreement
+ */
+
+const fs = require('fs');
+const path = require('path');
+
+/**
+ * Reads one measure.js run.
+ *
+ * The file is `results-<variant>.jsonl` — **JSONL, one object per line**, not a JSON array —
+ * and a row's identity is `corpusPath` **and** `route`, because measure.js runs every file
+ * through both routes and asserts `rows.length === files × routes`. Keying on the path alone
+ * silently collapses each pair, halving the comparison while still reporting agreement.
+ */
+function readRows(dir) {
+  const matches = fs.readdirSync(dir).filter((f) => f.startsWith('results-') && f.endsWith('.jsonl'));
+  if (matches.length !== 1) {
+    throw new Error(`expected exactly one results-*.jsonl in ${dir}, found ${matches.length}`);
+  }
+  const text = fs.readFileSync(path.join(dir, matches[0]), 'utf8');
+  const byKey = new Map();
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    const row = JSON.parse(line);
+    byKey.set(`${row.corpusPath} ${row.route}`, row);
+  }
+  return byKey;
+}
+
+/**
+ * AST validation issues are formatted `AST Error in item [<id>] at line …` by
+ * `validation/index.ts`, so a fallback reason carrying that prefix is the deep validator
+ * refusing the file — §80's predicted disagreement, not a region defect.
+ */
+function isValidatorFallback(row) {
+  return typeof row.fallbackReason === 'string' && row.fallbackReason.includes('AST Error');
+}
+
+function classify(fastRow, deepRow) {
+  if (fastRow.outputSha === deepRow.outputSha) return 'identical';
+  if (!fastRow.fallbackUsed && deepRow.fallbackUsed) {
+    return isValidatorFallback(deepRow) ? 'new-fallback-validator' : 'new-fallback-region';
+  }
+  if (fastRow.fallbackUsed && !deepRow.fallbackUsed) return 'recovered';
+  if (deepRow.outputBytes < fastRow.outputBytes) return 'differs-deep-smaller';
+  if (deepRow.outputBytes > fastRow.outputBytes) return 'differs-deep-larger';
+  return 'differs-same-size';
+}
+
+function main() {
+  const [fastDir, deepDir, ...rest] = process.argv.slice(2);
+  const outIndex = rest.indexOf('--out');
+  if (!fastDir || !deepDir || outIndex === -1) {
+    console.error('usage: deep-regions.js <fast-run-dir> <deep-run-dir> --out <file.json>');
+    process.exit(2);
+  }
+  const outFile = rest[outIndex + 1];
+
+  const fast = readRows(fastDir);
+  const deep = readRows(deepDir);
+
+  if (fast.size === 0) throw new Error('refusing: the fast run has 0 rows');
+  if (fast.size !== deep.size) {
+    throw new Error(`refusing: ${fast.size} fast rows vs ${deep.size} deep rows — not the same corpus`);
+  }
+
+  let backendAnswered = 0;
+  const buckets = {};
+  const differing = [];
+
+  for (const [key, fastRow] of fast) {
+    const deepRow = deep.get(key);
+    if (!deepRow) {
+      throw new Error(`refusing: ${fastRow.corpusPath} (${fastRow.route}) is missing from the deep run`);
+    }
+    backendAnswered += deepRow.parserBackendAnswered ?? 0;
+
+    const verdict = classify(fastRow, deepRow);
+    buckets[verdict] = (buckets[verdict] ?? 0) + 1;
+    if (verdict !== 'identical') {
+      differing.push({
+        path: fastRow.corpusPath,
+        route: fastRow.route,
+        verdict,
+        fastBytes: fastRow.outputBytes,
+        deepBytes: deepRow.outputBytes,
+        fastFallback: fastRow.fallbackUsed,
+        deepFallback: deepRow.fallbackUsed,
+        // Left empty on purpose: §3.5 requires every differing row be read by a person.
+        classification: '',
+      });
+    }
+  }
+
+  if (backendAnswered === 0) {
+    throw new Error(
+      'refusing: no row in the deep run reports parserCoverage.backendAnswered > 0. ' +
+        'That is a deep run in which Deep never answered, and it would report perfect agreement.',
+    );
+  }
+
+  const report = { rows: fast.size, backendAnswered, buckets, differing };
+  fs.writeFileSync(outFile, JSON.stringify(report, null, 2));
+  console.log(`${fast.size} rows, ${differing.length} differing, ${backendAnswered} backend answers`);
+  console.log(JSON.stringify(buckets, null, 2));
+}
+
+main();
