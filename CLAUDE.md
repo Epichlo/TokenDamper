@@ -237,9 +237,18 @@ DECISIONS §75, scheduled in `ROADMAP.md`.** Four releases, named rather than nu
     `FUNCTION_HEADER` regex cannot match. Net fallbacks fell, 8 recovered against 5 new.
   - `Parser.init()` plus four grammars is **~22ms per process**, answering §75's concern that it
     might make Deep unusable at the CLI. `topology-pruner` is 98% of cold engine time.
-- **v2.0.0 — `tokendamper-deep` ships**, N languages reduce, and `--mode` is withdrawn
+- **R4 / v2.0.0 — `tokendamper-deep` ships**, N languages reduce, and `--mode` is withdrawn
   (`optimize|bench` today, where `optimize` is the identity and `bench` duplicates the positional
-  command) so the name can mean `fast|deep`.
+  command) so the name can mean `fast|deep`. **NEXT, and not started.** **Start at
+  `docs/r4-start-here.md`**, which carries the state R4 begins from, the three things that do *not*
+  survive a session (the frozen corpus, the timing baseline, the Go corpora), and the two R3
+  findings that constrain it — deep validation cannot be combined with elision, and **a grammar is
+  not enough to reach a language**: JavaScript has a built grammar and is unreachable, because no
+  Fast validator returns the language name a backend would be registered under. Delete that file
+  when R4 lands. Languages are chosen **by measurement** (§3.7) — elidable ceiling on two
+  independent corpora per candidate, each with its own measured fallback rate, never one borrowed.
+  And measure test files separately: `_test.go` is 92.22% elidable against source's lower figure,
+  and nothing in this project has ever counted them.
 
 **Deep mode is a language-coverage feature, not a precision one, and §75 records why the two
 obvious alternatives were rejected on measurement.** The lexer is not the binding constraint on
