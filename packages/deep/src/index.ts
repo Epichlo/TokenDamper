@@ -2,9 +2,11 @@ import { Language, Parser } from 'web-tree-sitter';
 
 import { issuesFromTree, type DeepIssue } from './check';
 import { DEEP_LANGUAGES, grammarWasmPath, type DeepLanguage } from './grammars';
+import { regionsFromTree, type DeepRegion, type DeepRegionOptions } from './regions';
 import { symbolsFromTree } from './symbols';
 
 export { DEEP_LANGUAGES, type DeepLanguage } from './grammars';
+export { type DeepRegion, type DeepRegionOptions } from './regions';
 
 /**
  * `tokendamper-deep` — the Deep-mode backends, backed by tree-sitter compiled to WASM.
@@ -39,7 +41,7 @@ export interface DeepBackend {
   readonly language: DeepLanguage;
   symbols(content: string): Set<string>;
   check(content: string): DeepCheckResult;
-  regions(content: string): never;
+  regions(content: string, options?: DeepRegionOptions): DeepRegion[];
 }
 
 let initialised: Promise<void> | undefined;
@@ -53,17 +55,6 @@ let initialised: Promise<void> | undefined;
 function initRuntime(): Promise<void> {
   initialised ??= Parser.init();
   return initialised;
-}
-
-function notImplemented(step: string, language: DeepLanguage): never {
-  // Throwing rather than returning an empty or passing result, deliberately. `check()`
-  // returning `valid: true` and `regions()` returning `[]` are both indistinguishable from a
-  // backend that examined the content and found nothing — invariant 10's exact failure, and
-  // the one §60 names: 0 findings is also what a validator that examines nothing reports.
-  throw new Error(
-    `tokendamper-deep: ${step} is not implemented for ${language} yet (R3 ships symbols, then the ` +
-      `validator, then regions — in that order, for the reason DECISIONS §56 measured).`,
-  );
 }
 
 async function createBackend(language: DeepLanguage): Promise<DeepBackend> {
@@ -104,7 +95,19 @@ async function createBackend(language: DeepLanguage): Promise<DeepBackend> {
         tree.delete();
       }
     },
-    regions: (): never => notImplemented('regions()', language),
+    regions(content: string, options?: DeepRegionOptions): DeepRegion[] {
+      const tree = parser.parse(content);
+      // A parse failure is not "no regions". Returning [] would elide nothing and look
+      // identical to a clean file with no function bodies — §60's shape.
+      if (tree === null) {
+        throw new Error(`tokendamper-deep: parser returned no tree for ${language}`);
+      }
+      try {
+        return regionsFromTree(tree, language, options ?? {});
+      } finally {
+        tree.delete();
+      }
+    },
   };
 }
 

@@ -1,22 +1,23 @@
 import type { ElisionRegion } from '../elision/regions';
 import type { AstCheckResult, AstValidatorOptions, TargetLanguage } from '../validation/ast/types';
 
-/**
- * Which engine backend answers the three language questions.
- *
- * `fast` is the shipped, zero-dependency lexer path and the default. `deep` consults the
- * parser registry, falling back to the same lexer chain when nothing is registered.
- *
- * **Invariant 1 is per-configuration, and this type is why.** "Same input, same bytes out"
- * reads as absolute in `ARCHITECTURE.md`; with a second backend it becomes *same input,
- * same mode, same bytes out*. Fast and Deep producing different output for one file is the
- * feature rather than a violation — what would be a violation is either of them being
- * non-deterministic within itself.
- */
-export type EngineMode = 'fast' | 'deep';
+// `fast` is the shipped, zero-dependency lexer path and the default. `deep` consults the
+// parser registry, falling back to the same lexer chain when nothing is registered. Defined in
+// `./mode` (not here) to break an import cycle — see that module's doc comment — and re-exported
+// so every existing importer of `EngineMode` / `DEFAULT_ENGINE_MODE` from this module is unaffected.
+export { DEFAULT_ENGINE_MODE, type EngineMode } from './mode';
 
-/** The default, and the only value any shipped entry mode passes today. */
-export const DEFAULT_ENGINE_MODE: EngineMode = 'fast';
+/**
+ * Options a region scan honours.
+ *
+ * Exists because `--keep-docstrings` (DECISIONS §58) is a caller-opted retention/size trade
+ * that Fast implements *inside* `scanPythonDefBodies`. A one-argument `regions(content)` would
+ * make deep mode silently ignore a flag the user passed, which is the same class of defect as
+ * a check that never ran.
+ */
+export interface ParserRegionOptions {
+  readonly keepDocstrings?: boolean;
+}
 
 /**
  * A parser backend, answering exactly the three questions a language needs.
@@ -55,5 +56,5 @@ export interface ParserAdapter {
   check(content: string, options?: AstValidatorOptions): AstCheckResult;
 
   /** Feeds `selectElisionRegions`. */
-  regions(content: string): ReadonlyArray<ElisionRegion>;
+  regions(content: string, options?: ParserRegionOptions): ReadonlyArray<ElisionRegion>;
 }

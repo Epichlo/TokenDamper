@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { CLI_ADAPTER_NAME, CLI_ADAPTER_VERSION, format as formatCliOutput, parse } from '../adapters/cli';
 import { createMultiItemRequest } from '../core/model/constructors';
 import { escapeDelimiterLabel, ITEM_DELIMITER_PREFIX, ITEM_DELIMITER_SUFFIX } from '../core/render';
+import { registerDeepBackends } from './deep-backends';
 import { gitIgnoredAmong, ingestPaths, type IngestedFile } from './ingest';
 import { loadConfig } from '../config';
 import { declarableLanguages, normalizeLanguage } from '../core/model';
@@ -40,6 +41,36 @@ export function runCli(
   try {
     const parsed = parseArguments(argv, cwd);
 
+    if (parsed.engineMode === 'deep') {
+      // Registration is the one place async work is allowed (`ParserAdapter` is otherwise
+      // sync), so it happens here, before the pipeline runs.
+      return registerDeepBackends()
+        .then(() => dispatch(parsed, io, cwd))
+        .catch((err: unknown) => {
+          io.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
+          return 1;
+        });
+    }
+
+    return dispatch(parsed, io, cwd);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown TokenDamper error';
+    io.stderr.write(`${message}\n`);
+    return 1;
+  }
+}
+
+/**
+ * The body of `runCli` after argument parsing — every command branch, moved here unchanged so
+ * `runCli` can `await` backend registration before reaching it (Task 8). A pure extraction: the
+ * `try`/`catch` stays in `runCli`, wrapping this call, so a thrown error from any branch below
+ * is still caught in exactly one place.
+ */
+function dispatch(
+  parsed: ParsedArguments,
+  io: { readonly stdout: NodeJS.WritableStream; readonly stderr: NodeJS.WritableStream },
+  cwd: string,
+): number | Promise<number> {
     if (parsed.command === 'mcp') {
       const config = loadConfig({
         cwd,
@@ -254,6 +285,7 @@ export function runCli(
       ...(parsed.maxDebt !== undefined ? { maxDebtThreshold: parsed.maxDebt } : {}),
       ...(parsed.maxDrift !== undefined ? { maxDriftThreshold: parsed.maxDrift } : {}),
       ...(parsed.keepDocstrings ? { keepDocstrings: true } : {}),
+      ...(parsed.engineMode ? { engineMode: parsed.engineMode } : {}),
       ...(inputSurvivesDecoding
         ? {}
         : {
@@ -284,11 +316,6 @@ export function runCli(
 
     io.stderr.write(`${JSON.stringify(result.trace, null, 2)}\n`);
     return 0;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown TokenDamper error';
-    io.stderr.write(`${message}\n`);
-    return 1;
-  }
 }
 
 /**
@@ -351,6 +378,7 @@ function runMultiFileOptimize(
     ...(parsed.maxDebt !== undefined ? { maxDebtThreshold: parsed.maxDebt } : {}),
     ...(parsed.maxDrift !== undefined ? { maxDriftThreshold: parsed.maxDrift } : {}),
     ...(parsed.keepDocstrings ? { keepDocstrings: true } : {}),
+    ...(parsed.engineMode ? { engineMode: parsed.engineMode } : {}),
     ...(unrepresentable.length === 0
       ? {}
       : {
@@ -533,6 +561,8 @@ export interface ParsedArguments {
   readonly maxDrift?: number;
   /** `--keep-docstrings`: keep leading docstrings outside elided regions (Python only). */
   readonly keepDocstrings?: boolean;
+  /** `--engine-mode`: which parser backend answers. `fast` (default) or `deep`. */
+  readonly engineMode?: 'fast' | 'deep';
   /** `--language`: what the content is, declared by the caller. */
   readonly language?: string;
   /** `--input-name`: the filename stdin content would have had. Never opened. */
@@ -597,9 +627,18 @@ export const SUPPORTED_FLAGS: Readonly<Record<'optimize' | 'bench' | 'mcp', Read
     '--max-debt',
     '--max-drift',
     '--keep-docstrings',
+    '--engine-mode',
     '--language',
     '--input-name',
   ]),
+  // `--engine-mode` is deliberately absent here. `src/bench/runner.ts` calls
+  // `optimize(request, { tokenHasher })` with no mode, so accepting the flag on `bench` today
+  // would register deep backends (and could hard-fail if `packages/deep` is unbuilt) while the
+  // benchmark itself still measured fast mode — a flag with a side effect and a possible error,
+  // but not the behaviour its name promises. That is worse than the inert-dial shape
+  // `--minimum-confidence`/`--max-debt` are documented as (M13): those do nothing at all, which
+  // is at least honest. Add `--engine-mode` back here in the same change that threads
+  // `engineMode` into `BenchmarkRunnerConfig`/`runner.ts` — not before.
   bench: new Set([...COMMON_FLAGS, '--report-json', '--quiet', '--evaluate-quality']),
   mcp: new Set(COMMON_FLAGS),
 };
@@ -684,6 +723,7 @@ export function parseArguments(argv: readonly string[], cwd: string): ParsedArgu
   let maxDebt: number | undefined;
   let maxDrift: number | undefined;
   let keepDocstrings = false;
+  let engineMode: 'fast' | 'deep' = 'fast';
   let reportJsonPath: string | undefined;
   let evaluateQuality = false;
   let quiet = false;
@@ -824,6 +864,15 @@ export function parseArguments(argv: readonly string[], cwd: string): ParsedArgu
       continue;
     }
 
+    if (flag === '--engine-mode') {
+      const value = args.shift();
+      if (value !== 'fast' && value !== 'deep') {
+        throw new Error('Invalid value for --engine-mode. Accepted values: fast, deep.');
+      }
+      engineMode = value;
+      continue;
+    }
+
     if (flag === '--diff-html') {
       const value = args.shift();
       if (!value) {
@@ -947,6 +996,7 @@ export function parseArguments(argv: readonly string[], cwd: string): ParsedArgu
     ...(maxDebt !== undefined ? { maxDebt } : {}),
     ...(maxDrift !== undefined ? { maxDrift } : {}),
     ...(keepDocstrings ? { keepDocstrings } : {}),
+    ...(engineMode === 'deep' ? { engineMode } : {}),
     configOverrides: resolvedOverrides,
   };
 }

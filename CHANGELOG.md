@@ -12,6 +12,33 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Deep `regions()` and `--engine-mode fast|deep` — R3 step 3 of three, closing R3 (DECISIONS
+  §81).** `packages/deep` answers region discovery for TypeScript, Python and Go, reachable as
+  `tokendamper optimize <file> --engine-mode deep`. Deep replaces **candidate discovery only** —
+  `dropOverlapping`, `MIN_REGION_BYTES`, `isSubstantiveRegion` and the ceiling path all stay in
+  core and run over the backend's candidates unchanged. Measured over one frozen 297-file corpus
+  at ratio 0.3: **540 of 594 rows identical**, python file route **17.75% → 22.26%**, typescript
+  **20.35% → 20.20%**, and target adherence improving from **12 to 20** of 54 differing rows
+  landing in the 25–35% band. Go is 158 of 160 identical with zero new fallbacks.
+  - **Three languages through the live path, not four.** No Fast validator returns the language
+    `javascript`, so a JavaScript backend could never be resolved and is left unregistered.
+  - **Five rows newly fall back**, all `CONSTRAINT_DIRECTIVE_LOST` on regions Deep found and Fast
+    missed. Recorded rather than fixed — a strict superset on two of the three failing files,
+    disjoint on the third, and net fallbacks fell (8 recovered against 5 new).
+  - **Known convention divergence, characterized not fixed:** Deep starts a Python body after a
+    leading `#` comment where Fast includes it. 16 of 45 pip corpus files carry that shape, and
+    in 3 the excluded comment drops the span under `MIN_REGION_BYTES` so Deep declines the region.
+- **`validationMode`, a separate axis from `engineMode`, defaulting to `fast`.** Deep's `check()`
+  rejects TokenDamper's own elision marker, so deep validation and elision cannot be combined:
+  with both live, a file went **292 → 292 tokens with a fallback** against **292 → 211** in fast
+  mode. This is the Issue 2 post-condition becoming reachable for the first time, not a new
+  defect. Deep validation stays reachable in the API and is what §80 measured.
+- **`trace.parserCoverage`**, reporting the mode, the registered languages, and how many items a
+  Deep backend answered for — so `--engine-mode deep` producing byte-identical output and
+  `--engine-mode deep` never having run stop being the same observation. **It is emitted on every
+  run, fast included** (reading `mode: "fast"`, `backendAnswered: 0`), so anything parsing the
+  trace sees a new field on the default path even if it never passes `--engine-mode`.
+
 - **Deep `check()`, and the validator disagreement measurement — R3 step 2 of three (DECISIONS
   §80).** `packages/deep` reads tree-sitter's `ERROR` and `MISSING` nodes and reports them as an
   `AstCheckResult`. Nothing on the optimize route moves: **586/586 corpus rows byte-identical**,

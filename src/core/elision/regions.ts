@@ -1,4 +1,6 @@
 import type { ContextItem } from '../model/types';
+import { resolveParserBackend } from '../parser/registry';
+import { DEFAULT_ENGINE_MODE, type EngineMode } from '../parser/types';
 import { selectValidator } from '../validation/ast';
 import { ELISION_MARKER_BYTES } from './marker';
 
@@ -529,6 +531,12 @@ export function splitRegionIntoStatements(
   region: ElisionRegion,
   options?: SelectRegionsOptions,
 ): ReadonlyArray<ElisionRegion> {
+  // `regionElisionLanguage(item)` with no mode, deliberately — but note the trap in the
+  // signature: this takes the same `SelectRegionsOptions` as `selectElisionRegions`, which
+  // carries `mode`, and **this function ignores it**. Subdivision on the ceiling path is
+  // Fast-driven even under `--engine-mode deep`, which DECISIONS §81 records as a limitation of
+  // that release. The type says a caller may pass a mode; only `minRegionBytes` is read. If you
+  // wire subdivision to the backend, change this line and §81's "does not establish" together.
   const language = regionElisionLanguage(item);
   if (language === undefined) {
     return [];
@@ -1022,6 +1030,15 @@ export interface SelectRegionsOptions {
    * returns. DECISIONS §58.
    */
   readonly keepDocstrings?: boolean;
+  /**
+   * Which backend answers the candidate scan. `fast` (the default) never reads the registry.
+   *
+   * Deep replaces candidate *discovery* only: every filter below — `dropOverlapping`,
+   * `minBytes`, `isSubstantiveRegion` — and everything downstream in `token-hashing`
+   * (`trimRegionsToCeiling`, `splitRegionIntoStatements`) still runs unchanged. That is what
+   * makes a differing corpus row attributable: one thing moved.
+   */
+  readonly mode?: EngineMode;
 }
 
 /**
@@ -1052,16 +1069,19 @@ export const REGION_ELISION_LANGUAGES: ReadonlyArray<RegionElisionLanguage> = Ob
  * measurement gate; for a language whose symbols the drift tracker cannot see, that is refused
  * by construction.
  */
-export function regionElisionLanguage(item: ContextItem): RegionElisionLanguage | undefined {
-  const language = selectValidator(item)?.language;
+export function regionElisionLanguage(
+  item: ContextItem,
+  mode: EngineMode = DEFAULT_ENGINE_MODE,
+): RegionElisionLanguage | undefined {
+  const language = selectValidator(item, mode)?.language;
   return language !== undefined && (REGION_ELISION_LANGUAGES as ReadonlyArray<string>).includes(language)
     ? (language as RegionElisionLanguage)
     : undefined;
 }
 
 /** Whether sub-item elision is available for this item's language. */
-export function supportsRegionElision(item: ContextItem): boolean {
-  return regionElisionLanguage(item) !== undefined;
+export function supportsRegionElision(item: ContextItem, mode: EngineMode = DEFAULT_ENGINE_MODE): boolean {
+  return regionElisionLanguage(item, mode) !== undefined;
 }
 
 /**
@@ -1081,17 +1101,21 @@ export function selectElisionRegions(
   item: ContextItem,
   options?: SelectRegionsOptions,
 ): ReadonlyArray<ElisionRegion> {
-  const language = regionElisionLanguage(item);
+  const mode = options?.mode ?? DEFAULT_ENGINE_MODE;
+  const language = regionElisionLanguage(item, mode);
   if (language === undefined) {
     return [];
   }
 
   const minBytes = options?.minRegionBytes ?? MIN_REGION_BYTES;
   const content = item.content;
+  const keepDocstrings = options?.keepDocstrings ?? false;
 
-  const candidates: ElisionRegion[] =
-    language === 'python'
-      ? [...scanPythonDefBodies(content, options?.keepDocstrings ?? false)]
+  const backend = mode === 'deep' ? resolveParserBackend(language) : undefined;
+  const candidates: ElisionRegion[] = backend
+    ? [...backend.regions(content, { keepDocstrings })]
+    : language === 'python'
+      ? [...scanPythonDefBodies(content, keepDocstrings)]
       : language === 'go'
         ? scanGoBraceSpans(content)
             .filter((span) => GO_FUNCTION_HEADER.test(span.header))

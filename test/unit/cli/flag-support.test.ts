@@ -30,6 +30,7 @@ const VALUE_FOR: Readonly<Record<string, string | null>> = {
   '--max-debt': '10',
   '--max-drift': '0.5',
   '--keep-docstrings': null,
+  '--engine-mode': 'fast',
   '--language': 'python',
   '--input-name': 'snippet.py',
   '--report-json': 'report.json',

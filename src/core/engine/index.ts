@@ -22,6 +22,8 @@ import type { ConfidenceLedger } from '../ledger/confidence-ledger';
 import { DebtTracker, type DebtTrackerOptions } from '../ledger/debt-tracker';
 import type { DeltaCompressionOptions } from '../../stages/compression/delta-compression';
 import type { TokenHashingStageOptions } from '../../stages/compression/token-hashing';
+import { parserCoverage } from '../parser/coverage';
+import { DEFAULT_ENGINE_MODE, type EngineMode } from '../parser/mode';
 
 export interface EngineOptimizationOptions {
   readonly sessionContext?: SessionDedupContext;
@@ -54,6 +56,37 @@ export interface EngineOptimizationOptions {
    * it to `--keep-docstrings`. A retention/size trade the caller opts into — DECISIONS §58.
    */
   readonly keepDocstrings?: boolean;
+  /**
+   * Which backend answers the three language questions. `fast` is the default and the only
+   * value any shipped entry mode passed before R3.
+   *
+   * Invariant 1 is per-*configuration*: fast and deep may legitimately differ on one file.
+   * What would be a violation is either of them being non-deterministic within itself.
+   */
+  readonly engineMode?: EngineMode;
+  /**
+   * Which backend **validates** the optimized bundle. Defaults to `fast`, independently of
+   * `engineMode`.
+   *
+   * **The default encodes a measured product limitation, not a preference.** Deep's `check()`
+   * is a real syntax check, and TokenDamper's own elision marker —
+   * `[TokenDamper: N function-body lines elided, N bytes, sha256:…]` spliced into a function
+   * body — is not valid TypeScript or Python. Fast's lexer accepts it because it checks
+   * bracket and quote balance only, which is exactly what the Issue 2 entry in `CLAUDE.md`
+   * records: the post-condition check is unreachable today because the TS and Python
+   * validators accept a bare placeholder. Deep makes it reachable, and our own output fails
+   * it — measured on `src/core/parser/coverage.ts` at ratio 0.3 as **292 -> 292 tokens with a
+   * fallback**, against **292 -> 211** for the same file in fast mode.
+   *
+   * So deep validation and elision cannot currently be combined: every reducing file would
+   * fall back for a reason that has nothing to do with which regions were chosen, which would
+   * make the region comparison this release exists to produce unmeasurable. Deep validation
+   * stays reachable here, because it is real and step 2 measured it over thousands of files
+   * per language (DECISIONS §80) — it is simply not the default until the marker is rendered
+   * validly per language, which changes emitted bytes on the Fast path and belongs to its own
+   * release with its own measurement.
+   */
+  readonly validationMode?: EngineMode;
 }
 
 /**
@@ -81,14 +114,18 @@ export function optimize(
     let stageFailed = false;
     let failureReason: string | undefined;
 
-    // `tokenHashingOptions` carries both the (optional) store and `keepDocstrings`, so it is
-    // built whenever *either* is present — the CLI supplies no hasher but can still ask for
-    // docstrings to be kept, which the old `tokenHasher ? …` guard would have dropped.
+    // `tokenHashingOptions` carries the (optional) store, `keepDocstrings` and `engineMode`, so
+    // it is built whenever *any* is present — the CLI supplies no hasher but can still ask for
+    // docstrings to be kept or for deep mode, either of which the old `tokenHasher ? …` guard
+    // would have dropped. Without `engineMode` in this guard, `--engine-mode deep` with no
+    // hasher and no `--keep-docstrings` — the commonest CLI shape — would build no options
+    // object at all, and deep mode would silently do nothing.
     const tokenHashingOptions: TokenHashingStageOptions | undefined =
-      options?.tokenHasher || options?.keepDocstrings
+      options?.tokenHasher || options?.keepDocstrings || options?.engineMode
         ? {
             ...(options?.tokenHasher ? { tokenHasher: options.tokenHasher } : {}),
             ...(options?.keepDocstrings ? { keepDocstrings: true } : {}),
+            ...(options?.engineMode ? { mode: options.engineMode } : {}),
           }
         : undefined;
 
@@ -171,7 +208,33 @@ export function optimize(
 
     let debtBreakdown = computeDebtBreakdown(debtTracker, currentBundle, options?.confidenceLedger, turn);
 
-    const valOptions = options?.maxDriftThreshold !== undefined ? { maxDriftThreshold: options.maxDriftThreshold } : undefined;
+    // Shared by every `validate(` call below, so the modes reach AST validation on the initial
+    // pass, the post-rehydration revalidation and the post-repair revalidation alike — not just
+    // the one that happens to run first.
+    //
+    // **Two axes, deliberately.** `mode` selects the validator and comes from `validationMode`,
+    // which defaults to fast for the reason documented on that option. `coverageMode` is what
+    // `trace.parserCoverage` describes and comes from `engineMode`, because that block exists to
+    // witness *region discovery* for this release. Passing `validationMode` to both would make
+    // the trace report `fast` on a run whose regions were chosen by Deep — a coverage block
+    // asserting something the run did not measure, which is the exact defect class the block was
+    // added to prevent.
+    const valOptions =
+      options?.maxDriftThreshold !== undefined || options?.validationMode || options?.engineMode
+        ? {
+            ...(options?.maxDriftThreshold !== undefined ? { maxDriftThreshold: options.maxDriftThreshold } : {}),
+            ...(options?.validationMode ? { mode: options.validationMode } : {}),
+            // Unconditional, and that is the fix for a real defect rather than tidiness. Spread
+            // conditionally on `engineMode`, a caller passing `validationMode: 'deep'` alone —
+            // the independent-axis use this option's own docstring invites — produced
+            // `{ mode: 'deep' }` with no `coverageMode`, so `validate()` fell back to `mode` and
+            // the trace claimed Deep discovered regions that Fast had actually found. Measured:
+            // output byte-identical to a pure-Fast run, `parserCoverage.mode: "deep"`,
+            // `backendAnswered: 1`, with a backend whose `regions()` returns `[]` and therefore
+            // provably selected nothing.
+            coverageMode: options?.engineMode ?? DEFAULT_ENGINE_MODE,
+          }
+        : undefined;
 
     let validation = createValidationReport(
       validate(request.bundle, currentBundle, selectedPlan, request.budget, valOptions),
@@ -309,6 +372,10 @@ export function optimize(
         reason,
         ...(validation.driftReport ? { driftReport: validation.driftReport } : {}),
         ...(validation.astCoverage ? { astCoverage: validation.astCoverage } : {}),
+        // `currentBundle`: this branch is about `currentBundle` itself — a block-hash or
+        // confidence failure detected on the bundle the pipeline actually produced, independent
+        // of whether a fallback follows.
+        parserCoverage: parserCoverage(currentBundle, options?.engineMode ?? DEFAULT_ENGINE_MODE),
         ...(validation.driftCoverage ? { driftCoverage: validation.driftCoverage } : {}),
         ...(validation.languageSupport ? { languageSupport: validation.languageSupport } : {}),
       });
@@ -331,6 +398,9 @@ export function optimize(
         reason: failureReason ?? 'Stage execution failed',
         ...(validation.driftReport ? { driftReport: validation.driftReport } : {}),
         ...(validation.astCoverage ? { astCoverage: validation.astCoverage } : {}),
+        // `currentBundle`: whatever the stages produced before the failing stage broke, which is
+        // exactly what this report is about.
+        parserCoverage: parserCoverage(currentBundle, options?.engineMode ?? DEFAULT_ENGINE_MODE),
         ...(validation.driftCoverage ? { driftCoverage: validation.driftCoverage } : {}),
         ...(validation.languageSupport ? { languageSupport: validation.languageSupport } : {}),
       });
@@ -356,6 +426,17 @@ export function optimize(
         reason: options.inputNotRepresentable,
         ...(validation.driftReport ? { driftReport: validation.driftReport } : {}),
         ...(validation.astCoverage ? { astCoverage: validation.astCoverage } : {}),
+        // Mirrors `astCoverage` immediately above: carried forward from the validation this run
+        // already did, not recomputed. `astCoverage` and `parserCoverage` answer the same
+        // question — how many items were actually submitted to a validator, and how — about the
+        // same population, and only `currentBundle` (what the last `validate()` call actually
+        // examined) is that population. `request.bundle` is the pre-pruning set: an item the
+        // planner dropped before the first `validate()` call would be counted here as though a
+        // validator had looked at it, when nothing ever did — the exact failure this field exists
+        // to prevent, reproduced on itself. If there is no prior validation result, the field is
+        // correctly absent rather than fabricated as zero: "nothing looked" and "we looked and
+        // found none" are the two states this block exists to keep apart.
+        ...(validation.parserCoverage ? { parserCoverage: validation.parserCoverage } : {}),
         ...(validation.driftCoverage ? { driftCoverage: validation.driftCoverage } : {}),
         ...(validation.languageSupport ? { languageSupport: validation.languageSupport } : {}),
       });

@@ -215,7 +215,7 @@ export function validateItemAst(item: ContextItem, options?: AstValidatorOptions
   const maxTimeMs = options?.maxTimeMs ?? 5;
   const startTime = performance.now();
 
-  const validator = selectValidator(item);
+  const validator = selectValidator(item, options?.mode);
 
   if (!validator) {
     const durationMs = performance.now() - startTime;

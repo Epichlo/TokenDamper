@@ -208,6 +208,10 @@ export interface StageResult {
 }
 
 import type { DriftReport } from '../ledger/drift-tracker';
+// `../parser/mode`, not `../parser/types` — `parser/types.ts` imports `ElisionRegion` from
+// `../elision/regions`, which imports `ContextItem` from this file, and going through it would
+// close an import cycle. `parser/mode.ts` has no imports at all.
+import type { EngineMode } from '../parser/mode';
 
 /**
  * A validation issue emitted by a validator.
@@ -242,6 +246,22 @@ export interface AstCoverage {
   readonly checked: number;
   readonly unchecked: number;
   readonly uncheckedContentTypes: ReadonlyArray<ContentType>;
+}
+
+/**
+ * Whether a Deep backend actually answered for the items in this bundle.
+ *
+ * **This block exists because `--engine-mode deep` producing byte-identical output and
+ * `--engine-mode deep` never having run are otherwise the same observation.** That confusion
+ * is invariant 10, which this project has recorded ten instances of; `astCoverage` (§23) and
+ * `driftCoverage` (§33) are the two earlier answers to the same question, and this is the
+ * third.
+ */
+export interface ParserCoverage {
+  readonly mode: EngineMode;
+  readonly registeredLanguages: ReadonlyArray<string>;
+  readonly backendAnswered: number;
+  readonly fastAnswered: number;
 }
 
 /**
@@ -373,6 +393,7 @@ export interface ValidationReport {
   readonly reason?: string | undefined;
   readonly driftReport?: DriftReport | undefined;
   readonly astCoverage?: AstCoverage | undefined;
+  readonly parserCoverage?: ParserCoverage | undefined;
   readonly driftCoverage?: DriftCoverage | undefined;
   readonly languageSupport?: LanguageSupportReport | undefined;
   readonly attribution?: FailureAttribution | undefined;
@@ -426,6 +447,7 @@ export interface OptimizationTrace {
   readonly debtScore?: number | undefined;
   readonly driftScore?: number | undefined;
   readonly astCoverage?: AstCoverage | undefined;
+  readonly parserCoverage?: ParserCoverage | undefined;
   readonly driftCoverage?: DriftCoverage | undefined;
   readonly languageSupport?: LanguageSupportReport | undefined;
   /**
