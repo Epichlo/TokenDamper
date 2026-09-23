@@ -205,16 +205,25 @@ describe('gateway upstream timeout', () => {
 
   it('does not truncate a slow body just because the budget is small', async () => {
     // Same property as the first case, pushed harder: the body takes an order of magnitude longer
-    // than the budget. A per-chunk or restarted timer would fail this even though it passes the
-    // first.
+    // than the budget, and every gap between chunks is twice the budget on its own. A per-chunk
+    // or restarted timer would fail this even though it passes the first.
+    //
+    // Small relative to the body, not in absolute terms. This ran at 40ms and flaked under load
+    // with `504 … no response headers within 40ms`: the header budget firing, not the body being
+    // cut. The first byte is a round trip to an upstream in this same process, so any stall of
+    // the worker's event loop lands inside the budget: under three concurrent full-suite runs it
+    // took a median of 29ms and up to 121ms, so 40ms sat inside the distribution. 250ms is twice
+    // its worst case, and the gaps and body scale with it.
     headerDelayMs = 0;
-    chunkCount = 8;
-    chunkGapMs = 50; // ~400ms of body against a 40ms budget
+    chunkCount = 5;
+    chunkGapMs = 500; // ~2.5s of body against a 250ms budget
 
-    const result = await withGateway(40, post);
+    const result = await withGateway(250, post);
 
-    expect(result.status).toBe(200);
+    // The body as the message: a 504 here means the header budget expired, which is a different
+    // failure from a truncated body, and the status alone does not say which.
+    expect(result.status, result.body).toBe(200);
     expect(result.body).toContain('[DONE]');
-    expect(result.body.split('data: {').length - 1).toBe(8);
+    expect(result.body.split('data: {').length - 1).toBe(5);
   }, 30_000);
 });
