@@ -174,6 +174,40 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   §60) plus four documents. Reduction aggregates from here are over the new counts and are not
   comparable to earlier ones. `collect.js` refusing its own recipe is it working.
 
+### Fixed
+- **The Gateway's slow-body timeout test flaked under load, and what failed was never the
+  property it pins.** `gateway upstream timeout > does not truncate a slow body just because the
+  budget is small` pins DECISIONS §66 — the upstream budget is time-to-first-byte, so a slow body
+  is never cut — and ran it as a **40 ms** budget against 8 chunks 50 ms apart. Under load it
+  failed as `504 {"error":"Gateway Timeout: upstream sent no response headers within 40ms"}`: the
+  header budget expiring before the in-process upstream answered, not a body being truncated.
+  Test-only; `src/` is untouched and `npm pack --dry-run` carries nothing from `test/integration`.
+
+  Measured over whole-suite runs on the Windows dev machine: **0 of 15** failures with one suite
+  running, **1 of 20** under two concurrent suites, **2 of 18** under three. It passed alone
+  because the first byte is a round trip through the worker's own event loop, which a lone run
+  never starves. With the `fetch` the budget races wrapped and the budget lifted, the first byte
+  under three suites took a median of **29 ms**, p90 **65 ms** and at worst **121 ms** over 90
+  requests — a 40 ms budget sat inside the distribution.
+
+  Now **250 ms** against 5 chunks **500 ms** apart. The body is still **10×** the budget, and each
+  gap is **2×** it where it was 1.25× — a 10 ms margin, less than one Windows timer tick. Under
+  three concurrent suites it failed **0 of 18**, and ten single-suite runs were green. The test
+  takes ~2.6 s instead of ~0.5 s; the suite's wall time did not measurably move (10.6 s → 10.7 s
+  mean), because `bench.test.ts` at ~6 s is still the longest file.
+
+  **Mutation-checked**, original and new file side by side, 3 runs each. A total-duration timer
+  and a timer restarted at headers fail tests 1 and 4 in both; a per-chunk idle timer fails
+  **only test 4** in both, so it is still the one test that catches that. Every mutant failure is
+  `Error: aborted` — the truncation signature, distinct from the flake's 504 — which is why the
+  status assertion now carries the body as its message: `expected 504 to be 200` alone did not
+  say which failure it was.
+
+  **Not fixed, and exposed the same way:** `delivers a stream whose body outlives the timeout
+  budget`, at 120 ms. It makes the file's first `fetch`, so its first byte also pays the HTTP
+  client's one-time setup — a median of **72 ms** and up to **158 ms** under three suites — and it
+  failed **1 of 18** there in both arms.
+
 
 ## [v1.7.4] - 2026-09-19
 
