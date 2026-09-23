@@ -359,9 +359,13 @@ describe('deep regions() vs Fast — nested functions (a discovery/policy diverg
  *
  * Measured over the frozen 45-file pip corpus when R3 step 3 was recorded: 16 files contain at
  * least one such pair, and in 3 of them excluding the comment drops the span under
- * `MIN_REGION_BYTES` so Deep declines the region entirely. One of those, `locations/_distutils.py`,
- * is why DECISIONS §81's superset table has a non-zero only-in-fast column — the two region sets
- * are disjoint there, not nested.
+ * `MIN_REGION_BYTES` so Deep declines the region entirely — those three are `cli/parser.py`,
+ * `exceptions.py` and `index/package_finder.py`.
+ *
+ * `locations/_distutils.py` is a *different* case and is why DECISIONS §81's superset table has a
+ * non-zero only-in-fast column: the two region sets are disjoint there, not nested. Its Deep span
+ * survives at 552 bytes — it is not one of the three declining files, and an earlier draft of
+ * this comment said it was.
  *
  * This is a characterization test, not a defect report. Deep keeping the comment is the more
  * conservative slice. If someone makes the two agree, this fails on purpose and §81's numbers

@@ -6587,8 +6587,14 @@ strict superset:**
 > statement and the comment stays outside Deep's. Same end, different start. Measured over the
 > frozen 45-file pip corpus, **16 files** contain at least one such pair, and in **3** of them
 > excluding the comment drops the span under `MIN_REGION_BYTES` so Deep declines the region
-> altogether. `_distutils.py` is one of those three: Fast elides from `# XXX: In old virtualenv
-> versions…` at offset 5141, Deep from `prefix = os.path.normpath(…)` at 5273.
+> altogether — those three are `cli/parser.py`, `exceptions.py` and `index/package_finder.py`.
+>
+> `_distutils.py` is **not** one of them; it is the disjoint-set case. Fast elides from
+> `# XXX: In old virtualenv versions…` at offset 5141, Deep from `prefix = os.path.normpath(…)`
+> at 5273, and Deep's span survives at 552 bytes. An earlier draft of this paragraph named it as
+> a declining file too, reusing the example already in hand without rechecking that this
+> particular pair also declined — the same unverified-assumption error this whole note exists to
+> correct, committed once more while correcting it. The scoped re-review caught that one.
 >
 > Recorded rather than changed — Deep keeping the comment is the more conservative slice, and
 > making the two agree would move the numbers above. `deep-backend-regions.test.ts` now pins it.
