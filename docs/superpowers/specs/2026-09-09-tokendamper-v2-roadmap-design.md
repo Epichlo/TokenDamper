@@ -1,6 +1,9 @@
 # Design — the road to v2.0: Fast and Deep as one seam, four languages to N
 
-**Status:** design, approved in outline 2026-09-09. Nothing here is implemented.
+**Status:** design, approved in outline 2026-09-09. R1 shipped as v1.7.4 (2026-09-19); R2 and R3
+are closed and were cut together as v1.8.0 (2026-09-24). R4 is not started — begin at
+`docs/r4-start-here.md`. The sections below are the design as approved; outcomes and deviations
+are recorded in DECISIONS §76–§81 and `ROADMAP.md`.
 **Supersedes:** `ROADMAP.md`'s two unnumbered sections — *AST Code Folding ("Fast" vs "Deep") &
 Cache Alignment* and, in part, *Context Selection Quality*. Landing this design means rewriting
 those sections, not appending to them.
