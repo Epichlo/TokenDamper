@@ -11,6 +11,34 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [v1.8.0] - 2026-09-24
+
+**R2 and R3 of the road to v2.0 reach the registry, together.** R2 stopped the constraint gate
+firing on descriptive comments (§77) and added a latency instrument (§76); R3 added the
+`ParserAdapter` seam and an opt-in Deep path behind `--engine-mode deep` (§79–§81). Neither was
+cut on its own, so upgrading from 1.7.4 delivers both.
+
+**A minor, because the default path's output moves.** §77 stops reading a present-tense
+descriptive `never`/`always` as a directive, and over the frozen corpus **10 files that fell back
+now reduce, with 0 new fallbacks** — the same command over the same input emits different bytes,
+which is §53's threshold for a minor. Nothing was removed.
+
+**What changes for someone upgrading:**
+
+- **More files reduce instead of falling back** (§77). Paired over the 507 rows that reduce in
+  both arms, none changed a byte: the whole gain is fallbacks becoming reductions.
+- **Every trace carries a new `parserCoverage` block**, the default fast path included
+  (`mode: "fast"`, `registeredLanguages: []`, `backendAnswered: 0`). Anything that parses the
+  trace strictly sees a new field.
+- **`--engine-mode fast|deep` is new on `optimize`; `fast` is the default and is what ran
+  before.** `deep` needs the companion package `tokendamper-deep`, which stays **unpublished until
+  R4**, so from the npm package `--engine-mode deep` exits 1 with an error naming what it tried —
+  never a silent Fast run. Its "build it first" hint applies to a repository checkout, where deep
+  mode runs once the workspace is installed and `packages/deep` is built.
+
+Also here: a load-sensitive Gateway test fixed (test-only), and the §76 harness and a corpus-recipe
+update under `tools/`, which the package does not ship.
+
 ### Added
 - **Deep `regions()` and `--engine-mode fast|deep` — R3 step 3 of three, closing R3 (DECISIONS
   §81).** `packages/deep` answers region discovery for TypeScript, Python and Go, reachable as
@@ -113,34 +141,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   TypeScript, Python and Go: **0**. New: `tools/corpus-harness/deep-parity.js` and
   `deep-drift-control.js`, both of which refuse an empty or untransformed comparison set.
 
-### Changed
-- **A present-tense descriptive `never`/`always` is no longer a directive (DECISIONS §77).** §52
-  exempted only *perfect and past* constructions, so `// Should never happen, but we ...` — the
-  shape recorded as dominating Go's fallbacks — fell straight through. Surveyed first: **322**
-  such segments are unexempt on the frozen corpus and only **3** are caught today.
-
-  Three rules, each provable from the words present rather than from tone. **A third-person `-s`
-  cannot be an imperative**, because an English imperative is a bare infinitive — so
-  `never returns` describes while `never return` instructs (99 of 322). A **copula** states a
-  property (39). And **non-agentive verbs** (`happen`, `occur`, `exist`, `arise`, `matter`) have
-  no imperative form at all, which exempts `should never happen` without trusting the modal.
-  **Modals keep firing**, 38 segments, on purpose: `should never call this` instructs.
-
-  **Measured two-sided, per language, engine varied and input frozen.** Main corpus 584 rows,
-  Go 160 rows on the separate 80-file corpus: **10 files recovered, 0 new fallbacks**, 734 of 744
-  rows byte-identical. Per bucket — python 32→34 reduced (fallbacks 12→10), typescript 38→41
-  (18→15), go-app 32→34 (8→6), go-stdlib 25→26 (12→11).
-
-  **Paired over the 507 rows that reduce under both arms, the mean is unchanged and zero of them
-  changed a byte.** Nothing that already worked moved; the whole gain is fallbacks becoming
-  reductions. Unlike §52, which gained 6pp on TypeScript and zero on Python, **all four buckets
-  gain**, and 4 of 7 main-corpus recoveries are pip's own source rather than this repository's.
-
-  Also a **correction to §52**: `isNarrativeUse` tested the whole segment, so one narrative
-  construction anywhere exempted everything in it — `the value is always set, so always check it
-  first` was already losing its instruction. The check is now per occurrence and unanimous.
-
-### Added
 - **A per-file latency harness (DECISIONS §76).** `tools/corpus-harness/timing-run.js`. R2's second
   half: `stageTraces[].durationMs` is per stage, and no field anywhere carried an end-to-end
   figure, so `ROADMAP.md`'s `<1ms` Fast / `~15ms` Deep targets were not merely unvalidated but
@@ -169,6 +169,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `runCli` returns an exit code. No `src/` change, so no corpus run is owed.
 
 ### Changed
+- **A present-tense descriptive `never`/`always` is no longer a directive (DECISIONS §77).** §52
+  exempted only *perfect and past* constructions, so `// Should never happen, but we ...` — the
+  shape recorded as dominating Go's fallbacks — fell straight through. Surveyed first: **322**
+  such segments are unexempt on the frozen corpus and only **3** are caught today.
+
+  Three rules, each provable from the words present rather than from tone. **A third-person `-s`
+  cannot be an imperative**, because an English imperative is a bare infinitive — so
+  `never returns` describes while `never return` instructs (99 of 322). A **copula** states a
+  property (39). And **non-agentive verbs** (`happen`, `occur`, `exist`, `arise`, `matter`) have
+  no imperative form at all, which exempts `should never happen` without trusting the modal.
+  **Modals keep firing**, 38 segments, on purpose: `should never call this` instructs.
+
+  **Measured two-sided, per language, engine varied and input frozen.** Main corpus 584 rows,
+  Go 160 rows on the separate 80-file corpus: **10 files recovered, 0 new fallbacks**, 734 of 744
+  rows byte-identical. Per bucket — python 32→34 reduced (fallbacks 12→10), typescript 38→41
+  (18→15), go-app 32→34 (8→6), go-stdlib 25→26 (12→11).
+
+  **Paired over the 507 rows that reduce under both arms, the mean is unchanged and zero of them
+  changed a byte.** Nothing that already worked moved; the whole gain is fallbacks becoming
+  reductions. Unlike §52, which gained 6pp on TypeScript and zero on Python, **all four buckets
+  gain**, and 4 of 7 main-corpus recoveries are pip's own source rather than this repository's.
+
+  Also a **correction to §52**: `isNarrativeUse` tested the whole segment, so one narrative
+  construction anywhere exempted everything in it — `the value is always set, so always check it
+  first` was already losing its instruction. The check is now per occurrence and unanimous.
+
 - **Corpus recipe: typescript 62→63, prose 17→21.** Entirely pre-existing drift, surfaced because
   R2 is the first corpus run since v1.6.1 — `src/core/validation/ast/go-validator.ts` (DECISIONS
   §60) plus four documents. Reduction aggregates from here are over the new counts and are not

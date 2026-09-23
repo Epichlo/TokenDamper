@@ -3,7 +3,15 @@
 Working state for the `max_audit.md` remediation. **Read this before picking up audit work**;
 it records what is done, what is measured, and what the next batch actually requires.
 
-Last updated 2026-09-19. **Cut as v1.7.4 (2026-09-19) — R1 of the road to v2.0:** the whole
+Last updated 2026-09-24. **Cut as v1.8.0 (2026-09-24) — R2 and R3 of the road to v2.0, together:**
+§77 (the constraint gate stops firing on descriptive comments — 10 files recovered, 0 new
+fallbacks), §76 (the per-file latency instrument) and §79–§81 (the `ParserAdapter` seam, Deep
+behind `--engine-mode deep`, and `trace.parserCoverage` on every run). **`tokendamper-deep` is not
+published until R4**, so from the npm package `--engine-mode deep` exits 1 with an error. **The npm
+publish is the user's step (2FA)**; until `npm view tokendamper version` reads **1.8.0** the
+registry serves 1.7.4. Suite at cut: **1044 passing / 2 skipped across 109 files**, typecheck, lint
+and build clean; `npm pack --dry-run` read first at 238 files / 2.0 MB unpacked. No audit finding
+is reopened or closed by it. **Cut as v1.7.4 (2026-09-19) — R1 of the road to v2.0:** the whole
 2026-08-30 security review, every F, V and S finding (DECISIONS §73–§74), plus three
 `oxaudit.md` tooling items (OX-L8, L17, L18) and the README restructure. It also delivers
 **v1.7.3**, which was tagged 2026-09-01 and never published, so a consumer on 1.7.2 receives

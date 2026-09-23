@@ -203,7 +203,7 @@ DECISIONS §75, scheduled in `ROADMAP.md`.** Four releases, named rather than nu
   since v1.7.1. **It returns 1.7.4 as of 2026-09-19, so R1 is closed** — verified by unpacking the
   published tarball, whose `dist/src` is byte-identical to a local build of the tag. Don't take a
   version number as evidence on its own; see the 1.7.3 mislabel below for why.
-- **R2 — CLOSED 2026-09-19.** The latency harness exists (§76: `cold` 159.1ms models the CLI,
+- **R2 — CLOSED 2026-09-19, cut as v1.8.0 on 2026-09-24 together with R3.** The latency harness exists (§76: `cold` 159.1ms models the CLI,
   `warm` 3.8ms models the Gateway/MCP, a **41.48x** ratio caused by the git cache — and
   `topology-pruner` is 97% of cold engine time, all of it `git status`). **Axis A shipped** (§77:
   a third-person `-s` cannot be an imperative; 10 files recovered, **0 new fallbacks**, retention
@@ -211,7 +211,7 @@ DECISIONS §75, scheduled in `ROADMAP.md`.** Four releases, named rather than nu
   implementing** (§78: `must` is 49% of the remaining segments and genuinely imperative, and the
   measured ceiling on the whole axis is **1 file of 188**). Read §78 before reopening it — it names
   what would change the answer.
-- **R3 — CLOSED 2026-09-23 (DECISIONS §79, §80, §81).** The `ParserAdapter` seam, and Deep
+- **R3 — CLOSED 2026-09-23 (DECISIONS §79, §80, §81), cut as v1.8.0 on 2026-09-24 with R2.** The `ParserAdapter` seam, and Deep
   answering `symbols()`, `check()` and `regions()`. Reachable as
   `tokendamper optimize <file> --engine-mode deep`. **Three languages through the live path, not
   four** — no Fast validator ever returns the language `javascript` (a `.js` file resolves to the
@@ -269,6 +269,15 @@ set, so the target adheres. Per-row over 576 corpus rows, rows above 50% achieve
 with **zero** new fallbacks and **zero** files that stopped reducing; 522 rows are byte-identical
 because subdivision is confined to the ceiling path. Current measured baseline: python file
 **17.95%**, typescript file **18.52%** — status doc §2, not the figures a prior session may quote.
+
+**v1.8.0 was cut 2026-09-24 and ships R2 and R3 together — the npm publish is the user's step.**
+Neither was released on its own, so a consumer on 1.7.4 receives both: §77 moves default-path
+output (10 files recovered, 0 new fallbacks — a minor under §53), every trace gains a
+`parserCoverage` block, and `--engine-mode fast|deep` is new on `optimize`. **`tokendamper-deep`
+is not published until R4**, so from the npm package `--engine-mode deep` exits 1 with an error
+rather than running Fast; it works from a repository checkout with the workspace installed and
+`packages/deep` built. Until `npm view tokendamper version` reads 1.8.0 the registry still serves
+1.7.4 — check the registry, not the tag.
 
 **v1.7.4 was cut 2026-09-19 and ships the 2026-08-30 security remediation** — every finding in
 `docs/security-review-2026-08-30.md` (§73–§74), three `oxaudit.md` tooling items (OX-L8, L17,

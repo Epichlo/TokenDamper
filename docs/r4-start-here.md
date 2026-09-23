@@ -22,13 +22,13 @@ commit — this file counts itself, exactly as `docs/r3-start-here.md` did.
    the per-language order, which §56 measured as a safety property rather than a preference. The
    second is not optional — R4's deliverable is numbers.
 
-## State as of 2026-09-23
+## State as of 2026-09-24
 
 | | |
 |---|---|
-| `main` | `e23c997` (R3 step 3, PR #73, squash-merged) |
-| npm `latest` | **1.7.4** (1.7.3 is published-but-deprecated; see CLAUDE.md) |
-| R1 / R2 / R3 | all closed — §73–§74, §76–§78, §79–§81 |
+| `main` | the v1.8.0 release merge, tagged `v1.8.0` (R3 step 3 was `e23c997`, PR #73) |
+| npm `latest` | **1.8.0** once the user publishes it (2FA), **1.7.4** until then — check `npm view tokendamper version`. 1.7.3 is published-but-deprecated; see CLAUDE.md |
+| R1 / R2 / R3 | all closed — §73–§74, §76–§78, §79–§81; R2 and R3 cut together as **v1.8.0** |
 | suite | 1044 passing / 2 skipped |
 | languages that reduce | **three** — TypeScript, Python, Go |
 | `--engine-mode` | `fast\|deep`, on `optimize` only |
