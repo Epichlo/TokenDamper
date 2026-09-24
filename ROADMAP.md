@@ -5,7 +5,8 @@ when the tag exists.* It ships **R2 and R3 together**: the constraint gate stops
 descriptive comments (**§77** — 10 files recovered, 0 new fallbacks), the per-file latency
 instrument (**§76**), and the `ParserAdapter` seam with an opt-in Deep path behind
 `--engine-mode deep` (**§79–§81**; `tokendamper-deep` itself stays unpublished until R4).
-**Check `npm view tokendamper version`** — it must read **1.8.0**. On top of **v1.7.4** (cut
+`npm view tokendamper version` reads **1.8.0** as of 2026-09-24, verified against the tag and not
+only by the number, **so R2 and R3 are closed.** On top of **v1.7.4** (cut
 2026-09-19, R1 — the whole 2026-08-30 security-review remediation, **§73–§74**, carrying
 **v1.7.3** with it; `npm view` read **1.7.4** as of 2026-09-19, so R1 is closed), on top of
 **v1.7.2** (the build narrows to `tsconfig.build.json`; the package goes 508 → 223 entries),
@@ -112,7 +113,7 @@ v1.1.0 (tag @ 807f6f0) — never published to npm
              ├── R3  ParserAdapter seam + Deep path, 4 existing languages,
              │       staged negative control ────► a backend, checked where
              │       we can still hand-check it. CUT as v1.8.0 (2026-09-24).
-             │       Done when `npm view` reads 1.8.0, not at the tag.
+             │       On npm 2026-09-24: `npm view` reads 1.8.0.
              │
              └── v2.0.0  tokendamper-deep + grammars; --mode fast|deep,
                     old --mode withdrawn. A major signals BREAKING — §53
@@ -560,8 +561,9 @@ This was the failure the `release` skill exists to prevent, and it was live: wor
 ### R2 — The constraint gate, and a clock
 
 **Cut as v1.8.0 on 2026-09-24, together with R3.** Neither was released on its own, so one number
-carries both. The publish is the user's step; R2 reaches consumers when `npm view tokendamper
-version` reads **1.8.0**, not when the tag exists.
+carries both. **Published 2026-09-24:** `npm view tokendamper version` reads **1.8.0**, the
+published `gitHead` is the `v1.8.0` commit, and `dist/src` is byte-identical to a local build of
+the tag — the directory check and the artifact check, both passed.
 
 Two items, and both are **preconditions for measuring R3–R4 honestly** rather than features
 competing with them. R4's whole claim is a number, and that number comes from an instrument which
@@ -865,8 +867,8 @@ remediation track was inserted. Corrected below; the numbering now matches the c
 | v1.7.1 · v1.7.2 | Prior releases | A test fix; then the build narrows to `tsconfig.build.json` while typecheck stays on `tsconfig.json` | Package 508 → 223 entries, 3.08 → 1.65 MB | Shipped 2026-09-01 — **v1.7.2 is what npm serves** |
 | v1.7.3 | Prior release | §71 — `symbolBearingItems` counts symbols; a trace field moves on 254 of 580 rows | `outputSha` identical on all 580 | Tagged 2026-09-01 — never published on its own; ships inside v1.7.4 |
 | **v1.7.4** | **R1 — ship the backlog** | The 2026-08-30 security remediation, §73–§74 (S-01–S-04) · three `oxaudit.md` tooling items · the README restructure · v1.7.3 carried with it | No corpus run — R1 adds no code | **Cut 2026-09-19.** A patch over moved output, by explicit call; publish is the user's step |
-| **v1.8.0** | **R2 — a trustworthy instrument** | **DONE 2026-09-19.** Latency harness (§76) · Axis A shipped (§77 — 10 files recovered, 0 new fallbacks, retention 100%) · Axis B closed without implementing (§78 — ceiling 1 file of 188) | Retention side at 100%; a pinned latency baseline | **Exit met.** R3 unblocked · **Cut 2026-09-24** with R3; publish is the user's step |
-| **v1.8.0** | **R3 — the seam** | **DONE 2026-09-23.** `ParserAdapter` + Deep on **3** live languages (JS unresolvable); `--engine-mode deep` | Steps 1–2 byte-identical; step 3 classified — 540/594 identical, python 17.75%→22.26%, adherence 12→20 rows on target | **Exit met, 2 deviations (§81).** Deep cannot validate its own elision marker, so `validationMode` is a separate axis defaulting to fast · **Cut 2026-09-24** with R2 |
+| **v1.8.0** | **R2 — a trustworthy instrument** | **DONE 2026-09-19.** Latency harness (§76) · Axis A shipped (§77 — 10 files recovered, 0 new fallbacks, retention 100%) · Axis B closed without implementing (§78 — ceiling 1 file of 188) | Retention side at 100%; a pinned latency baseline | **Exit met.** R3 unblocked · **Cut and published 2026-09-24** with R3 |
+| **v1.8.0** | **R3 — the seam** | **DONE 2026-09-23.** `ParserAdapter` + Deep on **3** live languages (JS unresolvable); `--engine-mode deep` | Steps 1–2 byte-identical; step 3 classified — 540/594 identical, python 17.75%→22.26%, adherence 12→20 rows on target | **Exit met, 2 deviations (§81).** Deep cannot validate its own elision marker, so `validationMode` is a separate axis defaulting to fast · **Cut and published 2026-09-24** with R2 |
 | *unnumbered* | Selection quality | BM25 + graph hybrid scorer, dual-path MMR | `<10ms` pipeline selection | ⛔ **Both preconditions measured false** — holds no number |
 | ~~*unnumbered*~~ | ~~Folding & cache~~ | **Split 2026-09-09.** Folding → the R1–R4 spine (Deep is coverage, not precision); `cache_control` → Milestone 8 | — | ↪ **Replaced.** Fast was already shipped in `elision/regions.ts` |
 | *held* | Retrieval | `rehydrate_context` with sub-query matching | Targeted line extraction | ✅ Unblocked (M5b shipped); response shape still to design |

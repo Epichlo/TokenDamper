@@ -276,8 +276,9 @@ output (10 files recovered, 0 new fallbacks — a minor under §53), every trace
 `parserCoverage` block, and `--engine-mode fast|deep` is new on `optimize`. **`tokendamper-deep`
 is not published until R4**, so from the npm package `--engine-mode deep` exits 1 with an error
 rather than running Fast; it works from a repository checkout with the workspace installed and
-`packages/deep` built. Until `npm view tokendamper version` reads 1.8.0 the registry still serves
-1.7.4 — check the registry, not the tag.
+`packages/deep` built. **It returns 1.8.0 as of 2026-09-24, so R2 and R3 are closed on the
+registry** — verified 2026-09-25 against the tag rather than by the number: the published
+`gitHead` is the `v1.8.0` commit, and `dist/src` is byte-identical to a local build of the tag.
 
 **v1.7.4 was cut 2026-09-19 and ships the 2026-08-30 security remediation** — every finding in
 `docs/security-review-2026-08-30.md` (§73–§74), three `oxaudit.md` tooling items (OX-L8, L17,
