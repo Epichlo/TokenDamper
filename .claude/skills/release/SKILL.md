@@ -125,6 +125,23 @@ publish. Point out that this is the gate, and that it rebuilds `dist/` from scra
 
 After they publish, `npm view tokendamper version` confirms what the registry actually serves —
 worth checking rather than assuming, because a failed 2FA leaves everything else looking done.
+Add `--prefer-online`: straight after a publish the CLI can answer from its metadata cache, and
+v1.8.0 read `1.7.4` for several minutes after `+ tokendamper@1.8.0` had printed.
+
+**Then check the artifact, not only the number** — that is how R1 was closed, and a number alone
+is exactly what the 1.7.3 mislabel got wrong. Two checks, both cheap and neither needing a
+download:
+
+- `npm view tokendamper@X.Y.Z gitHead` must be the tag commit. It is the directory check, after
+  the fact: npm records the `HEAD` of the checkout it published from.
+- `dist/src` must be byte-identical to a local build of the tag. Hash the tree on both sides.
+
+**Do not compare tarball SHA-1s against a fresh worktree's `npm pack`.** It gives a false
+mismatch. The main checkout holds six older files — `LICENSE`, `CONTRIBUTING.md`,
+`CODE_OF_CONDUCT.md`, `SECURITY.md` and two bench fixtures — as their committed LF blobs, while a
+fresh checkout converts them to CRLF. For v1.8.0 that was 668 bytes, all outside `dist/`, with
+identical content. `npm pack <main checkout> --dry-run --json` from anywhere reproduces the
+registry's `shasum` exactly, because that is the tree that was published.
 
 ## Things that have gone wrong here
 

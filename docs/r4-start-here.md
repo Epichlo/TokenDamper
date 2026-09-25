@@ -27,7 +27,7 @@ commit — this file counts itself, exactly as `docs/r3-start-here.md` did.
 | | |
 |---|---|
 | `main` | the v1.8.0 release merge, tagged `v1.8.0` (R3 step 3 was `e23c997`, PR #73) |
-| npm `latest` | **1.8.0** once the user publishes it (2FA), **1.7.4** until then — check `npm view tokendamper version`. 1.7.3 is published-but-deprecated; see CLAUDE.md |
+| npm `latest` | **1.8.0**, published 2026-09-24 and verified against the tag (`gitHead`, byte-identical `dist/src`). 1.7.3 is published-but-deprecated; see CLAUDE.md |
 | R1 / R2 / R3 | all closed — §73–§74, §76–§78, §79–§81; R2 and R3 cut together as **v1.8.0** |
 | suite | 1044 passing / 2 skipped |
 | languages that reduce | **three** — TypeScript, Python, Go |
