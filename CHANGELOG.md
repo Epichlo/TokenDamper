@@ -11,6 +11,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- **The repository moved to `ojassug/TokenDamper`.** `package.json`'s `repository` and `homepage`,
+  and the README's `git clone` line, now point there. The old `Epichlo/TokenDamper` URL redirects
+  today, but a redirect ends if that name is ever reused, so nothing should depend on it. The npm
+  package page picks the links up at the next publish — 1.8.0 on the registry carries the old
+  ones, and they redirect.
+
 ## [v1.8.0] - 2026-09-24
 
 **R2 and R3 of the road to v2.0 reach the registry, together.** R2 stopped the constraint gate
