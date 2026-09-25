@@ -327,7 +327,7 @@ Node `^20.19 || ^22.13 || >=24`. Zero runtime dependencies.
 <summary><strong>From source</strong></summary>
 
 ```bash
-git clone https://github.com/Epichlo/TokenDamper.git
+git clone https://github.com/ojassug/TokenDamper.git
 cd TokenDamper
 npm install
 npm run build
