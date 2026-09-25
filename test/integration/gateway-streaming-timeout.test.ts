@@ -21,9 +21,13 @@ import { GatewayServer } from '../../src/gateway/server';
  *
  * These tests drive a real upstream over a socket rather than `mockUpstream`, because the defect
  * lives in `fetch`'s signal handling and a short-circuited upstream never exercises it. The budget
- * is configurable (`upstreamTtfbTimeoutMs`) partly so this suite runs in milliseconds instead of
- * needing a 30-second upstream, which is why the audit could observe the defect but no test caught
- * it.
+ * is configurable (`upstreamTtfbTimeoutMs`) partly so this suite runs in seconds instead of needing
+ * a 30-second upstream, which is why the audit could observe the defect but no test caught it.
+ *
+ * Every budget here is sized from measurement under load, not picked small. The first byte is a
+ * round trip through the vitest worker's own event loop, so a stalled loop lands inside the header
+ * budget and fails a test with a 504 that has nothing to do with the property it pins. Two cases
+ * flaked exactly that way before their budgets were widened.
  */
 describe('gateway upstream timeout', () => {
   let upstream: Server;
@@ -125,13 +129,21 @@ describe('gateway upstream timeout', () => {
   it('delivers a stream whose body outlives the timeout budget', async () => {
     // The defect. Headers arrive immediately; the body then takes well over the budget to finish.
     // Under the old signal the reader rejected mid-stream and the pump destroyed the response.
+    // Each gap stays under the budget, so a per-chunk timer passes this case; the fourth one is
+    // what catches that.
+    //
+    // This is the file's first `fetch`, so its first byte also pays the HTTP client's one-time
+    // setup. At 120ms that flaked under load the way the fourth case did at 40ms: under three
+    // concurrent full-suite runs this first byte took a median of 67ms and up to 158ms. 500ms is
+    // three times that worst case; the gaps and body keep their proportions (0.5x and 2.5x).
     headerDelayMs = 0;
     chunkCount = 5;
-    chunkGapMs = 60; // ~300ms of body against a 120ms budget
+    chunkGapMs = 250; // ~1.25s of body against a 500ms budget
 
-    const result = await withGateway(120, post);
+    const result = await withGateway(500, post);
 
-    expect(result.status).toBe(200);
+    // The body as the message, as in the fourth case: a 504 is the header budget, not truncation.
+    expect(result.status, result.body).toBe(200);
     expect(result.body).toContain('[DONE]');
     expect(result.body.split('data: {').length - 1).toBe(5);
   }, 30_000);
@@ -152,12 +164,17 @@ describe('gateway upstream timeout', () => {
     // The half a careless timeout fix removes. Disarming the budget must not disarm the
     // caller-disconnect signal — otherwise a client that walks away leaves the Gateway pulling a
     // response nobody will read, and paying the provider for it.
+    //
+    // The budget only has to stay out of the way here, and at 120ms it did not always: under load
+    // one first byte took 186ms and passed only because the late timer lost a race inside the
+    // event loop. A 504 here could also pass vacuously, because the timeout closes the upstream
+    // socket too — the very thing this test watches for. 500ms keeps the budget out of the answer.
     headerDelayMs = 0;
     chunkCount = 200;
     chunkGapMs = 20;
     upstreamClosedEarly = false;
 
-    await withGateway(120, async (port) => {
+    await withGateway(500, async (port) => {
       // Every path resolves — a client that hangs up mid-stream legitimately produces socket
       // errors on both sides, and none of them is a test failure. The assertion is on what the
       // upstream observed, not on how the client's own socket ended.
@@ -212,8 +229,8 @@ describe('gateway upstream timeout', () => {
     // with `504 … no response headers within 40ms`: the header budget firing, not the body being
     // cut. The first byte is a round trip to an upstream in this same process, so any stall of
     // the worker's event loop lands inside the budget: under three concurrent full-suite runs it
-    // took a median of 29ms and up to 121ms, so 40ms sat inside the distribution. 250ms is twice
-    // its worst case, and the gaps and body scale with it.
+    // took a median of 29ms and, over 156 requests, at worst 186ms, so 40ms sat inside the
+    // distribution. 250ms clears that worst case; the gaps and body scale with it.
     headerDelayMs = 0;
     chunkCount = 5;
     chunkGapMs = 500; // ~2.5s of body against a 250ms budget

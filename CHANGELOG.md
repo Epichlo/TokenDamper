@@ -18,6 +18,34 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   package page picks the links up at the next publish — 1.8.0 on the registry carries the old
   ones, and they redirect.
 
+### Fixed
+- **The Gateway timeout file's other two header budgets also sat inside their own first byte's
+  range.** The slow-body case's flake, fixed in v1.8.0, had siblings in the same file. All
+  figures are from three concurrent full-suite runs, the load that reproduced it.
+  - `delivers a stream whose body outlives the timeout budget` makes the file's first `fetch`, so
+    its first byte also pays the HTTP client's one-time setup. It took a median of **67 ms** and
+    up to **158 ms** against a **120 ms** budget, and the test failed 1 run in 18 in both earlier
+    batches. The budget is now **500 ms**, with 250 ms gaps and 1.25 s of body. Those are the old
+    proportions (gaps 0.5×, body 2.5×), so a per-chunk timer still passes this case by design;
+    the slow-body case is the one that catches it.
+  - `still aborts the upstream when the client hangs up mid-stream` was never reported flaky.
+    The same measurement found it: one of its first bytes took **186 ms** against **120 ms**, and
+    it passed only because the late timer lost a race inside the event loop. A 504 there can also
+    pass vacuously, because the timeout closes the very upstream socket the test watches. Its
+    budget only has to stay out of the way, so it is **500 ms** too; the test runs no longer for
+    it.
+
+  **Mutation-checked** against `main`'s file, 3 runs each, across five implementations: the three
+  broken timers, plus §66's own check for the hangup case (a fetch signal without its
+  client-disconnect half). All five rows match between the two files. Each broken timer fails the
+  same cases as before, and the dropped disconnect fails only the hangup case. The file then failed
+  **0 of 18** runs under three concurrent suites, and 5 of 5 single-suite runs were green.
+  - **The slow-body case keeps 250 ms, but its comment was corrected.** It claimed "twice the
+    worst case" from 121 ms. Pooled over 156 warm requests the worst is 186 ms, which 250 ms
+    clears, though not twice.
+  - **Cost:** test-only; the file takes ~4.5 s instead of ~3.5 s, and `bench.test.ts` is still
+    the longest file.
+
 ## [v1.8.0] - 2026-09-24
 
 **R2 and R3 of the road to v2.0 reach the registry, together.** R2 stopped the constraint gate
